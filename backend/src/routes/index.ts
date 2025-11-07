@@ -1,4 +1,5 @@
 import type { Express } from "express";
+import authRouter from "./auth";
 import projectsRouter from "./projects";
 
 export function registerRoutes(app: Express): void {
@@ -7,5 +8,6 @@ export function registerRoutes(app: Express): void {
   });
 
   app.use("/api/projects", projectsRouter);
+  app.use("/auth", authRouter);
 }
 

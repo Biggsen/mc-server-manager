@@ -14,6 +14,10 @@ npm run dev:frontend
 npm run dev:backend
 ```
 
+## Environment
+
+Create a `.env` file in the repo root to configure GitHub OAuth (dev-only defaults shown in `.env.example`).
+
 ## Structure
 
 - `frontend/` – Vite + React TypeScript UI scaffold.
