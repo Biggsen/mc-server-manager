@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { fetchProjects, type ProjectSummary } from '../lib/api'
+import { fetchProjects, triggerBuild, type ProjectSummary, type BuildJob } from '../lib/api'
 import { subscribeProjectsUpdated } from '../lib/events'
 
 function Dashboard() {
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [building, setBuilding] = useState<Record<string, BuildJob['status']>>({})
 
   useEffect(() => {
     let active = true
@@ -62,11 +63,28 @@ function Dashboard() {
                   <p className="muted">
                     {project.minecraftVersion} · {project.loader.toUpperCase()}{' '}
                     {project.source === 'imported' ? '· Imported' : ''}
+                    {project.manifest ? ` · Built ${new Date(project.manifest.generatedAt).toLocaleTimeString()}` : ''}
                   </p>
                 </div>
-                <time dateTime={project.updatedAt}>
-                  {new Date(project.updatedAt).toLocaleString()}
-                </time>
+                <div className="dev-buttons">
+                  <button
+                    type="button"
+                    className="ghost"
+                    disabled={building[project.id] === 'running'}
+                    onClick={async () => {
+                      try {
+                        setBuilding((prev) => ({ ...prev, [project.id]: 'running' }))
+                        const build = await triggerBuild(project.id)
+                        setBuilding((prev) => ({ ...prev, [project.id]: build.status }))
+                      } catch (err) {
+                        setBuilding((prev) => ({ ...prev, [project.id]: 'failed' }))
+                        console.error('Failed to trigger build', err)
+                      }
+                    }}
+                  >
+                    {building[project.id] === 'running' ? 'Building…' : 'Build'}
+                  </button>
+                </div>
               </li>
             ))}
           </ul>

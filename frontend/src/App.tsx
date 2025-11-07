@@ -14,14 +14,25 @@ function App() {
   return (
     <div className="app-shell">
       <header className="app-header">
-        <div className="brand">
+        <button
+          type="button"
+          className="brand brand-button"
+          onClick={() => navigate('/')}
+        >
           <span className="brand-badge">MC</span>
           <div>
             <h1>Server Manager</h1>
             <p className="muted">Define. Build. Deploy.</p>
           </div>
-        </div>
+        </button>
         <nav className="header-actions">
+          <button
+            type="button"
+            className="ghost"
+            onClick={() => navigate('/')}
+          >
+            Dashboard
+          </button>
           <button
             type="button"
             className="primary"
