@@ -118,8 +118,14 @@ router.post("/:id/assets", async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const project = await setProjectAssets(id, {
-      plugins: Array.isArray(req.body?.plugins) ? req.body.plugins : undefined,
-      configs: Array.isArray(req.body?.configs) ? req.body.configs : undefined,
+      plugins: Array.isArray(req.body?.plugins)
+        ? req.body.plugins.filter(
+            (item: { id?: unknown; version?: unknown }) => Boolean(item?.id && item?.version),
+          )
+        : undefined,
+      configs: Array.isArray(req.body?.configs)
+        ? req.body.configs.filter((item: { path?: unknown }) => Boolean(item?.path))
+        : undefined,
     });
 
     if (!project) {

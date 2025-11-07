@@ -190,10 +190,17 @@ interface AssetsPayload {
 export async function setProjectAssets(id: string, payload: AssetsPayload): Promise<StoredProject | undefined> {
   return updateProject(id, (project) => {
     if (payload.plugins) {
-      project.plugins = payload.plugins;
+      project.plugins = payload.plugins.map((plugin) => ({
+        id: plugin.id,
+        version: plugin.version,
+        sha256: plugin.sha256 ?? "<pending>",
+      }));
     }
     if (payload.configs) {
-      project.configs = payload.configs;
+      project.configs = payload.configs.map((config) => ({
+        path: config.path,
+        sha256: config.sha256 ?? "<pending>",
+      }));
     }
     return project;
   });
