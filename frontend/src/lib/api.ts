@@ -79,7 +79,29 @@ export async function importProjectRepo(payload: ImportPayload): Promise<Project
   return data.project
 }
 
-export async function triggerManifest(projectId: string): Promise<{
+export interface ManifestOverrides {
+  minecraft?: {
+    loader?: string
+    version?: string
+  }
+  world?: {
+    mode?: string
+    seed?: string
+    name?: string
+  }
+  plugins?: Array<{ id: string; version: string; sha256: string }>
+  configs?: Array<{ path: string; sha256: string }>
+  artifact?: {
+    zipPath?: string
+    sha256?: string
+    size?: number
+  }
+}
+
+export async function triggerManifest(
+  projectId: string,
+  overrides?: ManifestOverrides,
+): Promise<{
   manifest: ProjectSummary['manifest']
   content: unknown
 }> {
@@ -87,6 +109,7 @@ export async function triggerManifest(projectId: string): Promise<{
     `/projects/${projectId}/manifest`,
     {
       method: 'POST',
+      body: overrides ? JSON.stringify(overrides) : undefined,
     },
   )
   emitProjectsUpdated()

@@ -4,7 +4,7 @@ import { writeFile } from "fs/promises";
 import { createProject, findProject, importProject, listProjects, getManifestFilePath, recordManifestMetadata } from "../storage/projectsStore";
 import type { ProjectSummary } from "../types/projects";
 import type { ManifestMetadata } from "../types/storage";
-import { renderManifest } from "../services/manifestService";
+import { renderManifest, type ManifestOverrides } from "../services/manifestService";
 
 const router = Router();
 
@@ -109,7 +109,16 @@ router.post("/:id/manifest", async (req: Request, res: Response) => {
     }
 
     const buildId = new Date().toISOString().replace(/[:.]/g, "-");
-    const manifestContent = await renderManifest(project, buildId);
+
+    const overrides: ManifestOverrides = {
+      minecraft: req.body?.minecraft,
+      world: req.body?.world,
+      plugins: Array.isArray(req.body?.plugins) ? req.body.plugins : undefined,
+      configs: Array.isArray(req.body?.configs) ? req.body.configs : undefined,
+      artifact: req.body?.artifact,
+    };
+
+    const manifestContent = await renderManifest(project, buildId, overrides);
     const manifestPath = getManifestFilePath(project.id, buildId);
 
     await writeFile(manifestPath, manifestContent, "utf-8");

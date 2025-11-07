@@ -89,7 +89,33 @@ function TestTools() {
   const handleManifest = async (project: ProjectSummary) => {
     try {
       setBusy(true)
-      const response = await triggerManifest(project.id)
+      const response = await triggerManifest(project.id, {
+        plugins: [
+          {
+            id: 'worldguard',
+            version: '7.0.10',
+            sha256: '<pending>',
+          },
+          {
+            id: 'placeholderapi',
+            version: '2.11.6',
+            sha256: '<pending>',
+          },
+        ],
+        configs: [
+          {
+            path: 'server.properties',
+            sha256: '<pending>',
+          },
+          {
+            path: 'config/paper-global.yml',
+            sha256: '<pending>',
+          },
+        ],
+        artifact: {
+          zipPath: `dist/${project.id}.zip`,
+        },
+      })
       appendLog(
         `Manifest generated for ${project.name} (${response.manifest?.lastBuildId ?? 'unknown'})`,
       )
