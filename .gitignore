@@ -9,4 +9,5 @@ temp/
 .env
 frontend/dist/
 backend/dist/
+backend/data/
 

@@ -5,5 +5,6 @@ export interface ProjectSummary {
   loader: "paper" | "purpur" | string;
   description?: string;
   updatedAt: string;
+  source?: "created" | "imported";
 }
 

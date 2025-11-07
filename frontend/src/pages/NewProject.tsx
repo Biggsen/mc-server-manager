@@ -1,4 +1,13 @@
+import { useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { createProject } from '../lib/api'
+
 function NewProject() {
+  const [status, setStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle')
+  const [error, setError] = useState<string | null>(null)
+  const formRef = useRef<HTMLFormElement>(null)
+  const navigate = useNavigate()
+
   return (
     <section className="panel">
       <header>
@@ -9,7 +18,36 @@ function NewProject() {
       <form
         className="page-form"
         aria-label="New project"
-        onSubmit={(event) => event.preventDefault()}
+        ref={formRef}
+        onSubmit={async (event) => {
+          event.preventDefault()
+          const form = event.currentTarget
+          const data = new FormData(form)
+
+          const payload = {
+            name: String(data.get('projectName') ?? ''),
+            minecraftVersion: String(data.get('minecraftVersion') ?? '1.21.1'),
+            loader: String(data.get('loader') ?? 'paper'),
+            description: String(data.get('description') ?? ''),
+          }
+
+          if (!payload.name) {
+            setError('Project name is required')
+            setStatus('error')
+            return
+          }
+
+          try {
+            setStatus('saving')
+            setError(null)
+            await createProject(payload)
+            setStatus('success')
+            form.reset()
+          } catch (err) {
+            setStatus('error')
+            setError(err instanceof Error ? err.message : 'Failed to create project')
+          }
+        }}
       >
         <div className="form-grid">
           <div className="field">
@@ -48,13 +86,24 @@ function NewProject() {
         </div>
 
         <div className="form-actions">
-          <button type="button" className="ghost">
+          <button
+            type="button"
+            className="ghost"
+            onClick={() => {
+              formRef.current?.reset()
+              setStatus('idle')
+              setError(null)
+              navigate('/projects')
+            }}
+          >
             Cancel
           </button>
           <button type="submit" className="primary">
-            Continue
+            {status === 'saving' ? 'Creating…' : 'Continue'}
           </button>
         </div>
+        {status === 'success' && <p className="success-text">Project queued successfully.</p>}
+        {status === 'error' && error && <p className="error-text">{error}</p>}
       </form>
     </section>
   )

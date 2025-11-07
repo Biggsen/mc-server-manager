@@ -1,54 +1,97 @@
 import type { Request, Response } from "express";
 import { Router } from "express";
+import { createProject, findProject, importProject, listProjects } from "../storage/projectsStore";
 import type { ProjectSummary } from "../types/projects";
+import type { StoredProject } from "../types/storage";
 
 const router = Router();
 
-const mockProjects: ProjectSummary[] = [
-  {
-    id: "demo-project",
-    name: "Demo Project",
-    description: "Placeholder project definition",
-    minecraftVersion: "1.21.1",
-    loader: "paper",
-    updatedAt: new Date().toISOString(),
-  },
-];
-
-router.get("/", (_req: Request, res: Response) => {
-  res.json({ projects: mockProjects });
+router.get("/", async (_req: Request, res: Response) => {
+  const projects = await listProjects();
+  res.json({ projects });
 });
 
-router.post("/", (req: Request, res: Response) => {
-  const { name, minecraftVersion, loader } = req.body ?? {};
+router.post("/", async (req: Request, res: Response) => {
+  const { name, minecraftVersion, loader, description } = req.body ?? {};
 
   if (!name) {
     res.status(400).json({ error: "Project name is required" });
     return;
   }
 
-  const created: ProjectSummary = {
-    id: name.toLowerCase().replace(/[^a-z0-9-]+/g, "-"),
+  const project = await createProject({
     name,
     minecraftVersion: minecraftVersion ?? "1.21.1",
     loader: loader ?? "paper",
-    description: req.body?.description ?? "",
-    updatedAt: new Date().toISOString(),
+    description,
+  });
+
+  const summary: ProjectSummary = {
+    id: project.id,
+    name: project.name,
+    description: project.description,
+    minecraftVersion: project.minecraftVersion,
+    loader: project.loader,
+    updatedAt: project.updatedAt,
+    source: project.source,
   };
 
-  res.status(202).json({ project: created, status: "queued" });
+  res.status(201).json({ project: summary });
 });
 
-router.get("/:id", (req: Request, res: Response) => {
+router.post("/import", async (req: Request, res: Response) => {
+  const { repoUrl, defaultBranch, profilePath } = req.body ?? {};
+
+  if (!repoUrl) {
+    res.status(400).json({ error: "Repository URL is required" });
+    return;
+  }
+
+  if (!defaultBranch || !profilePath) {
+    res.status(400).json({ error: "defaultBranch and profilePath are required" });
+    return;
+  }
+
+  const project = await importProject({
+    name: req.body?.name,
+    repoUrl,
+    defaultBranch,
+    profilePath,
+  });
+
+  const summary: ProjectSummary = {
+    id: project.id,
+    name: project.name,
+    description: project.description,
+    minecraftVersion: project.minecraftVersion,
+    loader: project.loader,
+    updatedAt: project.updatedAt,
+    source: project.source,
+  };
+
+  res.status(201).json({ project: summary });
+});
+
+router.get("/:id", async (req: Request, res: Response) => {
   const { id } = req.params;
-  const project = mockProjects.find((entry) => entry.id === id);
+  const project = await findProject(id);
 
   if (!project) {
     res.status(404).json({ error: "Project not found" });
     return;
   }
 
-  res.json({ project });
+  const summary: ProjectSummary = {
+    id: project.id,
+    name: project.name,
+    description: project.description,
+    minecraftVersion: project.minecraftVersion,
+    loader: project.loader,
+    updatedAt: project.updatedAt,
+    source: project.source,
+  };
+
+  res.json({ project: summary });
 });
 
 export default router;
