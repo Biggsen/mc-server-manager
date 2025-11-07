@@ -1,13 +1,15 @@
 import { mkdir, readFile, writeFile } from "fs/promises";
 import { join } from "path";
 import type { ProjectSummary } from "../types/projects";
-import type { ProjectsSnapshot, StoredProject } from "../types/storage";
+import type { ManifestMetadata, ProjectsSnapshot, StoredProject } from "../types/storage";
 
 const DATA_DIR = join(process.cwd(), "data");
+const MANIFEST_DIR = join(DATA_DIR, "manifests");
 const PROJECTS_PATH = join(DATA_DIR, "projects.json");
 
 async function ensureStore(): Promise<void> {
   await mkdir(DATA_DIR, { recursive: true });
+  await mkdir(MANIFEST_DIR, { recursive: true });
 
   try {
     await readFile(PROJECTS_PATH, "utf-8");
@@ -34,7 +36,7 @@ async function persistSnapshot(snapshot: ProjectsSnapshot): Promise<void> {
 }
 
 function toSummary(project: StoredProject): ProjectSummary {
-  const { id, name, description, minecraftVersion, loader, updatedAt, source } = project;
+  const { id, name, description, minecraftVersion, loader, updatedAt, source, manifest } = project;
   return {
     id,
     name,
@@ -43,6 +45,7 @@ function toSummary(project: StoredProject): ProjectSummary {
     loader,
     updatedAt,
     source,
+    manifest,
   };
 }
 
@@ -127,5 +130,38 @@ export async function importProject(input: ImportProjectInput): Promise<StoredPr
   snapshot.projects.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
   await persistSnapshot(snapshot);
   return project;
+}
+
+export async function updateProject(
+  id: string,
+  updater: (project: StoredProject) => StoredProject | void,
+): Promise<StoredProject | undefined> {
+  const snapshot = await loadSnapshot();
+  const index = snapshot.projects.findIndex((project) => project.id === id);
+  if (index === -1) {
+    return undefined;
+  }
+
+  const original = snapshot.projects[index];
+  const draft: StoredProject = JSON.parse(JSON.stringify(original));
+  const result = updater(draft);
+  const updated = (result as StoredProject) ?? draft;
+  updated.updatedAt = new Date().toISOString();
+
+  snapshot.projects[index] = updated;
+  snapshot.projects.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
+  await persistSnapshot(snapshot);
+  return updated;
+}
+
+export function getManifestFilePath(projectId: string, buildId: string): string {
+  return join(MANIFEST_DIR, `${projectId}-${buildId}.json`);
+}
+
+export async function recordManifestMetadata(projectId: string, metadata: ManifestMetadata): Promise<StoredProject | undefined> {
+  return updateProject(projectId, (project) => {
+    project.manifest = metadata;
+    return project;
+  });
 }
 

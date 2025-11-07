@@ -1,3 +1,5 @@
+import type { ManifestMetadata } from "./storage";
+
 export interface ProjectSummary {
   id: string;
   name: string;
@@ -6,5 +8,6 @@ export interface ProjectSummary {
   description?: string;
   updatedAt: string;
   source?: "created" | "imported";
+  manifest?: ManifestMetadata;
 }
 

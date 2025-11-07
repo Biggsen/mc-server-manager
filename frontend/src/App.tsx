@@ -4,6 +4,7 @@ import ImportProject from './pages/ImportProject'
 import NewProject from './pages/NewProject'
 import NotFound from './pages/NotFound'
 import Projects from './pages/Projects'
+import TestTools from './pages/TestTools'
 import './App.css'
 
 function App() {
@@ -35,6 +36,13 @@ function App() {
           >
             Import Repo
           </button>
+          <button
+            type="button"
+            className="ghost"
+            onClick={() => navigate('/dev/tools')}
+          >
+            Dev Tools
+          </button>
         </nav>
       </header>
 
@@ -44,6 +52,7 @@ function App() {
           <Route path="/projects" element={<Projects />} />
           <Route path="/projects/new" element={<NewProject />} />
           <Route path="/projects/import" element={<ImportProject />} />
+          <Route path="/dev/tools" element={<TestTools />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </main>

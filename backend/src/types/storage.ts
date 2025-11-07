@@ -8,11 +8,18 @@ export interface StoredProject {
   repoUrl?: string;
   defaultBranch?: string;
   profilePath?: string;
+  manifest?: ManifestMetadata;
   createdAt: string;
   updatedAt: string;
 }
 
 export interface ProjectsSnapshot {
   projects: StoredProject[];
+}
+
+export interface ManifestMetadata {
+  lastBuildId: string;
+  manifestPath: string;
+  generatedAt: string;
 }
 

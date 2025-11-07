@@ -49,6 +49,11 @@ export interface ProjectSummary {
   loader: string
   updatedAt: string
   source?: 'created' | 'imported'
+  manifest?: {
+    lastBuildId: string
+    manifestPath: string
+    generatedAt: string
+  }
 }
 
 export async function fetchProjects(): Promise<ProjectSummary[]> {
@@ -72,5 +77,19 @@ export async function importProjectRepo(payload: ImportPayload): Promise<Project
   })
   emitProjectsUpdated()
   return data.project
+}
+
+export async function triggerManifest(projectId: string): Promise<{
+  manifest: ProjectSummary['manifest']
+  content: unknown
+}> {
+  const data = await request<{ manifest: ProjectSummary['manifest']; content: unknown }>(
+    `/projects/${projectId}/manifest`,
+    {
+      method: 'POST',
+    },
+  )
+  emitProjectsUpdated()
+  return data
 }
 

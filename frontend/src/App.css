@@ -164,6 +164,43 @@ ul {
   color: var(--muted-foreground);
 }
 
+.dev-actions {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.dev-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1.5rem;
+}
+
+.log-box {
+  border: 1px solid var(--border-color);
+  border-radius: 0.75rem;
+  padding: 1rem;
+  max-height: 240px;
+  overflow-y: auto;
+  background: rgba(12, 14, 20, 0.6);
+}
+
+.log-box ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.9rem;
+}
+
+.dev-buttons {
+  display: flex;
+  gap: 0.5rem;
+}
+
 .inline-link {
   color: var(--accent-color);
   text-decoration: underline;
