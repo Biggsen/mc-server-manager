@@ -1,0 +1,6 @@
+overrides:
+  - path: "server.properties:online-mode"
+    value: "true"
+  - path: "server.properties:max-players"
+    value: 40
+

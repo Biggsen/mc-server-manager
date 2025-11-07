@@ -1,0 +1,12 @@
+configs:
+  files:
+    - template: "server.properties.hbs"
+      output: "server.properties"
+      data:
+        motd: "[DEV] New MC Server"
+        maxPlayers: 5
+
+overrides:
+  - path: "server.properties:online-mode"
+    value: "false"
+

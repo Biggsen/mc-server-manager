@@ -1,0 +1,9 @@
+schema: 1
+plugins:
+  example-plugin:
+    displayName: "Example Plugin"
+    sources:
+      - type: "github"
+        repo: "example/example-plugin"
+        assetPattern: "example-plugin-*.jar"
+
