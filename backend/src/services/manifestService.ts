@@ -53,8 +53,15 @@ export async function renderManifest(
       seed: "",
       name: "world",
     },
-    plugins: [],
-    configs: [],
+    plugins: project.plugins?.map((plugin) => ({
+      id: plugin.id,
+      version: plugin.version,
+      sha256: plugin.sha256 ?? "<pending>",
+    })) ?? [],
+    configs: project.configs?.map((config) => ({
+      path: config.path,
+      sha256: config.sha256 ?? "<pending>",
+    })) ?? [],
     artifact: {
       zipPath: `dist/${project.id}-${buildId}.zip`,
       sha256: "<pending>",

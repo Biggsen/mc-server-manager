@@ -54,6 +54,29 @@ export interface ProjectSummary {
     manifestPath: string
     generatedAt: string
   }
+  plugins?: Array<{
+    id: string
+    version: string
+    sha256?: string
+  }>
+  configs?: Array<{
+    path: string
+    sha256?: string
+  }>
+}
+
+export type BuildStatus = 'pending' | 'running' | 'succeeded' | 'failed'
+
+export interface BuildJob {
+  id: string
+  projectId: string
+  status: BuildStatus
+  createdAt: string
+  startedAt?: string
+  finishedAt?: string
+  manifestBuildId?: string
+  manifestPath?: string
+  error?: string
 }
 
 export async function fetchProjects(): Promise<ProjectSummary[]> {
@@ -114,5 +137,37 @@ export async function triggerManifest(
   )
   emitProjectsUpdated()
   return data
+}
+
+export async function triggerBuild(projectId: string, overrides?: ManifestOverrides) {
+  const data = await request<{ build: BuildJob }>(`/projects/${projectId}/build`, {
+    method: 'POST',
+    body: overrides ? JSON.stringify(overrides) : undefined,
+  })
+  emitProjectsUpdated()
+  return data.build
+}
+
+export async function fetchBuilds(projectId?: string): Promise<BuildJob[]> {
+  const params = projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''
+  const data = await request<{ builds: BuildJob[] }>(`/builds${params}`)
+  return data.builds
+}
+
+export async function fetchBuild(buildId: string): Promise<BuildJob> {
+  const data = await request<{ build: BuildJob }>(`/builds/${buildId}`)
+  return data.build
+}
+
+export async function updateProjectAssets(projectId: string, payload: {
+  plugins?: ProjectSummary['plugins']
+  configs?: ProjectSummary['configs']
+}): Promise<void> {
+  await request(`/projects/${projectId}/assets`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+    parseJson: false,
+  })
+  emitProjectsUpdated()
 }
 

@@ -36,7 +36,18 @@ async function persistSnapshot(snapshot: ProjectsSnapshot): Promise<void> {
 }
 
 function toSummary(project: StoredProject): ProjectSummary {
-  const { id, name, description, minecraftVersion, loader, updatedAt, source, manifest } = project;
+  const {
+    id,
+    name,
+    description,
+    minecraftVersion,
+    loader,
+    updatedAt,
+    source,
+    manifest,
+    plugins,
+    configs,
+  } = project;
   return {
     id,
     name,
@@ -46,6 +57,8 @@ function toSummary(project: StoredProject): ProjectSummary {
     updatedAt,
     source,
     manifest,
+    plugins,
+    configs,
   };
 }
 
@@ -86,6 +99,8 @@ export async function createProject(input: CreateProjectInput): Promise<StoredPr
     minecraftVersion: input.minecraftVersion,
     loader: input.loader,
     source: "created",
+    plugins: [],
+    configs: [],
     createdAt: now,
     updatedAt: now,
   };
@@ -121,6 +136,8 @@ export async function importProject(input: ImportProjectInput): Promise<StoredPr
     repoUrl: input.repoUrl,
     defaultBranch: input.defaultBranch,
     profilePath: input.profilePath,
+    plugins: [],
+    configs: [],
     createdAt: now,
     updatedAt: now,
   };
@@ -161,6 +178,23 @@ export function getManifestFilePath(projectId: string, buildId: string): string 
 export async function recordManifestMetadata(projectId: string, metadata: ManifestMetadata): Promise<StoredProject | undefined> {
   return updateProject(projectId, (project) => {
     project.manifest = metadata;
+    return project;
+  });
+}
+
+interface AssetsPayload {
+  plugins?: StoredProject["plugins"];
+  configs?: StoredProject["configs"];
+}
+
+export async function setProjectAssets(id: string, payload: AssetsPayload): Promise<StoredProject | undefined> {
+  return updateProject(id, (project) => {
+    if (payload.plugins) {
+      project.plugins = payload.plugins;
+    }
+    if (payload.configs) {
+      project.configs = payload.configs;
+    }
     return project;
   });
 }

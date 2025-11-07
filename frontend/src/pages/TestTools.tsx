@@ -4,7 +4,12 @@ import {
   fetchProjects,
   importProjectRepo,
   triggerManifest,
+  triggerBuild,
+  fetchBuilds,
+  fetchBuild,
+  updateProjectAssets,
   type ProjectSummary,
+  type BuildJob,
 } from '../lib/api'
 import { subscribeProjectsUpdated } from '../lib/events'
 
@@ -13,6 +18,7 @@ function TestTools() {
   const [busy, setBusy] = useState(false)
   const [logs, setLogs] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [builds, setBuilds] = useState<BuildJob[]>([])
 
   const sortedProjects = useMemo(
     () => [...projects].sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1)),
@@ -41,6 +47,27 @@ function TestTools() {
     return () => {
       active = false
       unsubscribe()
+    }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+
+    const loadBuilds = () => {
+      fetchBuilds()
+        .then((items) => {
+          if (!active) return
+          setBuilds(items)
+        })
+        .catch((err: Error) => appendLog(`Load builds failed: ${err.message}`))
+    }
+
+    loadBuilds()
+    const interval = window.setInterval(loadBuilds, 5000)
+
+    return () => {
+      active = false
+      window.clearInterval(interval)
     }
   }, [])
 
@@ -89,38 +116,33 @@ function TestTools() {
   const handleManifest = async (project: ProjectSummary) => {
     try {
       setBusy(true)
-      const response = await triggerManifest(project.id, {
-        plugins: [
-          {
-            id: 'worldguard',
-            version: '7.0.10',
-            sha256: '<pending>',
-          },
-          {
-            id: 'placeholderapi',
-            version: '2.11.6',
-            sha256: '<pending>',
-          },
-        ],
-        configs: [
-          {
-            path: 'server.properties',
-            sha256: '<pending>',
-          },
-          {
-            path: 'config/paper-global.yml',
-            sha256: '<pending>',
-          },
-        ],
-        artifact: {
-          zipPath: `dist/${project.id}.zip`,
-        },
-      })
+      const response = await triggerManifest(project.id)
       appendLog(
         `Manifest generated for ${project.name} (${response.manifest?.lastBuildId ?? 'unknown'})`,
       )
     } catch (err) {
       appendLog(`Manifest failed: ${(err as Error).message}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleSeedAssets = async (project: ProjectSummary) => {
+    try {
+      setBusy(true)
+      await updateProjectAssets(project.id, {
+        plugins: [
+          { id: 'worldguard', version: '7.0.10', sha256: '<pending>' },
+          { id: 'placeholderapi', version: '2.11.6', sha256: '<pending>' },
+        ],
+        configs: [
+          { path: 'server.properties', sha256: '<pending>' },
+          { path: 'config/paper-global.yml', sha256: '<pending>' },
+        ],
+      })
+      appendLog(`Seeded assets for ${project.name}`)
+    } catch (err) {
+      appendLog(`Seeding assets failed: ${(err as Error).message}`)
     } finally {
       setBusy(false)
     }
@@ -159,6 +181,9 @@ function TestTools() {
                     {project.manifest
                       ? `· Manifest ${project.manifest.lastBuildId}`
                       : '· No manifest'}
+                    {project.plugins?.length
+                      ? ` · ${project.plugins.length} plugin${project.plugins.length > 1 ? 's' : ''}`
+                      : ''}
                   </p>
                 </div>
                 <div className="dev-buttons">
@@ -170,6 +195,39 @@ function TestTools() {
                   >
                     Generate Manifest
                   </button>
+                  <button
+                    type="button"
+                    className="ghost"
+                    disabled={busy}
+                    onClick={() => handleSeedAssets(project)}
+                  >
+                    Seed Assets
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost"
+                    disabled={busy}
+                    onClick={async () => {
+                      try {
+                        setBusy(true)
+                        const build = await triggerBuild(project.id)
+                        appendLog(`Queued build ${build.id} for ${project.name}`)
+                        setTimeout(async () => {
+                          const updated = await fetchBuild(build.id)
+                          setBuilds((prev) => {
+                            const copy = prev.filter((item) => item.id !== updated.id)
+                            return [updated, ...copy]
+                          })
+                        }, 1500)
+                      } catch (err) {
+                        appendLog(`Build failed to queue: ${(err as Error).message}`)
+                      } finally {
+                        setBusy(false)
+                      }
+                    }}
+                  >
+                    Trigger Build
+                  </button>
                 </div>
               </li>
             ))}
@@ -177,6 +235,26 @@ function TestTools() {
           {sortedProjects.length === 0 && (
             <p className="empty-state">No projects yet. Use the buttons above to seed data.</p>
           )}
+        </div>
+
+        <div>
+          <h3>Builds</h3>
+          <div className="log-box">
+            {builds.length === 0 && <p className="muted">No builds queued yet.</p>}
+            {builds.length > 0 && (
+              <ul>
+                {builds.map((build) => (
+                  <li key={build.id}>
+                    <strong>{build.projectId}</strong> · {build.status.toUpperCase()} ·{' '}
+                    {build.finishedAt
+                      ? new Date(build.finishedAt).toLocaleTimeString()
+                      : new Date(build.createdAt).toLocaleTimeString()}
+                    {build.error ? ` — ${build.error}` : ''}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
 
         <div>

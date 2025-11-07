@@ -151,7 +151,8 @@ ul {
   display: flex;
   justify-content: space-between;
   gap: 1rem;
-  align-items: center;
+  align-items: flex-start;
+  flex-wrap: wrap;
 }
 
 .project-list h4 {
@@ -175,6 +176,13 @@ ul {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 1.5rem;
+  align-items: start;
+}
+
+.dev-grid > div {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
 }
 
 .log-box {
@@ -199,6 +207,7 @@ ul {
 .dev-buttons {
   display: flex;
   gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
 .inline-link {

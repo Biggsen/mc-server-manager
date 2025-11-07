@@ -8,6 +8,8 @@ export interface StoredProject {
   repoUrl?: string;
   defaultBranch?: string;
   profilePath?: string;
+  plugins?: Array<{ id: string; version: string; sha256?: string }>;
+  configs?: Array<{ path: string; sha256?: string }>;
   manifest?: ManifestMetadata;
   createdAt: string;
   updatedAt: string;
