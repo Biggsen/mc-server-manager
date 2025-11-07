@@ -18,10 +18,17 @@ configs:
         motd: "New MC Server"
         maxPlayers: 10
         enforceSecureProfile: false
+        viewDistance: 10
+        onlineMode: true
+    - template: "paper-global.yml.hbs"
+      output: "config/paper-global.yml"
+      data:
+        chunkSystem:
+          targetTickDistance: 6
 
 overrides:
-  - path: "server.properties:view-distance"
-    value: 10
+  - path: "paper-global.yml:chunk-system.target-tick-distance"
+    value: 6
 
 mergePolicy:
   arrays: "replace"

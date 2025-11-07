@@ -1,3 +1,17 @@
+configs:
+  files:
+    - template: "server.properties.hbs"
+      output: "server.properties"
+      data:
+        maxPlayers: 40
+        viewDistance: 12
+        onlineMode: true
+    - template: "paper-global.yml.hbs"
+      output: "config/paper-global.yml"
+      data:
+        chunkSystem:
+          targetTickDistance: 8
+
 overrides:
   - path: "server.properties:online-mode"
     value: "true"

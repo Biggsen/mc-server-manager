@@ -5,6 +5,13 @@ configs:
       data:
         motd: "[DEV] New MC Server"
         maxPlayers: 5
+        viewDistance: 8
+        onlineMode: false
+    - template: "paper-global.yml.hbs"
+      output: "config/paper-global.yml"
+      data:
+        chunkSystem:
+          targetTickDistance: 4
 
 overrides:
   - path: "server.properties:online-mode"

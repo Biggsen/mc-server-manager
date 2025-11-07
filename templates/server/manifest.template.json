@@ -1,0 +1,37 @@
+{
+  "schema": 1,
+  "project": "{{projectId}}",
+  "buildId": "{{buildId}}",
+  "minecraft": {
+    "loader": "{{minecraft.loader}}",
+    "version": "{{minecraft.version}}"
+  },
+  "world": {
+    "mode": "{{world.mode}}",
+    "seed": "{{world.seed}}",
+    "name": "{{world.name}}"
+  },
+  "plugins": [
+    {{#each plugins}}
+    {
+      "id": "{{id}}",
+      "version": "{{version}}",
+      "sha256": "{{sha256}}"
+    }{{#unless @last}},{{/unless}}
+    {{/each}}
+  ],
+  "configs": [
+    {{#each configs}}
+    {
+      "path": "{{path}}",
+      "sha256": "{{sha256}}"
+    }{{#unless @last}},{{/unless}}
+    {{/each}}
+  ],
+  "artifact": {
+    "zipPath": "{{artifact.zipPath}}",
+    "sha256": "{{artifact.sha256}}",
+    "size": {{artifact.size}}
+  }
+}
+

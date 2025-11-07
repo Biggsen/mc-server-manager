@@ -12,4 +12,3 @@
     "build": "npm run build --workspace frontend && npm run build --workspace backend"
   }
 }
-
