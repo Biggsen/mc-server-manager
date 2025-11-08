@@ -20,7 +20,8 @@ import {
 } from "./projectFiles";
 import { scanProjectAssets } from "./projectScanner";
 import { commitFiles, getOctokitWithToken } from "./githubClient";
-import { fetchPluginArtifact, loadPluginRegistry } from "./pluginRegistry";
+import { fetchPluginArtifact } from "./pluginRegistry";
+import type { ProjectPlugin } from "../types/plugins";
 
 const DATA_DIR = join(process.cwd(), "data", "builds");
 const LOG_PATH = join(DATA_DIR, "builds.json");
@@ -240,21 +241,15 @@ async function materializePlugins(
   project: StoredProject,
   options: { githubToken?: string },
 ): Promise<PluginMaterialization[]> {
-  const registry = await loadPluginRegistry(project);
   const results: PluginMaterialization[] = [];
 
   for (const plugin of project.plugins ?? []) {
-    const requestedVersion = plugin.version ?? "latest";
-    const artifact = await fetchPluginArtifact(
-      project,
-      registry,
-      plugin.id,
-      requestedVersion,
-      { githubToken: options.githubToken },
-    );
+    const artifact = await fetchPluginArtifact(project, plugin, {
+      githubToken: options.githubToken,
+    });
 
     const buffer = artifact.buffer;
-    const version = artifact.version ?? requestedVersion;
+    const version = artifact.version ?? plugin.version;
     const sha256 = hashBuffer(buffer);
     const relativePath = `plugins/${artifact.fileName}`;
 

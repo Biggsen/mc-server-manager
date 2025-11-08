@@ -4,6 +4,7 @@ import projectsRouter from "./projects";
 import buildsRouter from "./builds";
 import githubRouter from "./github";
 import deploymentsRouter from "./deployments";
+import pluginsRouter from "./plugins";
 
 export function registerRoutes(app: Express): void {
   app.get("/health", (_req, res) => {
@@ -15,5 +16,6 @@ export function registerRoutes(app: Express): void {
   app.use("/api/auth", authRouter);
   app.use("/api/github", githubRouter);
   app.use("/api/deployments", deploymentsRouter);
+  app.use("/api/plugins", pluginsRouter);
 }
 

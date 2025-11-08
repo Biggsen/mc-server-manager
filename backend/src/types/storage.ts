@@ -1,3 +1,5 @@
+import type { ProjectPlugin } from "./plugins";
+
 export interface RepoMetadata {
   id?: number;
   owner: string;
@@ -18,7 +20,7 @@ export interface StoredProject {
   defaultBranch?: string;
   profilePath?: string;
   repo?: RepoMetadata;
-  plugins?: Array<{ id: string; version: string; sha256?: string }>;
+  plugins?: ProjectPlugin[];
   configs?: Array<{ path: string; sha256?: string }>;
   manifest?: ManifestMetadata;
   createdAt: string;

@@ -1,3 +1,50 @@
+export interface PluginSearchResult {
+  provider: 'hangar' | 'modrinth' | 'spiget'
+  id: string
+  slug: string
+  name: string
+  summary?: string
+  projectUrl?: string
+}
+
+export async function searchPlugins(
+  query: string,
+  loader: string,
+  minecraftVersion: string,
+): Promise<PluginSearchResult[]> {
+  const params = new URLSearchParams({
+    query,
+    loader,
+    minecraftVersion,
+  })
+  const data = await request<{ results: PluginSearchResult[] }>(`/plugins/search?${params.toString()}`)
+  return data.results
+}
+
+export interface PluginVersionInfo {
+  versionId: string
+  name: string
+  downloadUrl?: string
+  releasedAt?: string
+  supports: Array<{ loader: string; minecraftVersions: string[] }>
+}
+
+export async function fetchPluginVersions(
+  provider: 'hangar' | 'modrinth' | 'spiget',
+  slug: string,
+  loader: string,
+  minecraftVersion: string,
+): Promise<PluginVersionInfo[]> {
+  const params = new URLSearchParams({
+    loader,
+    minecraftVersion,
+  })
+  const data = await request<{ provider: string; versions: PluginVersionInfo[] }>(
+    `/plugins/${provider}/${encodeURIComponent(slug)}/versions?${params.toString()}`,
+  )
+  return data.versions
+}
+
 import { emitProjectsUpdated } from './events'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? '/api'
@@ -73,6 +120,16 @@ export interface ProjectSummary {
     id: string
     version: string
     sha256?: string
+    provider?: 'hangar' | 'modrinth' | 'spiget' | 'github' | 'custom'
+    source?: {
+      provider: 'hangar' | 'modrinth' | 'spiget' | 'github' | 'custom'
+      slug: string
+      projectUrl?: string
+      versionId?: string
+      downloadUrl?: string
+      loader?: string
+      minecraftVersion?: string
+    }
   }>
   configs?: Array<{
     path: string
@@ -244,6 +301,26 @@ export async function fetchProjectRuns(projectId: string): Promise<RunJob[]> {
 export async function fetchProject(projectId: string): Promise<ProjectSummary> {
   const data = await request<{ project: ProjectSummary }>(`/projects/${projectId}`)
   return data.project
+}
+
+export async function addProjectPlugin(
+  projectId: string,
+  payload: {
+    pluginId: string
+    version: string
+    provider?: string
+    source?: Record<string, unknown>
+  },
+): Promise<ProjectSummary['plugins']> {
+  const data = await request<{ project: { plugins: ProjectSummary['plugins'] } }>(
+    `/projects/${projectId}/plugins`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  )
+  emitProjectsUpdated()
+  return data.project.plugins
 }
 
 export type DeploymentType = 'folder' | 'sftp'

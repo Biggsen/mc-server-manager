@@ -7,6 +7,7 @@ import type {
   RepoMetadata,
   StoredProject,
 } from "../types/storage";
+import type { ProjectPlugin } from "../types/plugins";
 
 const DATA_DIR = join(process.cwd(), "data");
 const MANIFEST_DIR = join(DATA_DIR, "manifests");
@@ -207,11 +208,21 @@ interface AssetsPayload {
 export async function setProjectAssets(id: string, payload: AssetsPayload): Promise<StoredProject | undefined> {
   return updateProject(id, (project) => {
     if (payload.plugins) {
-      project.plugins = payload.plugins.map((plugin) => ({
-        id: plugin.id,
-        version: plugin.version,
-        sha256: plugin.sha256 ?? "<pending>",
-      }));
+      const existingMap = new Map<string, ProjectPlugin>();
+      for (const existing of project.plugins ?? []) {
+        existingMap.set(existing.id, existing);
+      }
+      project.plugins = payload.plugins.map((plugin) => {
+        const previous = existingMap.get(plugin.id);
+        return {
+          ...previous,
+          id: plugin.id,
+          version: plugin.version,
+          sha256: plugin.sha256 ?? previous?.sha256 ?? "<pending>",
+          provider: plugin.provider ?? previous?.provider,
+          source: plugin.source ?? previous?.source,
+        };
+      });
     }
     if (payload.configs) {
       project.configs = payload.configs.map((config) => ({
@@ -219,6 +230,26 @@ export async function setProjectAssets(id: string, payload: AssetsPayload): Prom
         sha256: config.sha256 ?? "<pending>",
       }));
     }
+    return project;
+  });
+}
+
+export async function upsertProjectPlugin(
+  id: string,
+  plugin: ProjectPlugin,
+): Promise<StoredProject | undefined> {
+  return updateProject(id, (project) => {
+    const plugins = [...(project.plugins ?? [])];
+    const index = plugins.findIndex((entry) => entry.id === plugin.id);
+    if (index >= 0) {
+      plugins[index] = {
+        ...plugins[index],
+        ...plugin,
+      };
+    } else {
+      plugins.push(plugin);
+    }
+    project.plugins = plugins;
     return project;
   });
 }

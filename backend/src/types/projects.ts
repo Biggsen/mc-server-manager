@@ -1,4 +1,5 @@
 import type { ManifestMetadata, RepoMetadata, StoredProject } from "./storage";
+import type { ProjectPlugin } from "./plugins";
 
 export interface ProjectSummary {
   id: string;
@@ -9,7 +10,7 @@ export interface ProjectSummary {
   updatedAt: string;
   source?: "created" | "imported";
   manifest?: ManifestMetadata;
-  plugins?: StoredProject["plugins"];
+  plugins?: ProjectPlugin[];
   configs?: StoredProject["configs"];
   repo?: RepoMetadata;
 }

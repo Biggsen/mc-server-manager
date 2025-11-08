@@ -9,9 +9,11 @@ import {
   getManifestFilePath,
   recordManifestMetadata,
   setProjectAssets,
+  upsertProjectPlugin,
 } from "../storage/projectsStore";
 import type { ProjectSummary } from "../types/projects";
 import type { ManifestMetadata, RepoMetadata, StoredProject } from "../types/storage";
+import type { PluginProvider, PluginSourceReference } from "../types/plugins";
 import { renderManifest, type ManifestOverrides } from "../services/manifestService";
 import { enqueueBuild } from "../services/buildQueue";
 import { scanProjectAssets } from "../services/projectScanner";
@@ -329,6 +331,66 @@ router.post("/:id/scan", async (req: Request, res: Response) => {
   } catch (error) {
     console.error("Failed to scan project assets", error);
     res.status(500).json({ error: "Failed to scan project assets" });
+  }
+});
+
+router.post("/:id/plugins", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const project = await findProject(id);
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+
+    const { pluginId, version, provider, source } = req.body ?? {};
+
+    if (!pluginId || !version) {
+      res.status(400).json({ error: "pluginId and version are required" });
+      return;
+    }
+
+    let providerValue: PluginProvider | undefined;
+    if (provider) {
+      const normalized = String(provider).toLowerCase();
+      const supported: PluginProvider[] = ["hangar", "modrinth", "spiget", "github", "custom"];
+      if (!supported.includes(normalized as PluginProvider)) {
+        res.status(400).json({ error: `Provider "${provider}" is not supported` });
+        return;
+      }
+      providerValue = normalized as PluginProvider;
+    }
+
+    let sourceRef: PluginSourceReference | undefined;
+    if (source && providerValue) {
+      sourceRef = {
+        provider: providerValue,
+        slug: typeof source.slug === "string" ? source.slug : pluginId,
+        displayName: source.displayName,
+        projectUrl: source.projectUrl,
+        versionId: source.versionId,
+        downloadUrl: source.downloadUrl,
+        loader: source.loader,
+        minecraftVersion: source.minecraftVersion,
+      };
+    }
+
+    const updated = await upsertProjectPlugin(id, {
+      id: pluginId,
+      version,
+      provider: providerValue,
+      source: sourceRef,
+    });
+
+    res.status(200).json({
+      project: {
+        id,
+        plugins: updated?.plugins ?? [],
+      },
+    });
+  } catch (error) {
+    console.error("Failed to add project plugin", error);
+    res.status(500).json({ error: "Failed to add plugin" });
   }
 });
 

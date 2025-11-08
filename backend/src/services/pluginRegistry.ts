@@ -4,6 +4,7 @@ import { basename, join } from "path";
 import { parse } from "yaml";
 import type { StoredProject } from "../types/storage";
 import { readProjectFile, resolveProjectRoot, writeProjectFileBuffer } from "./projectFiles";
+import type { ProjectPlugin } from "../types/plugins";
 
 interface PluginSourceGithub {
   type: "github";
@@ -62,11 +63,23 @@ export async function loadPluginRegistry(project: StoredProject): Promise<Plugin
 
 export async function fetchPluginArtifact(
   project: StoredProject,
-  registry: PluginRegistry,
-  pluginId: string,
-  requestedVersion: string,
+  plugin: ProjectPlugin,
   options: DownloadOptions = {},
 ): Promise<DownloadedPluginArtifact> {
+  const requestedVersion = plugin.version ?? "latest";
+  const pluginId = plugin.id;
+
+  if (plugin.provider) {
+    const artifact = await downloadFromProvider(project, plugin, options);
+    if (artifact) {
+      return artifact;
+    }
+    console.warn(
+      `Provider download failed for ${plugin.id} via ${plugin.provider}, falling back to registry/local sources.`,
+    );
+  }
+
+  const registry = await loadPluginRegistry(project);
   // 1. Look for plugin JAR in the project directory or template.
   const local = await readLocalPlugin(project, pluginId, requestedVersion);
   if (local) {
@@ -212,6 +225,200 @@ async function downloadFromSource(
   return undefined;
 }
 
+async function downloadFromProvider(
+  project: StoredProject,
+  plugin: ProjectPlugin,
+  options: DownloadOptions,
+): Promise<DownloadedPluginArtifact | undefined> {
+  const source = plugin.source;
+  if (!source) return undefined;
+  const version = plugin.version ?? "latest";
+
+  switch (source.provider) {
+    case "hangar":
+      return downloadFromHangar(source.slug, version, project.loader, project.minecraftVersion, options);
+    case "modrinth":
+      return downloadFromModrinth(source.slug, version, project.loader, project.minecraftVersion);
+    case "spiget":
+      return downloadFromSpiget(source.slug, version);
+    case "github":
+      return downloadFromGithub(
+        { type: "github", repo: source.slug, assetPattern: source.downloadUrl ?? `${plugin.id}-*.jar` },
+        { pluginId: plugin.id, requestedVersion: version, githubToken: options.githubToken },
+      );
+    case "custom":
+      if (source.downloadUrl) {
+        return downloadFromHttp(
+          { type: "http", url: source.downloadUrl },
+          { pluginId: plugin.id, requestedVersion: version },
+        );
+      }
+      return undefined;
+    default:
+      return undefined;
+  }
+}
+
+async function downloadFromHangar(
+  slug: string,
+  requestedVersion: string,
+  loader: string,
+  mcVersion: string,
+  options: DownloadOptions,
+): Promise<DownloadedPluginArtifact | undefined> {
+  const url = requestedVersion === "latest"
+    ? `https://hangar.papermc.io/api/v1/projects/${slug}/versions?platform=${encodeURIComponent(loader)}`
+    : `https://hangar.papermc.io/api/v1/projects/${slug}/versions/${encodeURIComponent(requestedVersion)}`;
+
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    "User-Agent": "mc-server-manager",
+  };
+  if (options.githubToken ?? process.env.GITHUB_TOKEN) {
+    headers.Authorization = `Bearer ${options.githubToken ?? process.env.GITHUB_TOKEN}`;
+  }
+
+  const response = await fetch(url, { headers });
+  if (!response.ok) {
+    throw new Error(`Hangar lookup failed for ${slug}@${requestedVersion}: ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  const versionData = Array.isArray(data?.result) ? data.result[0] : data;
+  if (!versionData) {
+    return undefined;
+  }
+
+  const files: Array<{ url: string; fileName: string }> = versionData.files ?? versionData.downloads ?? [];
+  const file = files.find((candidate) => candidate.fileName?.endsWith(".jar")) ?? files[0];
+  if (!file?.url) {
+    throw new Error(`Hangar version ${requestedVersion} has no downloadable jar`);
+  }
+
+  const downloadUrl = file.url.startsWith("http")
+    ? file.url
+    : `https://hangarcdn.papermc.io${file.url}`;
+  const jarResponse = await fetch(downloadUrl, { headers });
+  if (!jarResponse.ok) {
+    throw new Error(`Failed to download Hangar artifact for ${slug}: ${jarResponse.statusText}`);
+  }
+  const buffer = Buffer.from(await jarResponse.arrayBuffer());
+  const versionName = versionData.name ?? requestedVersion;
+  const fileName = file.fileName ?? `${slug.replace("/", "-")}-${versionName}.jar`;
+  return {
+    buffer,
+    fileName,
+    version: versionName,
+  };
+}
+
+async function downloadFromModrinth(
+  projectId: string,
+  requestedVersion: string,
+  loader: string,
+  mcVersion: string,
+): Promise<DownloadedPluginArtifact | undefined> {
+  const facets = [
+    `["project_id:${projectId}"]`,
+    `["versions:${mcVersion}"]`,
+    `["categories:${loader.toLowerCase()}"]`,
+  ];
+  const url = `https://api.modrinth.com/v2/project/${projectId}/version`;
+  const response = await fetch(url, {
+    headers: {
+      Accept: "application/json",
+      "User-Agent": "mc-server-manager",
+    },
+  });
+  if (!response.ok) {
+    throw new Error(`Modrinth lookup failed for ${projectId}: ${response.statusText}`);
+  }
+  const versions = (await response.json()) as Array<{
+    id: string;
+    version_number: string;
+    game_versions: string[];
+    loaders: string[];
+    files: Array<{ url: string; filename: string }>;
+  }>;
+  const match = versions.find((entry) => {
+    const versionMatches =
+      requestedVersion === "latest" ? true : entry.version_number === requestedVersion;
+    const loaderMatches = entry.loaders?.some((item) => item.toLowerCase() === loader.toLowerCase());
+    const mcMatches = entry.game_versions?.includes(mcVersion);
+    return versionMatches && loaderMatches && mcMatches;
+  }) ?? versions.find((entry) => entry.game_versions?.includes(mcVersion));
+
+  if (!match) {
+    throw new Error(`No Modrinth version found for ${projectId} supporting ${mcVersion}`);
+  }
+
+  const file = match.files.find((item) => item.filename.endsWith(".jar")) ?? match.files[0];
+  if (!file) {
+    throw new Error(`Modrinth version ${match.version_number} has no downloadable jar`);
+  }
+  const jarResponse = await fetch(file.url, {
+    headers: {
+      Accept: "application/octet-stream",
+      "User-Agent": "mc-server-manager",
+    },
+  });
+  if (!jarResponse.ok) {
+    throw new Error(`Failed to download Modrinth artifact: ${jarResponse.statusText}`);
+  }
+  const buffer = Buffer.from(await jarResponse.arrayBuffer());
+  return {
+    buffer,
+    fileName: file.filename,
+    version: match.version_number,
+  };
+}
+
+async function downloadFromSpiget(
+  resourceId: string,
+  requestedVersion: string,
+): Promise<DownloadedPluginArtifact | undefined> {
+  const resourceResponse = await fetch(
+    `https://api.spiget.org/v2/resources/${resourceId}`,
+  );
+  if (!resourceResponse.ok) {
+    throw new Error(`Spiget resource lookup failed: ${resourceResponse.statusText}`);
+  }
+  const resource = (await resourceResponse.json()) as { name: string };
+
+  const versionResponse = await fetch(
+    `https://api.spiget.org/v2/resources/${resourceId}/versions?size=50`,
+  );
+  if (!versionResponse.ok) {
+    throw new Error(`Spiget versions lookup failed: ${versionResponse.statusText}`);
+  }
+
+  const versions = (await versionResponse.json()) as Array<{
+    id: number;
+    name: string;
+    downloadUrl: string;
+  }>;
+
+  const match = versions.find((entry) =>
+    requestedVersion === "latest" ? true : entry.name === requestedVersion,
+  ) ?? versions[0];
+
+  if (!match) {
+    throw new Error(`No Spiget versions available for resource ${resourceId}`);
+  }
+
+  const downloadUrl = `https://api.spiget.org/v2/resources/${resourceId}/download/${match.id}.jar`;
+  const jarResponse = await fetch(downloadUrl);
+  if (!jarResponse.ok) {
+    throw new Error(`Failed to download Spiget artifact: ${jarResponse.statusText}`);
+  }
+  const buffer = Buffer.from(await jarResponse.arrayBuffer());
+  const fileName = `${resource.name.replace(/\s+/g, "-")}-${match.name}.jar`;
+  return {
+    buffer,
+    fileName,
+    version: match.name ?? requestedVersion,
+  };
+}
 async function downloadFromGithub(
   source: PluginSourceGithub,
   context: {

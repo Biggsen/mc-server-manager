@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   fetchProject,
@@ -9,9 +9,14 @@ import {
   triggerManifest,
   scanProjectAssets,
   runProjectLocally,
+  searchPlugins,
+  fetchPluginVersions,
+  addProjectPlugin,
   type ProjectSummary,
   type BuildJob,
   type RunJob,
+  type PluginSearchResult,
+  type PluginVersionInfo,
 } from '../lib/api'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? '/api'
@@ -26,6 +31,7 @@ function ProjectDetail() {
   const navigate = useNavigate()
 
   const [loading, setLoading] = useState(true)
+  const initialLoadRef = useRef(true)
   const [error, setError] = useState<string | null>(null)
   const [project, setProject] = useState<ProjectSummary | null>(null)
   const [builds, setBuilds] = useState<BuildJob[]>([])
@@ -33,6 +39,12 @@ function ProjectDetail() {
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [manifestPreview, setManifestPreview] = useState<ManifestPreview | null>(null)
+  const [pluginQuery, setPluginQuery] = useState('')
+  const [pluginResults, setPluginResults] = useState<PluginSearchResult[]>([])
+  const [pluginVersions, setPluginVersions] = useState<PluginVersionInfo[]>([])
+  const [pluginSelection, setPluginSelection] = useState<PluginSearchResult | null>(null)
+  const [pluginStatus, setPluginStatus] = useState<string | null>(null)
+  const [loadingPlugins, setLoadingPlugins] = useState(false)
 
   useEffect(() => {
     if (!id) return
@@ -40,7 +52,9 @@ function ProjectDetail() {
 
     const load = async () => {
       try {
-        setLoading(true)
+        if (initialLoadRef.current) {
+          setLoading(true)
+        }
         const [proj, projBuilds, projRuns] = await Promise.all([
           fetchProject(id),
           fetchBuilds(id),
@@ -55,8 +69,9 @@ function ProjectDetail() {
         if (cancelled) return
         setError(err instanceof Error ? err.message : String(err))
       } finally {
-        if (!cancelled) {
+        if (!cancelled && initialLoadRef.current) {
           setLoading(false)
+          initialLoadRef.current = false
         }
       }
     }
@@ -169,6 +184,37 @@ function ProjectDetail() {
             </p>
           )}
         </article>
+
+        {project.plugins && project.plugins.length > 0 && (
+          <article className="panel">
+            <header>
+              <h3>Configured Plugins</h3>
+            </header>
+            <ul className="project-list">
+              {project.plugins.map((plugin) => (
+                <li key={`${plugin.id}:${plugin.version}`}>
+                  <div>
+                    <strong>{plugin.id}</strong> <span className="muted">v{plugin.version}</span>
+                    {plugin.provider && (
+                      <p className="muted">
+                        Source: {plugin.provider}
+                        {plugin.source?.projectUrl && (
+                          <>
+                            {' '}
+                            —{' '}
+                            <a href={plugin.source.projectUrl} target="_blank" rel="noreferrer">
+                              View project
+                            </a>
+                          </>
+                        )}
+                      </p>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </article>
+        )}
 
         <article className="panel">
           <header>
@@ -388,6 +434,172 @@ function ProjectDetail() {
           </pre>
         </article>
       )}
+
+      <article className="panel">
+        <header>
+          <h3>Add Plugin</h3>
+        </header>
+        <form
+          className="page-form"
+          onSubmit={async (event) => {
+            event.preventDefault()
+            if (!pluginQuery.trim()) return
+            try {
+              setLoadingPlugins(true)
+              const results = await searchPlugins(
+                pluginQuery,
+                project.loader,
+                project.minecraftVersion,
+              )
+              setPluginResults(results)
+              setPluginSelection(null)
+              setPluginVersions([])
+              setPluginStatus(null)
+            } catch (err) {
+              setPluginStatus(err instanceof Error ? err.message : 'Search failed')
+            } finally {
+              setLoadingPlugins(false)
+            }
+          }}
+        >
+          <div className="form-grid">
+            <div className="field span-2">
+              <label htmlFor="plugin-search">Search Hangar</label>
+              <input
+                id="plugin-search"
+                value={pluginQuery}
+                onChange={(event) => setPluginQuery(event.target.value)}
+                placeholder="WorldGuard, LuckPerms, ..."
+              />
+            </div>
+          </div>
+          <div className="form-actions">
+            <button type="submit" className="ghost" disabled={loadingPlugins}>
+              {loadingPlugins ? 'Searching…' : 'Search'}
+            </button>
+          </div>
+          {pluginStatus && <p className="muted">{pluginStatus}</p>}
+        </form>
+
+        {pluginResults.length > 0 && (
+          <div className="layout-grid">
+            <section className="panel">
+              <header>
+                <h4>Results</h4>
+              </header>
+              <ul className="project-list">
+                {pluginResults.map((result) => (
+                  <li key={result.slug}>
+                    <div>
+                      <strong>{result.name}</strong>
+                      {result.summary && <p className="muted">{result.summary}</p>}
+                      {result.projectUrl && (
+                        <a href={result.projectUrl} target="_blank" rel="noreferrer">
+                          View project
+                        </a>
+                      )}
+                    </div>
+                    <div className="dev-buttons">
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={async () => {
+                          setPluginSelection(result)
+                          try {
+                          const versions = await fetchPluginVersions(
+                            result.provider,
+                            result.slug,
+                            project.loader,
+                            project.minecraftVersion,
+                          )
+                            const filtered = versions.filter((version) =>
+                              version.supports.some(
+                                (support) =>
+                                  support.loader.toLowerCase() === project.loader.toLowerCase() &&
+                                  support.minecraftVersions.includes(project.minecraftVersion),
+                              ),
+                            )
+                            setPluginVersions(filtered.length > 0 ? filtered : versions)
+                            setPluginStatus(
+                              filtered.length === 0
+                                ? 'No exact version match for this Minecraft version, showing all releases.'
+                                : null,
+                            )
+                          } catch (err) {
+                            setPluginStatus(
+                              err instanceof Error ? err.message : 'Failed to load versions.',
+                            )
+                          }
+                        }}
+                      >
+                        View Versions
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </section>
+
+            {pluginSelection && (
+              <section className="panel">
+                <header>
+                  <h4>Versions for {pluginSelection.name}</h4>
+                </header>
+                {pluginVersions.length === 0 && <p className="muted">No versions found.</p>}
+                {pluginVersions.length > 0 && (
+                  <ul className="project-list">
+                    {pluginVersions.slice(0, 10).map((version) => (
+                      <li key={version.versionId}>
+                        <div>
+                          <strong>{version.name}</strong>
+                          {version.releasedAt && (
+                            <p className="muted">
+                              Released {new Date(version.releasedAt).toLocaleString()}
+                            </p>
+                          )}
+                        </div>
+                        <div className="dev-buttons">
+                          <button
+                            type="button"
+                            className="ghost"
+                            onClick={async () => {
+                              try {
+                                setBusy(true)
+                                const plugins = await addProjectPlugin(project.id, {
+                                  pluginId: pluginSelection.slug,
+                                  version: version.name,
+                                  provider: pluginSelection.provider,
+                                  source: {
+                                    slug: pluginSelection.slug,
+                                    projectUrl: pluginSelection.projectUrl,
+                                    versionId: version.versionId,
+                                  },
+                                })
+                                setProject((prev) =>
+                                  prev ? { ...prev, plugins: plugins ?? prev.plugins } : prev,
+                                )
+                                setMessage(`Added ${pluginSelection.name} ${version.name}`)
+                              } catch (err) {
+                                setMessage(
+                                  err instanceof Error ? err.message : 'Failed to add plugin.',
+                                )
+                              } finally {
+                                setBusy(false)
+                              }
+                            }}
+                          >
+                            Add to server
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+            )}
+          </div>
+        )}
+      </article>
     </section>
   )
 }
