@@ -10,6 +10,6 @@ export function registerRoutes(app: Express): void {
 
   app.use("/api/projects", projectsRouter);
   app.use("/api/builds", buildsRouter);
-  app.use("/auth", authRouter);
+  app.use("/api/auth", authRouter);
 }
 

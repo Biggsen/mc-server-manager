@@ -18,6 +18,14 @@ npm run dev:backend
 
 Create a `.env` file in the repo root to configure GitHub OAuth (dev-only defaults shown in `.env.example`).
 
+Required keys:
+
+- `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET`
+- `AUTH_CALLBACK_URL` (usually `http://localhost:4000/api/auth/github/callback`)
+- `SESSION_SECRET`
+- `APP_BASE_URL` (frontend origin, e.g. `http://localhost:5173`)
+- Optional: `GITHUB_SCOPE` (defaults to `repo read:user`)
+
 ## Structure
 
 - `frontend/` – Vite + React TypeScript UI scaffold.

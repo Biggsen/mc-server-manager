@@ -1,5 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
 import express from "express";
+import session from "express-session";
+import { sessionSecret } from "./config";
 import "./config";
 import { registerRoutes } from "./routes";
 
@@ -7,6 +9,18 @@ const app = express();
 const port = Number(process.env.PORT ?? 4000);
 
 app.use(express.json());
+app.use(
+  session({
+    secret: sessionSecret,
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: false,
+    },
+  }),
+);
 
 registerRoutes(app);
 

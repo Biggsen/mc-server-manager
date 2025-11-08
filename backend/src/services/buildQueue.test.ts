@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { join } from "path";
 import { mkdtemp, rm, readFile, mkdir } from "fs/promises";
 import { tmpdir } from "os";
+import type { StoredProject } from "../types/storage";
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -30,7 +31,7 @@ describe("buildQueue persistence", () => {
   it("persists jobs to disk and loads them on startup", async () => {
     const { enqueueBuild, listBuilds } = await import("./buildQueue");
 
-    const project = {
+    const project: StoredProject = {
       id: "proj-1",
       name: "Test",
       description: "",

@@ -185,3 +185,27 @@ export async function scanProjectAssets(projectId: string): Promise<{
   return data.project
 }
 
+export interface AuthStatus {
+  provider: string
+  configured: boolean
+  authenticated: boolean
+  login: string | null
+  authorizeUrl: string | null
+}
+
+export async function fetchAuthStatus(): Promise<AuthStatus> {
+  return request<AuthStatus>('/auth/status')
+}
+
+export function startGitHubLogin(returnTo?: string): void {
+  const url = new URL(`${API_BASE}/auth/github`, window.location.origin)
+  if (returnTo) {
+    url.searchParams.set('returnTo', returnTo)
+  }
+  window.location.href = url.toString()
+}
+
+export async function logout(): Promise<void> {
+  await request('/auth/logout', { method: 'POST', parseJson: false })
+}
+
