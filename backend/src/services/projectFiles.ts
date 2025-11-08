@@ -1,6 +1,6 @@
 import { existsSync, readdirSync } from "fs";
-import { readFile } from "fs/promises";
-import { join } from "path";
+import { mkdir, readFile, writeFile } from "fs/promises";
+import { dirname, join } from "path";
 import Handlebars from "handlebars";
 import { parse } from "yaml";
 import type { StoredProject } from "../types/storage";
@@ -169,6 +169,19 @@ export async function renderConfigFiles(project: StoredProject): Promise<Rendere
   }
 
   return results;
+}
+
+
+export async function writeProjectFileBuffer(
+  project: StoredProject,
+  relativePath: string,
+  buffer: Buffer,
+): Promise<string> {
+  const targetRoot = join(PROJECTS_ROOT, project.id);
+  const targetPath = join(targetRoot, relativePath);
+  await mkdir(dirname(targetPath), { recursive: true });
+  await writeFile(targetPath, buffer);
+  return targetPath;
 }
 
 

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import {
   fetchProjects,
   triggerBuild,
@@ -123,7 +124,9 @@ function Projects() {
             return (
               <li key={project.id}>
                 <div>
-                  <h4>{project.name}</h4>
+                <h4>
+                  <Link to={`/projects/${project.id}`}>{project.name}</Link>
+                </h4>
                   <p className="muted">
                     {[
                       project.minecraftVersion,
@@ -254,10 +257,10 @@ function Projects() {
                     onClick={async () => {
                       try {
                         setProjectBusy(project.id, true)
-                        const response = await runProjectLocally(project.id)
+                        const run = await runProjectLocally(project.id)
                         setProjectMessage(project.id, {
                           type: 'success',
-                          text: `Local run queued (${response.status})`,
+                          text: `Local run queued (${run.status.toUpperCase()})`,
                         })
                       } catch (err) {
                         console.error('Failed to queue local run', err)

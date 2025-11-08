@@ -20,6 +20,7 @@ import {
   collectProjectDefinitionFiles,
   renderConfigFiles,
 } from "../services/projectFiles";
+import { enqueueRun, listRuns } from "../services/runQueue";
 
 const router = Router();
 
@@ -406,6 +407,12 @@ router.post("/:id/build", async (req: Request, res: Response) => {
   }
 });
 
+router.get("/:id/runs", async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const runs = listRuns(id);
+  res.json({ runs });
+});
+
 router.post("/:id/run", async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
@@ -415,8 +422,8 @@ router.post("/:id/run", async (req: Request, res: Response) => {
       return;
     }
 
-    console.info(`[run-local] (stub) project=${project.id}`);
-    res.status(202).json({ status: "queued" });
+    const run = await enqueueRun(project);
+    res.status(202).json({ run });
   } catch (error) {
     console.error("Failed to trigger local run", error);
     res.status(500).json({ error: "Failed to trigger local run" });

@@ -16,9 +16,11 @@ import {
   readProjectFile,
   renderConfigFiles,
   resolveProjectRoot,
+  writeProjectFileBuffer,
 } from "./projectFiles";
 import { scanProjectAssets } from "./projectScanner";
 import { commitFiles, getOctokitWithToken } from "./githubClient";
+import { fetchPluginArtifact, loadPluginRegistry } from "./pluginRegistry";
 
 const DATA_DIR = join(process.cwd(), "data", "builds");
 const LOG_PATH = join(DATA_DIR, "builds.json");
@@ -95,7 +97,9 @@ async function runBuild(
     const projectWithAssets = await ensureProjectAssets(project);
 
     const definitionFiles = await collectProjectDefinitionFiles(projectWithAssets);
-    const plugins = await materializePlugins(projectWithAssets);
+    const plugins = await materializePlugins(projectWithAssets, {
+      githubToken: options.githubToken,
+    });
     const configs = await materializeConfigs(projectWithAssets);
 
     const updatedProject =
@@ -232,51 +236,35 @@ function hashBuffer(buffer: Buffer): string {
   return createHash("sha256").update(buffer).digest("hex");
 }
 
-async function materializePlugins(project: StoredProject): Promise<PluginMaterialization[]> {
+async function materializePlugins(
+  project: StoredProject,
+  options: { githubToken?: string },
+): Promise<PluginMaterialization[]> {
+  const registry = await loadPluginRegistry(project);
   const results: PluginMaterialization[] = [];
-  const root = join(resolveProjectRoot(project), "plugins");
 
   for (const plugin of project.plugins ?? []) {
-    const filename = `${plugin.id}-${plugin.version}.jar`;
-    const relativePath = `plugins/${filename}`;
-    const candidates = [
-      join(root, `${plugin.id}-${plugin.version}.jar`),
-      join(root, `${plugin.id}.jar`),
-    ];
+    const requestedVersion = plugin.version ?? "latest";
+    const artifact = await fetchPluginArtifact(
+      project,
+      registry,
+      plugin.id,
+      requestedVersion,
+      { githubToken: options.githubToken },
+    );
 
-    let buffer: Buffer | undefined;
-    for (const candidate of candidates) {
-      try {
-        buffer = await readFile(candidate);
-        break;
-      } catch (error) {
-        const code = (error as NodeJS.ErrnoException).code;
-        if (code !== "ENOENT") {
-          console.warn(`Failed to read plugin jar ${candidate}`, error);
-        }
-      }
-    }
+    const buffer = artifact.buffer;
+    const version = artifact.version ?? requestedVersion;
+    const sha256 = hashBuffer(buffer);
+    const relativePath = `plugins/${artifact.fileName}`;
 
-    if (!buffer) {
-      buffer = Buffer.from(
-        JSON.stringify(
-          {
-            placeholder: true,
-            plugin: plugin.id,
-            version: plugin.version,
-            generatedAt: new Date().toISOString(),
-          },
-          null,
-          2,
-        ),
-        "utf-8",
-      );
-    }
+    // Materialize to the project workspace for future scans.
+    await writeProjectFileBuffer(project, relativePath, buffer);
 
     results.push({
       id: plugin.id,
-      version: plugin.version,
-      sha256: hashBuffer(buffer),
+      version,
+      sha256,
       relativePath,
       buffer,
     });
@@ -301,6 +289,8 @@ async function materializeConfigs(project: StoredProject): Promise<ConfigMateria
       content = await readProjectFile(project, path);
     }
     if (!content) continue;
+
+    await writeProjectFileBuffer(project, path, Buffer.from(content, "utf-8"));
 
     const sha256 = hashBuffer(Buffer.from(content, "utf-8"));
     results.push({

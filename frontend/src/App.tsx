@@ -6,6 +6,8 @@ import ImportProject from './pages/ImportProject'
 import NewProject from './pages/NewProject'
 import NotFound from './pages/NotFound'
 import Projects from './pages/Projects'
+import ProjectDetail from './pages/ProjectDetail'
+import Deployments from './pages/Deployments'
 import TestTools from './pages/TestTools'
 import './App.css'
 
@@ -70,6 +72,13 @@ function App() {
           >
             Dev Tools
           </button>
+          <button
+            type="button"
+            className="ghost"
+            onClick={() => navigate('/deployments')}
+          >
+            Deployments
+          </button>
           {authStatus?.authenticated ? (
             <button
               type="button"
@@ -108,7 +117,9 @@ function App() {
           <Route path="/projects" element={<Projects />} />
           <Route path="/projects/new" element={<NewProject />} />
           <Route path="/projects/import" element={<ImportProject />} />
+          <Route path="/projects/:id" element={<ProjectDetail />} />
           <Route path="/dev/tools" element={<TestTools />} />
+          <Route path="/deployments" element={<Deployments />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </main>

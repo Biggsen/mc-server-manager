@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { join } from "path";
-import { mkdtemp, rm, readFile, mkdir } from "fs/promises";
+import { join, dirname } from "path";
+import { mkdtemp, rm, readFile, mkdir, writeFile } from "fs/promises";
 import { tmpdir } from "os";
 import type { StoredProject } from "../types/storage";
 
@@ -29,6 +29,20 @@ describe("buildQueue persistence", () => {
       ]),
       readProjectFile: vi.fn(async () => "motd=hello"),
       resolveProjectRoot: vi.fn(() => workspace),
+      writeProjectFileBuffer: vi.fn(async (_project, relativePath, buffer: Buffer) => {
+        const target = join(workspace, relativePath);
+        await mkdir(dirname(target), { recursive: true });
+        await writeFile(target, buffer);
+        return target;
+      }),
+    }));
+    vi.doMock("./pluginRegistry", () => ({
+      loadPluginRegistry: vi.fn(async () => ({ schema: 1, plugins: {} })),
+      fetchPluginArtifact: vi.fn(async () => ({
+        fileName: "example-plugin.jar",
+        buffer: Buffer.from("plugin"),
+        version: "1.0.0",
+      })),
     }));
     vi.doMock("./projectScanner", () => ({
       scanProjectAssets: vi.fn(async () => ({
@@ -88,6 +102,15 @@ describe("buildQueue persistence", () => {
       ]),
       readProjectFile: vi.fn(async () => "motd=hello"),
       resolveProjectRoot: vi.fn(() => workspace),
+      writeProjectFileBuffer: vi.fn(async () => workspace),
+    }));
+    vi.doMock("./pluginRegistry", () => ({
+      loadPluginRegistry: vi.fn(async () => ({ schema: 1, plugins: {} })),
+      fetchPluginArtifact: vi.fn(async () => ({
+        fileName: "example-plugin.jar",
+        buffer: Buffer.from("plugin"),
+        version: "1.0.0",
+      })),
     }));
     vi.doMock("./projectScanner", () => ({
       scanProjectAssets: vi.fn(async () => ({

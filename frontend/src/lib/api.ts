@@ -92,6 +92,8 @@ export interface BuildJob {
   finishedAt?: string
   manifestBuildId?: string
   manifestPath?: string
+  artifactPath?: string
+  artifactSha?: string
   error?: string
 }
 
@@ -175,6 +177,11 @@ export async function fetchBuild(buildId: string): Promise<BuildJob> {
   return data.build
 }
 
+export async function fetchBuildManifest(buildId: string): Promise<unknown> {
+  const data = await request<{ manifest: unknown }>(`/builds/${buildId}/manifest`)
+  return data.manifest
+}
+
 export async function updateProjectAssets(projectId: string, payload: {
   plugins?: ProjectSummary['plugins']
   configs?: ProjectSummary['configs']
@@ -201,11 +208,86 @@ export async function scanProjectAssets(projectId: string): Promise<{
   return data.project
 }
 
-export async function runProjectLocally(
-  projectId: string,
-): Promise<{ status: string }> {
-  return request<{ status: string }>(`/projects/${projectId}/run`, {
+export type RunStatus = 'pending' | 'running' | 'succeeded' | 'failed'
+
+export interface RunLogEntry {
+  timestamp: string
+  stream: 'stdout' | 'stderr' | 'system'
+  message: string
+}
+
+export interface RunJob {
+  id: string
+  projectId: string
+  buildId: string
+  artifactPath: string
+  status: RunStatus
+  createdAt: string
+  startedAt?: string
+  finishedAt?: string
+  error?: string
+  logs: RunLogEntry[]
+}
+
+export async function runProjectLocally(projectId: string): Promise<RunJob> {
+  const data = await request<{ run: RunJob }>(`/projects/${projectId}/run`, {
     method: 'POST',
+  })
+  return data.run
+}
+
+export async function fetchProjectRuns(projectId: string): Promise<RunJob[]> {
+  const data = await request<{ runs: RunJob[] }>(`/projects/${projectId}/runs`)
+  return data.runs
+}
+
+export async function fetchProject(projectId: string): Promise<ProjectSummary> {
+  const data = await request<{ project: ProjectSummary }>(`/projects/${projectId}`)
+  return data.project
+}
+
+export type DeploymentType = 'folder' | 'sftp'
+
+export interface DeploymentTarget {
+  id: string
+  name: string
+  type: DeploymentType
+  notes?: string
+  createdAt: string
+  updatedAt: string
+  path?: string
+  host?: string
+  port?: number
+  username?: string
+  remotePath?: string
+}
+
+export async function fetchDeploymentTargets(): Promise<DeploymentTarget[]> {
+  const data = await request<{ targets: DeploymentTarget[] }>('/deployments')
+  return data.targets
+}
+
+export async function createDeploymentTarget(payload: {
+  name: string
+  type: DeploymentType
+  notes?: string
+  folder?: { path: string }
+  sftp?: { host: string; port?: number; username: string; remotePath: string }
+}): Promise<DeploymentTarget> {
+  const data = await request<{ target: DeploymentTarget }>('/deployments', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+  return data.target
+}
+
+export async function publishDeployment(
+  targetId: string,
+  buildId: string,
+): Promise<{ deployment: { status: string } }> {
+  return request<{ deployment: { status: string } }>(`/deployments/${targetId}/publish`, {
+    method: 'POST',
+    body: JSON.stringify({ buildId }),
   })
 }
 
