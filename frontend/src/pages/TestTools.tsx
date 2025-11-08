@@ -278,13 +278,19 @@ function TestTools() {
                 <div>
                   <h4>{project.name}</h4>
                   <p className="muted">
-                    {project.minecraftVersion} · {project.loader.toUpperCase()}{' '}
-                    {project.manifest
-                      ? `· Manifest ${project.manifest.lastBuildId}`
-                      : '· No manifest'}
-                    {project.plugins?.length
-                      ? ` · ${project.plugins.length} plugin${project.plugins.length > 1 ? 's' : ''}`
-                      : ''}
+                    {[
+                      project.minecraftVersion,
+                      project.loader.toUpperCase(),
+                      project.repo?.fullName ?? null,
+                      project.manifest
+                        ? `Manifest ${project.manifest.lastBuildId}`
+                        : 'No manifest',
+                      project.plugins?.length
+                        ? `${project.plugins.length} plugin${project.plugins.length > 1 ? 's' : ''}`
+                        : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
                   </p>
                 </div>
                 <div className="dev-buttons">

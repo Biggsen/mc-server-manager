@@ -9,6 +9,7 @@ export interface ManifestOverrides {
   plugins?: ManifestContext["plugins"];
   configs?: ManifestContext["configs"];
   artifact?: Partial<ManifestContext["artifact"]>;
+  repository?: Partial<ManifestContext["repository"]>;
 }
 
 interface ManifestContext {
@@ -29,6 +30,12 @@ interface ManifestContext {
     zipPath: string;
     sha256: string;
     size: number;
+  };
+  repository: {
+    url: string;
+    fullName?: string;
+    defaultBranch?: string;
+    commit?: string;
   };
 }
 
@@ -67,6 +74,12 @@ export async function renderManifest(
       sha256: "<pending>",
       size: 0,
     },
+    repository: {
+      url: project.repo?.htmlUrl ?? project.repoUrl ?? "",
+      fullName: project.repo?.fullName,
+      defaultBranch: project.repo?.defaultBranch ?? project.defaultBranch ?? "main",
+      commit: project.manifest?.commitSha,
+    },
   };
 
   if (overrides.minecraft) {
@@ -83,6 +96,9 @@ export async function renderManifest(
   }
   if (overrides.artifact) {
     context.artifact = { ...context.artifact, ...overrides.artifact };
+  }
+  if (overrides.repository) {
+    context.repository = { ...context.repository, ...overrides.repository };
   }
 
   return template(context);

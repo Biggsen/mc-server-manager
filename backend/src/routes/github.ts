@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 import { Router } from "express";
-import { getOctokitForRequest } from "../services/githubClient";
+import { commitFiles, getOctokitForRequest } from "../services/githubClient";
 
 const router = Router();
 
@@ -112,67 +112,22 @@ router.post("/repos/:owner/:repo/commit", async (req: Request, res: Response) =>
   try {
     const octokit = getOctokitForRequest(req);
     const { owner, repo } = req.params;
-    const { message, files } = req.body ?? {};
+    const { message, files, branch } = req.body ?? {};
 
     if (!message || !files || typeof files !== "object") {
       res.status(400).json({ error: "Commit message and files are required" });
       return;
     }
 
-    const { data: refData } = await octokit.git.getRef({
+    const { commitSha } = await commitFiles(octokit, {
       owner,
       repo,
-      ref: "heads/main",
-    });
-
-    const baseCommitSha = refData.object.sha;
-
-    const treeItems = await Promise.all(
-      Object.entries(files as Record<string, string>).map(async ([path, content]) => {
-        const blob = await octokit.git.createBlob({
-          owner,
-          repo,
-          content,
-          encoding: "utf-8",
-        });
-        return {
-          path,
-          mode: "100644",
-          type: "blob",
-          sha: blob.data.sha,
-        } as const;
-      }),
-    );
-
-    const { data: baseCommit } = await octokit.git.getCommit({
-      owner,
-      repo,
-      commit_sha: baseCommitSha,
-    });
-
-    const { data: tree } = await octokit.git.createTree({
-      owner,
-      repo,
-      tree: treeItems,
-      base_tree: baseCommit.tree.sha,
-    });
-
-    const { data: newCommit } = await octokit.git.createCommit({
-      owner,
-      repo,
+      branch: typeof branch === "string" && branch.length > 0 ? branch : undefined,
       message,
-      tree: tree.sha,
-      parents: [baseCommitSha],
+      files: files as Record<string, string>,
     });
 
-    await octokit.git.updateRef({
-      owner,
-      repo,
-      ref: "heads/main",
-      sha: newCommit.sha,
-    });
-
-    res.status(201).json({ commit: newCommit.sha });
+    res.status(201).json({ commit: commitSha });
   } catch (error) {
     console.error("Failed to push commit", error);
     res.status(500).json({ error: "Failed to push commit" });

@@ -1,7 +1,12 @@
 import { mkdir, readFile, writeFile } from "fs/promises";
 import { join } from "path";
 import type { ProjectSummary } from "../types/projects";
-import type { ManifestMetadata, ProjectsSnapshot, StoredProject } from "../types/storage";
+import type {
+  ManifestMetadata,
+  ProjectsSnapshot,
+  RepoMetadata,
+  StoredProject,
+} from "../types/storage";
 
 const DATA_DIR = join(process.cwd(), "data");
 const MANIFEST_DIR = join(DATA_DIR, "manifests");
@@ -47,6 +52,7 @@ function toSummary(project: StoredProject): ProjectSummary {
     manifest,
     plugins,
     configs,
+    repo,
   } = project;
   return {
     id,
@@ -59,6 +65,7 @@ function toSummary(project: StoredProject): ProjectSummary {
     manifest,
     plugins,
     configs,
+    repo,
   };
 }
 
@@ -85,6 +92,8 @@ interface CreateProjectInput {
   description?: string;
   minecraftVersion: string;
   loader: string;
+  profilePath?: string;
+  repo?: RepoMetadata;
 }
 
 export async function createProject(input: CreateProjectInput): Promise<StoredProject> {
@@ -99,6 +108,10 @@ export async function createProject(input: CreateProjectInput): Promise<StoredPr
     minecraftVersion: input.minecraftVersion,
     loader: input.loader,
     source: "created",
+    repo: input.repo,
+    repoUrl: input.repo?.htmlUrl,
+    defaultBranch: input.repo?.defaultBranch,
+    profilePath: input.profilePath ?? "profiles/base.yml",
     plugins: [],
     configs: [],
     createdAt: now,
@@ -117,6 +130,7 @@ interface ImportProjectInput {
   repoUrl: string;
   defaultBranch: string;
   profilePath: string;
+  repo?: RepoMetadata;
 }
 
 export async function importProject(input: ImportProjectInput): Promise<StoredProject> {
@@ -125,6 +139,8 @@ export async function importProject(input: ImportProjectInput): Promise<StoredPr
   const derivedName =
     input.name || input.repoUrl.split("/").filter(Boolean).slice(-1)[0] || "Imported Project";
   const id = slugify(derivedName);
+  const repoMetadata = input.repo ?? createRepoMetadataFromUrl(input.repoUrl, input.defaultBranch);
+  const normalizedRepoUrl = repoMetadata?.htmlUrl ?? input.repoUrl;
 
   const project: StoredProject = {
     id,
@@ -133,9 +149,10 @@ export async function importProject(input: ImportProjectInput): Promise<StoredPr
     minecraftVersion: "unknown",
     loader: "paper",
     source: "imported",
-    repoUrl: input.repoUrl,
+    repoUrl: normalizedRepoUrl,
     defaultBranch: input.defaultBranch,
     profilePath: input.profilePath,
+    repo: repoMetadata,
     plugins: [],
     configs: [],
     createdAt: now,
@@ -204,5 +221,29 @@ export async function setProjectAssets(id: string, payload: AssetsPayload): Prom
     }
     return project;
   });
+}
+
+function createRepoMetadataFromUrl(repoUrl: string, defaultBranch: string): RepoMetadata | undefined {
+  const trimmed = repoUrl.trim();
+  const match =
+    trimmed.match(
+      /github\.com[:/](?<owner>[^/]+)\/(?<name>[^/]+?)(?:\.git)?(?:[#?].*)?$/i,
+    ) ?? undefined;
+
+  if (!match?.groups) {
+    return undefined;
+  }
+
+  const owner = match.groups.owner;
+  const name = match.groups.name.replace(/\.git$/i, "");
+  const htmlUrl = `https://github.com/${owner}/${name}`;
+
+  return {
+    owner,
+    name,
+    fullName: `${owner}/${name}`,
+    htmlUrl,
+    defaultBranch,
+  };
 }
 

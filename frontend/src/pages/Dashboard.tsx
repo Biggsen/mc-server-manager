@@ -61,9 +61,17 @@ function Dashboard() {
                 <div>
                   <h4>{project.name}</h4>
                   <p className="muted">
-                    {project.minecraftVersion} · {project.loader.toUpperCase()}{' '}
-                    {project.source === 'imported' ? '· Imported' : ''}
-                    {project.manifest ? ` · Built ${new Date(project.manifest.generatedAt).toLocaleTimeString()}` : ''}
+                    {[
+                      project.minecraftVersion,
+                      project.loader.toUpperCase(),
+                      project.repo?.fullName ?? null,
+                      project.source === 'imported' ? 'Imported' : null,
+                      project.manifest
+                        ? `Built ${new Date(project.manifest.generatedAt).toLocaleTimeString()}`
+                        : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
                   </p>
                 </div>
                 <div className="dev-buttons">

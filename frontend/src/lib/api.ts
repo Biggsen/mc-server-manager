@@ -29,17 +29,30 @@ async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
   return (await response.json()) as T
 }
 
+export interface RepoMetadata {
+  id?: number
+  owner: string
+  name: string
+  fullName: string
+  htmlUrl: string
+  defaultBranch: string
+}
+
 export interface ProjectPayload {
   name: string
   description?: string
   minecraftVersion: string
   loader: string
+  profilePath?: string
+  repo?: RepoMetadata
 }
 
 export interface ImportPayload {
-  repoUrl: string
-  defaultBranch: string
+  repoUrl?: string
+  defaultBranch?: string
   profilePath: string
+  name?: string
+  repo?: RepoMetadata
 }
 
 export interface ProjectSummary {
@@ -54,6 +67,7 @@ export interface ProjectSummary {
     lastBuildId: string
     manifestPath: string
     generatedAt: string
+    commitSha?: string
   }
   plugins?: Array<{
     id: string
@@ -64,6 +78,7 @@ export interface ProjectSummary {
     path: string
     sha256?: string
   }>
+  repo?: RepoMetadata
 }
 
 export type BuildStatus = 'pending' | 'running' | 'succeeded' | 'failed'
@@ -192,6 +207,7 @@ export interface GitHubRepo {
   fullName: string
   private: boolean
   htmlUrl: string
+  defaultBranch: string
 }
 
 export interface GitHubOwnerInfo {
@@ -212,12 +228,28 @@ export async function fetchGitHubRepos(): Promise<GitHubOwnerInfo> {
   return request<GitHubOwnerInfo>('/github/repos')
 }
 
-export async function createGitHubRepo(org: string, payload: { name: string; description?: string; private?: boolean }): Promise<GitHubRepo> {
-  const data = await request<{ id: number; name: string; fullName: string; htmlUrl: string }>('/github/orgs/' + org + '/repos', {
+export async function createGitHubRepo(
+  org: string,
+  payload: { name: string; description?: string; private?: boolean },
+): Promise<GitHubRepo> {
+  const data = await request<{
+    id: number
+    name: string
+    fullName: string
+    htmlUrl: string
+    defaultBranch: string
+  }>(`/github/orgs/${org}/repos`, {
     method: 'POST',
     body: JSON.stringify(payload),
   })
-  return { id: data.id, name: data.name, fullName: data.fullName, private: payload.private ?? false, htmlUrl: data.htmlUrl }
+  return {
+    id: data.id,
+    name: data.name,
+    fullName: data.fullName,
+    private: payload.private ?? false,
+    htmlUrl: data.htmlUrl,
+    defaultBranch: data.defaultBranch,
+  }
 }
 
 export interface AuthStatus {

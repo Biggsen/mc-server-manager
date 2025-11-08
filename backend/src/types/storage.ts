@@ -1,3 +1,12 @@
+export interface RepoMetadata {
+  id?: number;
+  owner: string;
+  name: string;
+  fullName: string;
+  htmlUrl: string;
+  defaultBranch: string;
+}
+
 export interface StoredProject {
   id: string;
   name: string;
@@ -8,6 +17,7 @@ export interface StoredProject {
   repoUrl?: string;
   defaultBranch?: string;
   profilePath?: string;
+  repo?: RepoMetadata;
   plugins?: Array<{ id: string; version: string; sha256?: string }>;
   configs?: Array<{ path: string; sha256?: string }>;
   manifest?: ManifestMetadata;
@@ -23,5 +33,6 @@ export interface ManifestMetadata {
   lastBuildId: string;
   manifestPath: string;
   generatedAt: string;
+  commitSha?: string;
 }
 
