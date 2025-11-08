@@ -224,6 +224,40 @@ ul {
   flex-wrap: wrap;
 }
 
+.github-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.github-form input,
+.github-form select {
+  padding: 0.6rem 0.8rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--border-color);
+  background: rgba(12, 14, 20, 0.6);
+  color: inherit;
+  font: inherit;
+}
+
+.github-form label {
+  font-weight: 600;
+}
+
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 500;
+}
+
+.github-repo-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
 .inline-link {
   color: var(--accent-color);
   text-decoration: underline;

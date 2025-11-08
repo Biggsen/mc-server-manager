@@ -8,8 +8,12 @@ import {
   fetchBuilds,
   fetchBuild,
   scanProjectAssets,
+  fetchGitHubRepos,
+  createGitHubRepo,
   type ProjectSummary,
   type BuildJob,
+  type GitHubRepo,
+  type GitHubOwnerInfo,
 } from '../lib/api'
 import { subscribeProjectsUpdated } from '../lib/events'
 
@@ -19,6 +23,11 @@ function TestTools() {
   const [logs, setLogs] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
   const [builds, setBuilds] = useState<BuildJob[]>([])
+  const [repos, setRepos] = useState<GitHubRepo[]>([])
+  const [owners, setOwners] = useState<GitHubOwnerInfo['orgs'] & GitHubOwnerInfo['orgs']>([])
+  const [selectedOrg, setSelectedOrg] = useState<string>('')
+  const [newRepoName, setNewRepoName] = useState('')
+  const [newRepoPrivate, setNewRepoPrivate] = useState(true)
 
   const sortedProjects = useMemo(
     () => [...projects].sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1)),
@@ -70,6 +79,22 @@ function TestTools() {
       window.clearInterval(interval)
     }
   }, [])
+
+  useEffect(() => {
+    fetchGitHubRepos()
+      .then((data) => {
+        setRepos(data.repos)
+        const uniqueOwners = [
+          { login: data.owner.login, avatarUrl: data.owner.avatarUrl, htmlUrl: data.owner.htmlUrl },
+          ...data.orgs,
+        ]
+        setOwners(uniqueOwners)
+        if (uniqueOwners.length > 0 && (!selectedOrg || !uniqueOwners.some((org) => org.login === selectedOrg))) {
+          setSelectedOrg(uniqueOwners[0].login)
+        }
+      })
+      .catch((err: Error) => appendLog(`Load GitHub repos failed: ${err.message}`))
+  }, [selectedOrg])
 
   const appendLog = (message: string) => {
     setLogs((prev) => [
@@ -162,6 +187,87 @@ function TestTools() {
       {error && <p className="error-text">{error}</p>}
 
       <div className="dev-grid">
+        <div>
+          <h3>GitHub Repositories</h3>
+          <form
+            className="github-form"
+            onSubmit={async (event) => {
+              event.preventDefault()
+              if (!selectedOrg || !newRepoName.trim()) {
+                appendLog('Org and repo name are required')
+                return
+              }
+              try {
+                setBusy(true)
+                const repo = await createGitHubRepo(selectedOrg, {
+                  name: newRepoName.trim(),
+                  private: newRepoPrivate,
+                })
+                appendLog(`Created repo ${repo.fullName}`)
+                setRepos((prev) => [repo, ...prev])
+                setNewRepoName('')
+              } catch (err) {
+                appendLog(`Repo creation failed: ${(err as Error).message}`)
+              } finally {
+                setBusy(false)
+              }
+            }}
+          >
+            <label htmlFor="org-select">Organization / Owner</label>
+            <select
+              id="org-select"
+              value={selectedOrg}
+              onChange={(event) => setSelectedOrg(event.target.value)}
+            >
+              {owners.map((owner) => (
+                <option key={owner.login} value={owner.login}>
+                  {owner.login}
+                </option>
+              ))}
+            </select>
+
+            <div className="field">
+              <label htmlFor="repo-name">Repository name</label>
+              <input
+                id="repo-name"
+                value={newRepoName}
+                onChange={(event) => setNewRepoName(event.target.value)}
+                placeholder="my-server-manager"
+              />
+            </div>
+
+            <label className="checkbox">
+              <input
+                type="checkbox"
+                checked={newRepoPrivate}
+                onChange={(event) => setNewRepoPrivate(event.target.checked)}
+              />
+              Private repository
+            </label>
+
+            <button type="submit" className="primary" disabled={busy}>
+              Create Repo
+            </button>
+          </form>
+
+          <div className="log-box">
+            {repos.length === 0 ? (
+              <p className="muted">No repositories found.</p>
+            ) : (
+              <ul className="github-repo-list">
+                {repos.map((repo) => (
+                  <li key={repo.id}>
+                    <strong>{repo.fullName}</strong> {repo.private ? '🔒' : '🌐'}{' '}
+                    <a href={repo.htmlUrl} target="_blank" rel="noreferrer">
+                      View
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+
         <div>
           <h3>Projects</h3>
           <ul className="project-list">

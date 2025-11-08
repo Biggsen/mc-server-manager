@@ -12,6 +12,8 @@
     "build": "npm run build --workspace frontend && npm run build --workspace backend"
   },
   "dependencies": {
+    "@octokit/plugin-throttling": "^11.0.3",
+    "@octokit/rest": "^22.0.1",
     "yaml": "^2.8.1"
   }
 }

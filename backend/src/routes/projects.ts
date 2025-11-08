@@ -14,6 +14,7 @@ import type { ProjectSummary } from "../types/projects";
 import type { ManifestMetadata } from "../types/storage";
 import { renderManifest, type ManifestOverrides } from "../services/manifestService";
 import { enqueueBuild } from "../services/buildQueue";
+import { getOctokitForRequest } from "../services/githubClient";
 import { scanProjectAssets } from "../services/projectScanner";
 
 const router = Router();

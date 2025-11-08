@@ -185,6 +185,40 @@ export async function scanProjectAssets(projectId: string): Promise<{
   return data.project
 }
 
+export interface GitHubRepo {
+  id: number
+  name: string
+  fullName: string
+  private: boolean
+  htmlUrl: string
+}
+
+export interface GitHubOwnerInfo {
+  owner: {
+    login: string
+    avatarUrl: string
+    htmlUrl: string
+  }
+  orgs: Array<{
+    login: string
+    avatarUrl: string
+    htmlUrl: string
+  }>
+  repos: GitHubRepo[]
+}
+
+export async function fetchGitHubRepos(): Promise<GitHubOwnerInfo> {
+  return request<GitHubOwnerInfo>('/github/repos')
+}
+
+export async function createGitHubRepo(org: string, payload: { name: string; description?: string; private?: boolean }): Promise<GitHubRepo> {
+  const data = await request<{ id: number; name: string; fullName: string; htmlUrl: string }>('/github/orgs/' + org + '/repos', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+  return { id: data.id, name: data.name, fullName: data.fullName, private: payload.private ?? false, htmlUrl: data.htmlUrl }
+}
+
 export interface AuthStatus {
   provider: string
   configured: boolean
