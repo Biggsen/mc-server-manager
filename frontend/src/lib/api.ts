@@ -171,3 +171,17 @@ export async function updateProjectAssets(projectId: string, payload: {
   emitProjectsUpdated()
 }
 
+export async function scanProjectAssets(projectId: string): Promise<{
+  plugins: NonNullable<ProjectSummary['plugins']>
+  configs: NonNullable<ProjectSummary['configs']>
+}> {
+  const data = await request<{ project: { plugins: NonNullable<ProjectSummary['plugins']>; configs: NonNullable<ProjectSummary['configs']> } }>(
+    `/projects/${projectId}/scan`,
+    {
+      method: 'POST',
+    },
+  )
+  emitProjectsUpdated()
+  return data.project
+}
+

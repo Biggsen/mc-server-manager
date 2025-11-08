@@ -14,6 +14,7 @@ import type { ProjectSummary } from "../types/projects";
 import type { ManifestMetadata } from "../types/storage";
 import { renderManifest, type ManifestOverrides } from "../services/manifestService";
 import { enqueueBuild } from "../services/buildQueue";
+import { scanProjectAssets } from "../services/projectScanner";
 
 const router = Router();
 
@@ -146,6 +147,31 @@ router.post("/:id/assets", async (req: Request, res: Response) => {
   }
 });
 
+router.post("/:id/scan", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const project = await findProject(id);
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+
+    const assets = await scanProjectAssets(project);
+    const updated = await setProjectAssets(id, assets);
+
+    res.status(200).json({
+      project: {
+        id,
+        plugins: updated?.plugins ?? [],
+        configs: updated?.configs ?? [],
+      },
+    });
+  } catch (error) {
+    console.error("Failed to scan project assets", error);
+    res.status(500).json({ error: "Failed to scan project assets" });
+  }
+});
+
 router.post("/:id/manifest", async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
@@ -189,7 +215,7 @@ router.post("/:id/manifest", async (req: Request, res: Response) => {
 router.post("/:id/build", async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const project = await findProject(id);
+    let project = await findProject(id);
 
     if (!project) {
       res.status(404).json({ error: "Project not found" });
@@ -203,6 +229,11 @@ router.post("/:id/build", async (req: Request, res: Response) => {
       configs: Array.isArray(req.body?.configs) ? req.body.configs : undefined,
       artifact: req.body?.artifact,
     };
+
+    if (!project.plugins?.length || !project.configs?.length) {
+      const scanned = await scanProjectAssets(project);
+      project = (await setProjectAssets(project.id, scanned)) ?? project;
+    }
 
     const job = await enqueueBuild(project, overrides);
     res.status(202).json({ build: job });

@@ -7,7 +7,7 @@ import {
   triggerBuild,
   fetchBuilds,
   fetchBuild,
-  updateProjectAssets,
+  scanProjectAssets,
   type ProjectSummary,
   type BuildJob,
 } from '../lib/api'
@@ -130,19 +130,12 @@ function TestTools() {
   const handleSeedAssets = async (project: ProjectSummary) => {
     try {
       setBusy(true)
-      await updateProjectAssets(project.id, {
-        plugins: [
-          { id: 'worldguard', version: '7.0.10', sha256: '<pending>' },
-          { id: 'placeholderapi', version: '2.11.6', sha256: '<pending>' },
-        ],
-        configs: [
-          { path: 'server.properties', sha256: '<pending>' },
-          { path: 'config/paper-global.yml', sha256: '<pending>' },
-        ],
-      })
-      appendLog(`Seeded assets for ${project.name}`)
+      const assets = await scanProjectAssets(project.id)
+      appendLog(
+        `Scanned assets for ${project.name} (${assets.plugins.length} plugins, ${assets.configs.length} configs)`,
+      )
     } catch (err) {
-      appendLog(`Seeding assets failed: ${(err as Error).message}`)
+      appendLog(`Asset scan failed: ${(err as Error).message}`)
     } finally {
       setBusy(false)
     }
@@ -201,7 +194,7 @@ function TestTools() {
                     disabled={busy}
                     onClick={() => handleSeedAssets(project)}
                   >
-                    Seed Assets
+                    Scan Assets
                   </button>
                   <button
                     type="button"
