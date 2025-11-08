@@ -13,7 +13,6 @@ import {
   type ProjectSummary,
   type BuildJob,
   type GitHubRepo,
-  type GitHubOwnerInfo,
 } from '../lib/api'
 import { subscribeProjectsUpdated } from '../lib/events'
 
@@ -24,7 +23,7 @@ function TestTools() {
   const [error, setError] = useState<string | null>(null)
   const [builds, setBuilds] = useState<BuildJob[]>([])
   const [repos, setRepos] = useState<GitHubRepo[]>([])
-  const [owners, setOwners] = useState<GitHubOwnerInfo['orgs'] & GitHubOwnerInfo['orgs']>([])
+  const [owners, setOwners] = useState<Array<{ login: string; avatarUrl: string; htmlUrl: string }>>([])
   const [selectedOrg, setSelectedOrg] = useState<string>('')
   const [newRepoName, setNewRepoName] = useState('')
   const [newRepoPrivate, setNewRepoPrivate] = useState(true)
@@ -85,16 +84,19 @@ function TestTools() {
       .then((data) => {
         setRepos(data.repos)
         const uniqueOwners = [
-          { login: data.owner.login, avatarUrl: data.owner.avatarUrl, htmlUrl: data.owner.htmlUrl },
+          { login: 'self', avatarUrl: data.owner.avatarUrl, htmlUrl: data.owner.htmlUrl },
           ...data.orgs,
         ]
         setOwners(uniqueOwners)
-        if (uniqueOwners.length > 0 && (!selectedOrg || !uniqueOwners.some((org) => org.login === selectedOrg))) {
-          setSelectedOrg(uniqueOwners[0].login)
-        }
+        setSelectedOrg((prev) => {
+          if (prev && uniqueOwners.some((org) => org.login === prev)) {
+            return prev
+          }
+          return uniqueOwners[0]?.login ?? ''
+        })
       })
       .catch((err: Error) => appendLog(`Load GitHub repos failed: ${err.message}`))
-  }, [selectedOrg])
+  }, [])
 
   const appendLog = (message: string) => {
     setLogs((prev) => [

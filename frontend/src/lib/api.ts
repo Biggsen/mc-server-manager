@@ -10,6 +10,7 @@ async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
   const { parseJson = true, headers, ...rest } = options
   const response = await fetch(`${API_BASE}${path}`, {
     ...rest,
+    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
       ...(headers ?? {}),

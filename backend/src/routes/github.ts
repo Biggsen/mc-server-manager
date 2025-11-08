@@ -51,7 +51,7 @@ router.get("/repos", async (req: Request, res: Response) => {
       orgs: orgMemberships.map((org) => ({
         login: org.login,
         avatarUrl: org.avatar_url,
-        htmlUrl: org.html_url,
+        htmlUrl: org.url,
       })),
       repos: repos.map((repo) => ({
         id: repo.id,
@@ -80,13 +80,20 @@ router.post("/orgs/:org/repos", async (req: Request, res: Response) => {
       return;
     }
 
-    const { data } = await octokit.repos.createInOrg({
-      org,
+    const payload = {
       name,
       description,
       private: Boolean(isPrivate),
       auto_init: true,
-    });
+    };
+
+    const { data } =
+      org === "self"
+        ? await octokit.repos.createForAuthenticatedUser(payload)
+        : await octokit.repos.createInOrg({
+            org,
+            ...payload,
+          });
 
     res.status(201).json({
       id: data.id,
