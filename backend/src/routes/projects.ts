@@ -1,8 +1,6 @@
 import type { Request, Response } from "express";
 import { Router } from "express";
-import { existsSync } from "fs";
-import { readFile, writeFile } from "fs/promises";
-import { join } from "path";
+import { writeFile } from "fs/promises";
 import {
   createProject,
   findProject,
@@ -18,11 +16,12 @@ import { renderManifest, type ManifestOverrides } from "../services/manifestServ
 import { enqueueBuild } from "../services/buildQueue";
 import { scanProjectAssets } from "../services/projectScanner";
 import { commitFiles, getOctokitForRequest } from "../services/githubClient";
+import {
+  collectProjectDefinitionFiles,
+  renderConfigFiles,
+} from "../services/projectFiles";
 
 const router = Router();
-
-const PROJECTS_ROOT = join(process.cwd(), "data", "projects");
-const TEMPLATE_ROOT = join(process.cwd(), "..", "templates", "server");
 
 interface RepoParseSuccess {
   success: true;
@@ -74,70 +73,6 @@ function toSummary(project: StoredProject): ProjectSummary {
   };
 }
 
-function resolveProjectRoot(project: StoredProject): string {
-  const candidate = join(PROJECTS_ROOT, project.id);
-  if (existsSync(candidate)) {
-    return candidate;
-  }
-  return TEMPLATE_ROOT;
-}
-
-async function readProjectFile(project: StoredProject, relativePath: string): Promise<string | undefined> {
-  const root = resolveProjectRoot(project);
-  const candidates = [join(root, relativePath)];
-  if (root !== TEMPLATE_ROOT) {
-    candidates.push(join(TEMPLATE_ROOT, relativePath));
-  }
-
-  for (const candidate of candidates) {
-    try {
-      return await readFile(candidate, "utf-8");
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code !== "ENOENT") {
-        console.warn(`Failed to read project file ${candidate}`, error);
-      }
-    }
-  }
-  return undefined;
-}
-
-async function collectBootstrapFiles(project: StoredProject): Promise<Record<string, string>> {
-  const files: Record<string, string> = {};
-
-  if (project.profilePath) {
-    const profileContent = await readProjectFile(project, project.profilePath);
-    if (profileContent) {
-      files[project.profilePath] = profileContent;
-    }
-  }
-
-  const supplementalPaths = [
-    "plugins/registry.yml",
-    "overlays/dev.yml",
-    "overlays/live.yml",
-    "configs/server.properties.hbs",
-    "configs/paper-global.yml.hbs",
-  ];
-  for (const path of supplementalPaths) {
-    const content = await readProjectFile(project, path);
-    if (content) {
-      files[path] = content;
-    }
-  }
-
-  if (project.configs) {
-    for (const config of project.configs) {
-      const content = await readProjectFile(project, config.path);
-      if (content) {
-        files[config.path] = content;
-      }
-    }
-  }
-
-  return files;
-}
-
 async function ensureProjectAssetsCached(project: StoredProject): Promise<StoredProject> {
   if (project.plugins?.length && project.configs?.length) {
     return project;
@@ -177,9 +112,14 @@ async function bootstrapProjectRepository(
       [`manifests/${buildId}.json`]: manifestInitial,
     };
 
-    const bootstrapFiles = await collectBootstrapFiles(current);
-    for (const [path, content] of Object.entries(bootstrapFiles)) {
+    const definitionFiles = await collectProjectDefinitionFiles(current);
+    for (const [path, content] of Object.entries(definitionFiles)) {
       filesToCommit[path] = content;
+    }
+
+    const renderedConfigs = await renderConfigFiles(current);
+    for (const config of renderedConfigs) {
+      filesToCommit[config.path] = config.content;
     }
 
     const { commitSha } = await commitFiles(octokit, {
@@ -456,11 +396,30 @@ router.post("/:id/build", async (req: Request, res: Response) => {
       project = (await setProjectAssets(project.id, scanned)) ?? project;
     }
 
-    const job = await enqueueBuild(project, overrides);
+    const job = await enqueueBuild(project, overrides, {
+      githubToken: req.session.github?.accessToken,
+    });
     res.status(202).json({ build: job });
   } catch (error) {
     console.error("Failed to queue build", error);
     res.status(500).json({ error: "Failed to queue build" });
+  }
+});
+
+router.post("/:id/run", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const project = await findProject(id);
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+
+    console.info(`[run-local] (stub) project=${project.id}`);
+    res.status(202).json({ status: "queued" });
+  } catch (error) {
+    console.error("Failed to trigger local run", error);
+    res.status(500).json({ error: "Failed to trigger local run" });
   }
 });
 

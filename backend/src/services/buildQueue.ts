@@ -1,13 +1,47 @@
+import { createHash } from "crypto";
 import { mkdir, readFile, writeFile } from "fs/promises";
-import { join } from "path";
+import { dirname, join } from "path";
 import { v4 as uuid } from "uuid";
-import { getManifestFilePath, recordManifestMetadata } from "../storage/projectsStore";
-import type { StoredProject } from "../types/storage";
+import { ZipFile } from "yazl";
+import {
+  getManifestFilePath,
+  recordManifestMetadata,
+  setProjectAssets,
+} from "../storage/projectsStore";
+import type { RepoMetadata, StoredProject } from "../types/storage";
 import type { BuildJob } from "../types/build";
 import { renderManifest, type ManifestOverrides } from "./manifestService";
+import {
+  collectProjectDefinitionFiles,
+  readProjectFile,
+  renderConfigFiles,
+  resolveProjectRoot,
+} from "./projectFiles";
+import { scanProjectAssets } from "./projectScanner";
+import { commitFiles, getOctokitWithToken } from "./githubClient";
 
 const DATA_DIR = join(process.cwd(), "data", "builds");
 const LOG_PATH = join(DATA_DIR, "builds.json");
+const DIST_DIR = join(DATA_DIR, "dist");
+
+interface PluginMaterialization {
+  id: string;
+  version: string;
+  sha256: string;
+  relativePath: string;
+  buffer: Buffer;
+}
+
+interface ConfigMaterialization {
+  path: string;
+  content: string;
+  sha256: string;
+}
+
+interface EnqueueOptions {
+  overrides?: ManifestOverrides;
+  githubToken?: string;
+}
 
 const jobs = new Map<string, BuildJob>();
 
@@ -26,6 +60,7 @@ export function getBuild(jobId: string): BuildJob | undefined {
 export async function enqueueBuild(
   project: StoredProject,
   overrides: ManifestOverrides = {},
+  options: EnqueueOptions = {},
 ): Promise<BuildJob> {
   const jobId = uuid();
   const createdAt = new Date().toISOString();
@@ -37,7 +72,7 @@ export async function enqueueBuild(
   };
 
   jobs.set(jobId, job);
-  void runBuild(jobId, project, overrides);
+  void runBuild(jobId, project, overrides, options);
   await persistBuilds();
   return job;
 }
@@ -46,6 +81,7 @@ async function runBuild(
   jobId: string,
   project: StoredProject,
   overrides: ManifestOverrides,
+  options: EnqueueOptions,
 ): Promise<void> {
   const job = jobs.get(jobId);
   if (!job) return;
@@ -55,23 +91,92 @@ async function runBuild(
   jobs.set(jobId, job);
 
   try {
-    // Simulate manifest + packaging steps
     const buildId = new Date().toISOString().replace(/[:.]/g, "-");
-    const manifestContent = await renderManifest(project, buildId, overrides);
-    const manifestPath = getManifestFilePath(project.id, buildId);
+    const projectWithAssets = await ensureProjectAssets(project);
 
+    const definitionFiles = await collectProjectDefinitionFiles(projectWithAssets);
+    const plugins = await materializePlugins(projectWithAssets);
+    const configs = await materializeConfigs(projectWithAssets);
+
+    const updatedProject =
+      (await setProjectAssets(project.id, {
+        plugins: plugins.map(({ id, version, sha256 }) => ({ id, version, sha256 })),
+        configs: configs.map(({ path, sha256 }) => ({ path, sha256 })),
+      })) ?? {
+        ...projectWithAssets,
+        plugins: plugins.map(({ id, version, sha256 }) => ({ id, version, sha256 })),
+        configs: configs.map(({ path, sha256 }) => ({ path, sha256 })),
+      };
+
+    const artifactRelativePath = `dist/${project.id}-${buildId}.zip`;
+    const artifactPath = join(DATA_DIR, project.id, `${buildId}.zip`);
+    const distPath = join(DIST_DIR, `${project.id}-${buildId}.zip`);
+
+    const zipEntries = new Map<string, Buffer>();
+    for (const [path, content] of Object.entries(definitionFiles)) {
+      zipEntries.set(path, Buffer.from(content, "utf-8"));
+    }
+    for (const config of configs) {
+      zipEntries.set(config.path, Buffer.from(config.content, "utf-8"));
+    }
+    for (const plugin of plugins) {
+      zipEntries.set(plugin.relativePath, plugin.buffer);
+    }
+
+    const zipBuffer = await createArtifactZip(
+      Array.from(zipEntries.entries()).map(([path, buffer]) => ({ path, buffer })),
+    );
+
+    await mkdir(dirname(artifactPath), { recursive: true });
+    await mkdir(DIST_DIR, { recursive: true });
+    await writeFile(artifactPath, zipBuffer);
+    await writeFile(distPath, zipBuffer);
+
+    const artifactSha = hashBuffer(zipBuffer);
+    const artifactSize = zipBuffer.length;
+
+    const manifestOverrides: ManifestOverrides = {
+      ...overrides,
+      plugins: plugins.map(({ id, version, sha256 }) => ({ id, version, sha256 })),
+      configs: configs.map(({ path, sha256 }) => ({ path, sha256 })),
+      artifact: {
+        zipPath: artifactRelativePath,
+        sha256: artifactSha,
+        size: artifactSize,
+      },
+    };
+
+    const manifestPath = getManifestFilePath(project.id, buildId);
+    const manifestContent = await renderManifest(updatedProject, buildId, manifestOverrides);
     await writeFile(manifestPath, manifestContent, "utf-8");
 
-    await recordManifestMetadata(project.id, {
+    const metadata = {
       lastBuildId: buildId,
       manifestPath,
       generatedAt: new Date().toISOString(),
-    });
+      commitSha: undefined as string | undefined,
+    };
+
+    if (options.githubToken && updatedProject.repo) {
+      await pushBuildToRepository({
+        project: updatedProject,
+        buildId,
+        manifestContent,
+        artifactRelativePath,
+        zipBuffer,
+        metadata,
+        overrides: manifestOverrides,
+      }, options.githubToken);
+    }
+
+    await recordManifestMetadata(project.id, metadata);
 
     job.status = "succeeded";
     job.finishedAt = new Date().toISOString();
     job.manifestBuildId = buildId;
     job.manifestPath = manifestPath;
+    job.artifactPath = distPath;
+    job.artifactSha = artifactSha;
     jobs.set(jobId, job);
     await persistBuilds();
   } catch (error) {
@@ -108,4 +213,174 @@ async function persistBuilds(): Promise<void> {
   );
   await writeFile(LOG_PATH, JSON.stringify({ builds: snapshot }, null, 2), "utf-8");
 }
+
+async function ensureProjectAssets(project: StoredProject): Promise<StoredProject> {
+  if (project.plugins?.length && project.configs?.length) {
+    return project;
+  }
+
+  const scanned = await scanProjectAssets(project);
+  return (
+    (await setProjectAssets(project.id, {
+      plugins: scanned.plugins,
+      configs: scanned.configs,
+    })) ?? project
+  );
+}
+
+function hashBuffer(buffer: Buffer): string {
+  return createHash("sha256").update(buffer).digest("hex");
+}
+
+async function materializePlugins(project: StoredProject): Promise<PluginMaterialization[]> {
+  const results: PluginMaterialization[] = [];
+  const root = join(resolveProjectRoot(project), "plugins");
+
+  for (const plugin of project.plugins ?? []) {
+    const filename = `${plugin.id}-${plugin.version}.jar`;
+    const relativePath = `plugins/${filename}`;
+    const candidates = [
+      join(root, `${plugin.id}-${plugin.version}.jar`),
+      join(root, `${plugin.id}.jar`),
+    ];
+
+    let buffer: Buffer | undefined;
+    for (const candidate of candidates) {
+      try {
+        buffer = await readFile(candidate);
+        break;
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== "ENOENT") {
+          console.warn(`Failed to read plugin jar ${candidate}`, error);
+        }
+      }
+    }
+
+    if (!buffer) {
+      buffer = Buffer.from(
+        JSON.stringify(
+          {
+            placeholder: true,
+            plugin: plugin.id,
+            version: plugin.version,
+            generatedAt: new Date().toISOString(),
+          },
+          null,
+          2,
+        ),
+        "utf-8",
+      );
+    }
+
+    results.push({
+      id: plugin.id,
+      version: plugin.version,
+      sha256: hashBuffer(buffer),
+      relativePath,
+      buffer,
+    });
+  }
+
+  return results;
+}
+
+async function materializeConfigs(project: StoredProject): Promise<ConfigMaterialization[]> {
+  const rendered = await renderConfigFiles(project);
+  const renderedMap = new Map(rendered.map((item) => [item.path, item.content]));
+
+  const uniquePaths = new Set<string>([
+    ...(project.configs?.map((config) => config.path) ?? []),
+    ...rendered.map((item) => item.path),
+  ]);
+
+  const results: ConfigMaterialization[] = [];
+  for (const path of uniquePaths) {
+    let content = renderedMap.get(path);
+    if (!content) {
+      content = await readProjectFile(project, path);
+    }
+    if (!content) continue;
+
+    const sha256 = hashBuffer(Buffer.from(content, "utf-8"));
+    results.push({
+      path,
+      content,
+      sha256,
+    });
+  }
+
+  return results;
+}
+
+async function createArtifactZip(
+  entries: Array<{ path: string; buffer: Buffer }>,
+): Promise<Buffer> {
+  return new Promise<Buffer>((resolve, reject) => {
+    const zipfile = new ZipFile();
+    const chunks: Buffer[] = [];
+
+    zipfile.outputStream.on("data", (chunk: Buffer) => chunks.push(chunk));
+    zipfile.outputStream.on("error", reject);
+    zipfile.outputStream.on("end", () => resolve(Buffer.concat(chunks)));
+
+    for (const entry of entries) {
+      zipfile.addBuffer(entry.buffer, entry.path, {
+        mtime: new Date(0),
+        mode: 0o100644,
+      });
+    }
+
+    zipfile.end();
+  });
+}
+
+async function pushBuildToRepository(
+  params: {
+    project: StoredProject;
+    buildId: string;
+    manifestContent: string;
+    artifactRelativePath: string;
+    zipBuffer: Buffer;
+    metadata: { commitSha?: string };
+    overrides: ManifestOverrides;
+  },
+  githubToken: string,
+): Promise<void> {
+  const repo = params.project.repo as RepoMetadata | undefined;
+  if (!repo) {
+    return;
+  }
+
+  const octokit = getOctokitWithToken(githubToken);
+  const branch = repo.defaultBranch ?? params.project.defaultBranch ?? "main";
+
+  const files = {
+    [`manifests/${params.buildId}.json`]: params.manifestContent,
+    [params.artifactRelativePath]: {
+      content: params.zipBuffer.toString("base64"),
+      encoding: "base64" as const,
+    },
+  };
+
+  const { commitSha } = await commitFiles(octokit, {
+    owner: repo.owner,
+    repo: repo.name,
+    branch,
+    message: `build: ${params.project.id} (${params.buildId})`,
+    files,
+  });
+
+  params.metadata.commitSha = commitSha;
+
+  const manifestPath = getManifestFilePath(params.project.id, params.buildId);
+  const manifestWithCommit = await renderManifest(params.project, params.buildId, {
+    ...params.overrides,
+    repository: {
+      commit: commitSha,
+    },
+  });
+  await writeFile(manifestPath, manifestWithCommit, "utf-8");
+}
+
 

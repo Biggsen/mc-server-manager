@@ -2,7 +2,7 @@ import { Octokit } from "@octokit/rest";
 import { throttling } from "@octokit/plugin-throttling";
 import type { Request } from "express";
 
-const ThrottledOctokit = Octokit.plugin(throttling);
+const ThrottledOctokit = Octokit.plugin(throttling as never);
 
 export function getOctokitForRequest(req: Request): Octokit {
   const accessToken = req.session.github?.accessToken;
@@ -10,11 +10,19 @@ export function getOctokitForRequest(req: Request): Octokit {
     throw new Error("GitHub session not available");
   }
 
+  return createOctokit(accessToken);
+}
+
+export function getOctokitWithToken(token: string): Octokit {
+  return createOctokit(token);
+}
+
+function createOctokit(token: string): Octokit {
   return new ThrottledOctokit({
-    auth: accessToken,
+    auth: token,
     userAgent: "mc-server-manager/0.1",
     throttle: {
-      onRateLimit: (retryAfter, options, octokit) => {
+      onRateLimit: (retryAfter: number, options: any, octokit: any) => {
         console.warn(`Request quota exhausted for request ${options.method} ${options.url}`);
         if (options.request.retryCount === 0) {
           console.log(`Retrying after ${retryAfter} seconds`);
@@ -22,7 +30,7 @@ export function getOctokitForRequest(req: Request): Octokit {
         }
         return false;
       },
-      onSecondaryRateLimit: (retryAfter, options, octokit) => {
+      onSecondaryRateLimit: (retryAfter: number, options: any, octokit: any) => {
         console.warn(`Secondary rate limit hit for request ${options.method} ${options.url}`);
         return false;
       },
@@ -30,12 +38,17 @@ export function getOctokitForRequest(req: Request): Octokit {
   });
 }
 
+export interface CommitFileContent {
+  content: string;
+  encoding?: "utf-8" | "base64";
+}
+
 export interface CommitFilesOptions {
   owner: string;
   repo: string;
   branch?: string;
   message: string;
-  files: Record<string, string>;
+  files: Record<string, CommitFileContent | string>;
 }
 
 export async function commitFiles(
@@ -53,12 +66,17 @@ export async function commitFiles(
   const baseCommitSha = refData.object.sha;
 
   const treeItems = await Promise.all(
-    Object.entries(options.files).map(async ([path, content]) => {
+    Object.entries(options.files).map(async ([path, value]) => {
+      const payload: CommitFileContent =
+        typeof value === "string"
+          ? { content: value, encoding: "utf-8" }
+          : { content: value.content, encoding: value.encoding ?? "utf-8" };
+
       const blob = await octokit.git.createBlob({
         owner: options.owner,
         repo: options.repo,
-        content,
-        encoding: "utf-8",
+        content: payload.content,
+        encoding: payload.encoding,
       });
       return {
         path,

@@ -201,6 +201,14 @@ export async function scanProjectAssets(projectId: string): Promise<{
   return data.project
 }
 
+export async function runProjectLocally(
+  projectId: string,
+): Promise<{ status: string }> {
+  return request<{ status: string }>(`/projects/${projectId}/run`, {
+    method: 'POST',
+  })
+}
+
 export interface GitHubRepo {
   id: number
   name: string

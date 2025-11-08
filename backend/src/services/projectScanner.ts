@@ -4,10 +4,7 @@ import { readdir, readFile } from "fs/promises";
 import { join } from "path";
 import { parse } from "yaml";
 import type { StoredProject } from "../types/storage";
-
-const DATA_DIR = join(process.cwd(), "data");
-const PROJECTS_DIR = join(DATA_DIR, "projects");
-const TEMPLATE_ROOT = join(process.cwd(), "..", "templates", "server");
+import { resolveProjectRoot } from "./projectFiles";
 
 interface ProfileFileEntry {
   template?: string;
@@ -32,14 +29,6 @@ async function readYamlDocument(path: string): Promise<ProfileDocument | null> {
     }
     return null;
   }
-}
-
-function resolveProjectRoot(project: StoredProject): string {
-  const candidate = join(PROJECTS_DIR, project.id);
-  if (existsSync(candidate)) {
-    return candidate;
-  }
-  return TEMPLATE_ROOT;
 }
 
 function computeHashFromString(value: string): string {

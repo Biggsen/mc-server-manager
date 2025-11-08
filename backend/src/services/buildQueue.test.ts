@@ -20,6 +20,22 @@ describe("buildQueue persistence", () => {
     vi.doMock("./manifestService", () => ({
       renderManifest: vi.fn(async () => '{"ok":true}'),
     }));
+    vi.doMock("./projectFiles", () => ({
+      collectProjectDefinitionFiles: vi.fn(async () => ({
+        "profiles/base.yml": "name: Test",
+      })),
+      renderConfigFiles: vi.fn(async () => [
+        { path: "server.properties", content: "motd=hello" },
+      ]),
+      readProjectFile: vi.fn(async () => "motd=hello"),
+      resolveProjectRoot: vi.fn(() => workspace),
+    }));
+    vi.doMock("./projectScanner", () => ({
+      scanProjectAssets: vi.fn(async () => ({
+        plugins: [],
+        configs: [],
+      })),
+    }));
   });
 
   afterEach(async () => {
@@ -62,6 +78,22 @@ describe("buildQueue persistence", () => {
     vi.spyOn(process, "cwd").mockReturnValue(workspace);
     vi.doMock("./manifestService", () => ({
       renderManifest: vi.fn(async () => '{"ok":true}'),
+    }));
+    vi.doMock("./projectFiles", () => ({
+      collectProjectDefinitionFiles: vi.fn(async () => ({
+        "profiles/base.yml": "name: Test",
+      })),
+      renderConfigFiles: vi.fn(async () => [
+        { path: "server.properties", content: "motd=hello" },
+      ]),
+      readProjectFile: vi.fn(async () => "motd=hello"),
+      resolveProjectRoot: vi.fn(() => workspace),
+    }));
+    vi.doMock("./projectScanner", () => ({
+      scanProjectAssets: vi.fn(async () => ({
+        plugins: [],
+        configs: [],
+      })),
     }));
     const reloaded = await import("./buildQueue");
     await delay(50);

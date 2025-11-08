@@ -9,6 +9,8 @@ export interface BuildJob {
   finishedAt?: string;
   manifestBuildId?: string;
   manifestPath?: string;
+  artifactPath?: string;
+  artifactSha?: string;
   error?: string;
 }
 
