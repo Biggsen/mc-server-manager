@@ -7,6 +7,30 @@ export interface PluginSearchResult {
   projectUrl?: string
 }
 
+export interface StoredPluginRecord {
+  id: string
+  version: string
+  provider?: 'hangar' | 'modrinth' | 'spiget' | 'github' | 'custom'
+  sha256?: string
+  minecraftVersionMin?: string
+  minecraftVersionMax?: string
+  source?: {
+    provider: 'hangar' | 'modrinth' | 'spiget' | 'github' | 'custom'
+    slug: string
+    projectUrl?: string
+    versionId?: string
+    downloadUrl?: string
+    loader?: string
+    minecraftVersion?: string
+    minecraftVersionMin?: string
+    minecraftVersionMax?: string
+    uploadPath?: string
+    sha256?: string
+  }
+  createdAt: string
+  updatedAt: string
+}
+
 export async function searchPlugins(
   query: string,
   loader: string,
@@ -317,8 +341,8 @@ export async function addProjectPlugin(
     version: string
     provider?: string
     downloadUrl?: string
-    minecraftVersionMin: string
-    minecraftVersionMax: string
+    minecraftVersionMin?: string
+    minecraftVersionMax?: string
     source?: Record<string, unknown>
   },
 ): Promise<ProjectSummary['plugins']> {
@@ -339,16 +363,20 @@ export async function uploadProjectPlugin(
     pluginId: string
     version: string
     file: File
-    minecraftVersionMin: string
-    minecraftVersionMax: string
+    minecraftVersionMin?: string
+    minecraftVersionMax?: string
   },
 ): Promise<ProjectSummary['plugins']> {
   const formData = new FormData()
   formData.append('pluginId', payload.pluginId)
   formData.append('version', payload.version)
   formData.append('file', payload.file)
-  formData.append('minecraftVersionMin', payload.minecraftVersionMin)
-  formData.append('minecraftVersionMax', payload.minecraftVersionMax)
+  if (payload.minecraftVersionMin) {
+    formData.append('minecraftVersionMin', payload.minecraftVersionMin)
+  }
+  if (payload.minecraftVersionMax) {
+    formData.append('minecraftVersionMax', payload.minecraftVersionMax)
+  }
 
   const response = await fetch(
     `${API_BASE}/projects/${projectId}/plugins/upload`,
@@ -369,6 +397,11 @@ export async function uploadProjectPlugin(
   }
   emitProjectsUpdated()
   return data.project.plugins
+}
+
+export async function fetchPluginLibrary(): Promise<StoredPluginRecord[]> {
+  const data = await request<{ plugins: StoredPluginRecord[] }>('/plugins/library')
+  return data.plugins
 }
 
 export type DeploymentType = 'folder' | 'sftp'

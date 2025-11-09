@@ -26,6 +26,7 @@ import {
   writeProjectFileBuffer,
 } from "../services/projectFiles";
 import { enqueueRun, listRuns } from "../services/runQueue";
+import { upsertStoredPlugin } from "../storage/pluginsStore";
 
 const router = Router();
 const pluginUpload = multer({
@@ -383,21 +384,26 @@ router.post("/:id/plugins", async (req: Request, res: Response) => {
       providerValue = normalized as PluginProvider;
     }
 
-    const normalizedMin =
-      typeof minecraftVersionMin === "string" && minecraftVersionMin.trim().length > 0
-        ? minecraftVersionMin.trim()
-        : undefined;
-    const normalizedMax =
-      typeof minecraftVersionMax === "string" && minecraftVersionMax.trim().length > 0
-        ? minecraftVersionMax.trim()
-        : undefined;
+    const coerceVersion = (value: unknown): string | undefined =>
+      typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+
+    const normalizedMin = coerceVersion(minecraftVersionMin);
+    const normalizedMax = coerceVersion(minecraftVersionMax);
+    const sourceMin =
+      coerceVersion(source?.minecraftVersionMin) ?? coerceVersion(source?.minecraftVersion);
+    const sourceMax =
+      coerceVersion(source?.minecraftVersionMax) ?? coerceVersion(source?.minecraftVersion);
+    const fallbackVersion = coerceVersion(project.minecraftVersion);
+
+    const finalMin = normalizedMin ?? sourceMin ?? fallbackVersion;
+    const finalMax = normalizedMax ?? sourceMax ?? fallbackVersion;
 
     const resolvedProvider: PluginProvider | undefined =
       providerValue ?? (downloadUrl ? "custom" : undefined);
 
-    if (resolvedProvider === "custom" && (!normalizedMin || !normalizedMax)) {
+    if (!finalMin || !finalMax) {
       res.status(400).json({
-        error: "minecraftVersionMin and minecraftVersionMax are required for custom plugins",
+        error: "Unable to determine compatible Minecraft version range for this plugin",
       });
       return;
     }
@@ -413,8 +419,8 @@ router.post("/:id/plugins", async (req: Request, res: Response) => {
             downloadUrl: downloadUrl ?? source?.downloadUrl,
             loader: source?.loader,
             minecraftVersion: source?.minecraftVersion,
-            minecraftVersionMin: normalizedMin ?? source?.minecraftVersionMin,
-            minecraftVersionMax: normalizedMax ?? source?.minecraftVersionMax,
+            minecraftVersionMin: finalMin,
+            minecraftVersionMax: finalMax,
             sha256: hash ?? source?.sha256,
           }
         : source
@@ -427,8 +433,8 @@ router.post("/:id/plugins", async (req: Request, res: Response) => {
             downloadUrl: source.downloadUrl,
             loader: source.loader,
             minecraftVersion: source.minecraftVersion,
-            minecraftVersionMin: source.minecraftVersionMin,
-            minecraftVersionMax: source.minecraftVersionMax,
+            minecraftVersionMin: source.minecraftVersionMin ?? finalMin,
+            minecraftVersionMax: source.minecraftVersionMax ?? finalMax,
             sha256: source.sha256,
           }
         : undefined;
@@ -437,8 +443,18 @@ router.post("/:id/plugins", async (req: Request, res: Response) => {
       id: pluginId,
       version,
       provider: sourceRef?.provider ?? resolvedProvider ?? providerValue,
-      minecraftVersionMin: sourceRef?.minecraftVersionMin,
-      minecraftVersionMax: sourceRef?.minecraftVersionMax,
+      minecraftVersionMin: sourceRef?.minecraftVersionMin ?? finalMin,
+      minecraftVersionMax: sourceRef?.minecraftVersionMax ?? finalMax,
+      source: sourceRef,
+    });
+
+    await upsertStoredPlugin({
+      id: pluginId,
+      version,
+      provider: sourceRef?.provider ?? resolvedProvider ?? providerValue,
+      sha256: hash ?? sourceRef?.sha256,
+      minecraftVersionMin: sourceRef?.minecraftVersionMin ?? finalMin,
+      minecraftVersionMax: sourceRef?.minecraftVersionMax ?? finalMax,
       source: sourceRef,
     });
 
@@ -478,19 +494,15 @@ router.post(
         return;
       }
 
-      const normalizedMin =
-        typeof minecraftVersionMin === "string" && minecraftVersionMin.trim().length > 0
-          ? minecraftVersionMin.trim()
-          : undefined;
-      const normalizedMax =
-        typeof minecraftVersionMax === "string" && minecraftVersionMax.trim().length > 0
-          ? minecraftVersionMax.trim()
-          : undefined;
+      const coerceVersion = (value: unknown): string | undefined =>
+        typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+      const normalizedMin = coerceVersion(minecraftVersionMin) ?? coerceVersion(project.minecraftVersion);
+      const normalizedMax = coerceVersion(minecraftVersionMax) ?? coerceVersion(project.minecraftVersion);
 
       if (!normalizedMin || !normalizedMax) {
-        res
-          .status(400)
-          .json({ error: "minecraftVersionMin and minecraftVersionMax are required for uploads" });
+        res.status(400).json({
+          error: "Unable to determine compatible Minecraft version range for uploaded plugin",
+        });
         return;
       }
 
@@ -513,6 +525,23 @@ router.post(
         },
         minecraftVersionMin: normalizedMin,
         minecraftVersionMax: normalizedMax,
+      });
+
+      await upsertStoredPlugin({
+        id: pluginId,
+        version,
+        provider: "custom",
+        sha256,
+        minecraftVersionMin: normalizedMin,
+        minecraftVersionMax: normalizedMax,
+        source: {
+          provider: "custom",
+          slug: pluginId,
+          uploadPath: relativePath,
+          sha256,
+          minecraftVersionMin: normalizedMin,
+          minecraftVersionMax: normalizedMax,
+        },
       });
 
       res.status(201).json({

@@ -1,8 +1,19 @@
 import type { Request, Response } from "express";
 import { Router } from "express";
 import { fetchPluginVersions, searchPlugins } from "../services/pluginCatalog";
+import { listStoredPlugins } from "../storage/pluginsStore";
 
 const router = Router();
+
+router.get("/library", async (_req: Request, res: Response) => {
+  try {
+    const plugins = await listStoredPlugins();
+    res.json({ plugins });
+  } catch (error) {
+    console.error("Failed to load stored plugins", error);
+    res.status(500).json({ error: "Failed to load stored plugins" });
+  }
+});
 
 router.get("/search", async (req: Request, res: Response) => {
   try {

@@ -25,4 +25,16 @@ export interface ProjectPlugin {
   minecraftVersionMax?: string;
 }
 
+export interface StoredPluginRecord {
+  id: string;
+  version: string;
+  provider?: PluginProvider;
+  source?: PluginSourceReference;
+  sha256?: string;
+  minecraftVersionMin?: string;
+  minecraftVersionMax?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 

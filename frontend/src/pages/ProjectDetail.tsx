@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   fetchProject,
@@ -12,10 +12,12 @@ import {
   searchPlugins,
   addProjectPlugin,
   uploadProjectPlugin,
+  fetchPluginLibrary,
   type ProjectSummary,
   type BuildJob,
   type RunJob,
   type PluginSearchResult,
+  type StoredPluginRecord,
 } from '../lib/api'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? '/api'
@@ -72,6 +74,24 @@ function ProjectDetail() {
   const [manualBusy, setManualBusy] = useState(false)
   const [uploadBusy, setUploadBusy] = useState(false)
   const [pluginMessage, setPluginMessage] = useState<string | null>(null)
+  const [libraryPlugins, setLibraryPlugins] = useState<StoredPluginRecord[]>([])
+  const [libraryLoading, setLibraryLoading] = useState(false)
+  const [libraryError, setLibraryError] = useState<string | null>(null)
+  const [libraryQuery, setLibraryQuery] = useState('')
+  const [libraryBusy, setLibraryBusy] = useState<string | null>(null)
+
+  const loadLibrary = useCallback(async () => {
+    try {
+      setLibraryLoading(true)
+      const plugins = await fetchPluginLibrary()
+      setLibraryPlugins(plugins)
+      setLibraryError(null)
+    } catch (err) {
+      setLibraryError(err instanceof Error ? err.message : 'Failed to load saved plugins.')
+    } finally {
+      setLibraryLoading(false)
+    }
+  }, [])
 
   useEffect(() => {
     if (!id) return
@@ -112,6 +132,10 @@ function ProjectDetail() {
   }, [id])
 
   useEffect(() => {
+    void loadLibrary()
+  }, [loadLibrary])
+
+  useEffect(() => {
     if (!project) {
       return
     }
@@ -124,6 +148,63 @@ function ProjectDetail() {
   const latestBuild = useMemo(
     () => builds.find((build) => build.status === 'succeeded'),
     [builds],
+  )
+
+  const filteredLibrary = useMemo(() => {
+    const term = libraryQuery.trim().toLowerCase()
+    if (!term) {
+      return libraryPlugins
+    }
+    return libraryPlugins.filter((plugin) => {
+      const haystack = [
+        plugin.id,
+        plugin.version,
+        plugin.provider,
+        plugin.source?.slug,
+        plugin.source?.projectUrl,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+      return haystack.includes(term)
+    })
+  }, [libraryPlugins, libraryQuery])
+
+  const projectPluginKeys = useMemo(() => {
+    if (!project?.plugins) {
+      return new Set<string>()
+    }
+    return new Set(project.plugins.map((plugin) => `${plugin.id}:${plugin.version}`))
+  }, [project?.plugins])
+
+  const handleAddLibraryPlugin = useCallback(
+    async (plugin: StoredPluginRecord) => {
+      if (!id) {
+        return
+      }
+      try {
+        setLibraryBusy(`${plugin.id}:${plugin.version}`)
+        const plugins = await addProjectPlugin(id, {
+          pluginId: plugin.id,
+          version: plugin.version,
+          provider: plugin.provider,
+          downloadUrl: plugin.source?.downloadUrl,
+          minecraftVersionMin: plugin.minecraftVersionMin ?? plugin.source?.minecraftVersionMin,
+          minecraftVersionMax: plugin.minecraftVersionMax ?? plugin.source?.minecraftVersionMax,
+          source: plugin.source,
+        })
+        setProject((prev) => (prev ? { ...prev, plugins: plugins ?? prev.plugins } : prev))
+        setPluginMessage(`Added ${plugin.id} ${plugin.version} from saved plugins.`)
+        await loadLibrary()
+      } catch (err) {
+        setPluginMessage(
+          err instanceof Error ? err.message : 'Failed to add plugin from saved library.',
+        )
+      } finally {
+        setLibraryBusy(null)
+      }
+    },
+    [id, loadLibrary],
   )
 
   if (!id) {
@@ -492,6 +573,90 @@ function ProjectDetail() {
         <header>
           <h3>Add Plugin</h3>
         </header>
+        <section>
+          <header>
+            <h4>Saved Plugins</h4>
+          </header>
+          <div className="form-grid">
+            <div className="field span-2">
+              <label htmlFor="saved-plugin-search">Search saved plugins</label>
+              <input
+                id="saved-plugin-search"
+                value={libraryQuery}
+                onChange={(event) => setLibraryQuery(event.target.value)}
+                placeholder="Filter by name, version, or source"
+              />
+            </div>
+          </div>
+          {libraryError && <p className="error-text">{libraryError}</p>}
+          {libraryLoading && <p className="muted">Loading saved plugins…</p>}
+          {!libraryLoading && filteredLibrary.length === 0 && (
+            <p className="muted">
+              {libraryQuery.trim()
+                ? 'No saved plugins match that search.'
+                : 'No saved plugins yet. Add one via download URL or upload to populate this list.'}
+            </p>
+          )}
+          {!libraryLoading && filteredLibrary.length > 0 && (
+            <ul className="project-list">
+              {filteredLibrary.map((plugin) => {
+                const key = `${plugin.id}:${plugin.version}`
+                const supportRange = formatMinecraftRange(
+                  plugin.minecraftVersionMin ?? plugin.source?.minecraftVersionMin,
+                  plugin.minecraftVersionMax ?? plugin.source?.minecraftVersionMax,
+                )
+                const alreadyAdded = projectPluginKeys.has(key)
+                const busyKey = libraryBusy === key
+                return (
+                  <li key={key}>
+                    <div>
+                      <strong>{plugin.id}</strong>{' '}
+                      {plugin.provider && (
+                        <span className="badge">
+                          {providerLabel[plugin.provider] ?? plugin.provider}
+                        </span>
+                      )}{' '}
+                      <span className="muted">v{plugin.version}</span>
+                      {supportRange && <p className="muted">Supports: {supportRange}</p>}
+                      {plugin.source?.projectUrl && (
+                        <p className="muted">
+                          <a href={plugin.source.projectUrl} target="_blank" rel="noreferrer">
+                            View project
+                          </a>
+                        </p>
+                      )}
+                      {plugin.source?.downloadUrl && (
+                        <p className="muted">
+                          <a href={plugin.source.downloadUrl} target="_blank" rel="noreferrer">
+                            Download URL
+                          </a>
+                        </p>
+                      )}
+                      {plugin.source?.uploadPath && (
+                        <p className="muted">Uploaded jar: {plugin.source.uploadPath}</p>
+                      )}
+                    </div>
+                    <div className="dev-buttons">
+                      <button
+                        type="button"
+                        className="primary"
+                        disabled={alreadyAdded || busyKey}
+                        onClick={() => void handleAddLibraryPlugin(plugin)}
+                      >
+                        {alreadyAdded
+                          ? 'Already added'
+                          : busyKey
+                          ? 'Adding…'
+                          : 'Add to server'}
+                      </button>
+                    </div>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </section>
+
         <form
           className="page-form"
           onSubmit={async (event) => {
@@ -518,7 +683,7 @@ function ProjectDetail() {
         >
           <div className="form-grid">
             <div className="field span-2">
-              <label htmlFor="plugin-search">Search Hangar</label>
+              <label htmlFor="plugin-search">Search external catalogs</label>
               <input
                 id="plugin-search"
                 value={pluginQuery}
@@ -539,7 +704,7 @@ function ProjectDetail() {
           <div className="layout-grid">
             <section className="panel">
               <header>
-                <h4>Results</h4>
+                <h4>External results</h4>
               </header>
               <ul className="project-list">
                 {pluginResults.map((result) => (
@@ -604,6 +769,7 @@ function ProjectDetail() {
                   setProject((prev) =>
                     prev ? { ...prev, plugins: plugins ?? prev.plugins } : prev,
                   )
+                  await loadLibrary()
                   setPluginMessage(`Added ${manualPluginId.trim()} ${manualPluginVersion.trim()}`)
                   setManualPluginId('')
                   setManualPluginVersion('')
@@ -704,6 +870,7 @@ function ProjectDetail() {
                   setProject((prev) =>
                     prev ? { ...prev, plugins: plugins ?? prev.plugins } : prev,
                   )
+                  await loadLibrary()
                   setPluginMessage(`Uploaded ${uploadPluginId.trim()} ${uploadPluginVersion.trim()}`)
                   setUploadPluginId('')
                   setUploadPluginVersion('')
