@@ -44,6 +44,15 @@ export async function listStoredPlugins(): Promise<StoredPluginRecord[]> {
   return snapshot.plugins.slice().sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
 }
 
+export async function findStoredPlugin(
+  id: string,
+  version: string,
+): Promise<StoredPluginRecord | undefined> {
+  const snapshot = await loadSnapshot();
+  const key = keyFor({ id, version });
+  return snapshot.plugins.find((plugin) => keyFor(plugin) === key);
+}
+
 type StoredPluginInput = Omit<StoredPluginRecord, "createdAt" | "updatedAt"> &
   Partial<Pick<StoredPluginRecord, "createdAt" | "updatedAt">>;
 
@@ -52,33 +61,57 @@ export async function upsertStoredPlugin(record: StoredPluginInput): Promise<Sto
   const now = new Date().toISOString();
   const normalizedId = record.id.trim();
   const normalizedVersion = record.version.trim();
-  const newRecord: StoredPluginRecord = {
-    ...record,
-    id: normalizedId,
-    version: normalizedVersion,
-    createdAt: record.createdAt ?? now,
-    updatedAt: now,
-  };
+  const targetKey = keyFor({ id: normalizedId, version: normalizedVersion });
+  const existingIndex = snapshot.plugins.findIndex((plugin) => keyFor(plugin) === targetKey);
 
-  const targetKey = keyFor(newRecord);
-  const existingIndex = snapshot.plugins.findIndex(
-    (plugin) => keyFor(plugin) === targetKey,
-  );
+  const shouldUpdateCache = !!record.cachePath?.length;
+  const cachedAt =
+    shouldUpdateCache && record.cachedAt !== undefined ? record.cachedAt : shouldUpdateCache ? now : undefined;
+  const lastUsedAt =
+    record.lastUsedAt ??
+    (shouldUpdateCache ? now : undefined);
+
   if (existingIndex >= 0) {
     const existing = snapshot.plugins[existingIndex];
     snapshot.plugins[existingIndex] = {
       ...existing,
-      ...newRecord,
+      ...record,
+      id: normalizedId,
+      version: normalizedVersion,
       createdAt: existing.createdAt,
       updatedAt: now,
+      cachePath: record.cachePath ?? existing.cachePath,
+      artifactFileName: record.artifactFileName ?? existing.artifactFileName,
+      cachedAt: cachedAt ?? existing.cachedAt,
+      lastUsedAt: lastUsedAt ?? existing.lastUsedAt,
+      sha256: record.sha256 ?? existing.sha256,
+      minecraftVersionMin: record.minecraftVersionMin ?? existing.minecraftVersionMin,
+      minecraftVersionMax: record.minecraftVersionMax ?? existing.minecraftVersionMax,
+      provider: record.provider ?? existing.provider,
+      source: record.source ?? existing.source,
     };
   } else {
-    snapshot.plugins.push(newRecord);
+    const created: StoredPluginRecord = {
+      id: normalizedId,
+      version: normalizedVersion,
+      provider: record.provider,
+      source: record.source,
+      sha256: record.sha256,
+      minecraftVersionMin: record.minecraftVersionMin,
+      minecraftVersionMax: record.minecraftVersionMax,
+      cachePath: record.cachePath,
+      artifactFileName: record.artifactFileName,
+      cachedAt,
+      lastUsedAt,
+      createdAt: record.createdAt ?? now,
+      updatedAt: now,
+    };
+    snapshot.plugins.push(created);
   }
 
   snapshot.plugins.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
   await persistSnapshot(snapshot);
-  return newRecord;
+  return snapshot.plugins.find((plugin) => keyFor(plugin) === targetKey) as StoredPluginRecord;
 }
 
 

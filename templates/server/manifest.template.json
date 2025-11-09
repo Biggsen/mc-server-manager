@@ -16,7 +16,13 @@
     {
       "id": "{{id}}",
       "version": "{{version}}",
-      "sha256": "{{sha256}}"
+      "sha256": "{{sha256}}"{{#if provider}},
+      "provider": "{{provider}}"{{/if}}{{#if cachePath}},
+      "cachePath": "{{cachePath}}"{{/if}}{{#if minecraftVersionMin}},
+      "minecraftVersionMin": "{{minecraftVersionMin}}"{{/if}}{{#if minecraftVersionMax}},
+      "minecraftVersionMax": "{{minecraftVersionMax}}"{{/if}}{{#if source}},
+      "source": {{{json source}}}{{/if}}{{#if catalog}},
+      "catalog": {{{json catalog}}}{{/if}}
     }{{#unless @last}},{{/unless}}
     {{/each}}
   ],

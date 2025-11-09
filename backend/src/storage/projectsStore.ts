@@ -214,13 +214,24 @@ export async function setProjectAssets(id: string, payload: AssetsPayload): Prom
       }
       project.plugins = payload.plugins.map((plugin) => {
         const previous = existingMap.get(plugin.id);
+        const mergedSource =
+          plugin.source && previous?.source
+            ? { ...previous.source, ...plugin.source }
+            : plugin.source ?? previous?.source;
+        const cachePath = plugin.cachePath ?? previous?.cachePath;
+        if (cachePath && mergedSource) {
+          mergedSource.cachePath = cachePath;
+        }
         return {
           ...previous,
           id: plugin.id,
           version: plugin.version,
           sha256: plugin.sha256 ?? previous?.sha256 ?? "<pending>",
           provider: plugin.provider ?? previous?.provider,
-          source: plugin.source ?? previous?.source,
+          source: mergedSource,
+          cachePath,
+          minecraftVersionMin: plugin.minecraftVersionMin ?? previous?.minecraftVersionMin,
+          minecraftVersionMax: plugin.minecraftVersionMax ?? previous?.minecraftVersionMax,
         };
       });
     }

@@ -1,6 +1,22 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { fetchProjects, triggerBuild, type ProjectSummary, type BuildJob } from '../lib/api'
+import {
+  fetchProjects,
+  triggerBuild,
+  fetchPluginLibrary,
+  type ProjectSummary,
+  type BuildJob,
+  type StoredPluginRecord,
+} from '../lib/api'
+
+const sourceLabel: Record<'download' | 'upload', string> = {
+  download: 'Download URL',
+  upload: 'Uploaded jar',
+}
+
+function getPluginSourceKind(plugin: StoredPluginRecord): 'download' | 'upload' {
+  return plugin.source?.uploadPath ? 'upload' : 'download'
+}
 import { subscribeProjectsUpdated } from '../lib/events'
 
 function Dashboard() {
@@ -8,6 +24,9 @@ function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [building, setBuilding] = useState<Record<string, BuildJob['status']>>({})
+  const [library, setLibrary] = useState<StoredPluginRecord[]>([])
+  const [libraryLoading, setLibraryLoading] = useState(true)
+  const [libraryError, setLibraryError] = useState<string | null>(null)
 
   useEffect(() => {
     let active = true
@@ -35,6 +54,33 @@ function Dashboard() {
     return () => {
       active = false
       unsubscribe()
+    }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+
+    const loadLibrary = () => {
+      setLibraryLoading(true)
+      fetchPluginLibrary()
+        .then((items) => {
+          if (!active) return
+          setLibrary(items)
+          setLibraryError(null)
+        })
+        .catch((err: Error) => {
+          if (!active) return
+          setLibraryError(err.message)
+        })
+        .finally(() => {
+          if (!active) return
+          setLibraryLoading(false)
+        })
+    }
+
+    loadLibrary()
+    return () => {
+      active = false
     }
   }, [])
 
@@ -92,6 +138,38 @@ function Dashboard() {
                   >
                     {building[project.id] === 'running' ? 'Building…' : 'Build'}
                   </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section className="panel">
+        <header>
+          <h2>Saved Plugins</h2>
+          <Link to="/plugins" className="link">
+            Browse library
+          </Link>
+        </header>
+        {libraryLoading && <p className="muted">Loading plugins…</p>}
+        {libraryError && <p className="error-text">{libraryError}</p>}
+        {!libraryLoading && !libraryError && library.length === 0 && (
+          <p className="muted">No saved plugins yet. Add one from a project to populate the library.</p>
+        )}
+        {!libraryLoading && !libraryError && library.length > 0 && (
+          <ul className="project-list">
+            {library.slice(0, 5).map((plugin) => (
+              <li key={`${plugin.id}:${plugin.version}`}>
+                <div>
+                  <strong>{plugin.id}</strong>{' '}
+                  <span className="muted">{sourceLabel[getPluginSourceKind(plugin)]}</span>{' '}
+                  <span className="muted">v{plugin.version}</span>
+                  {plugin.cachePath && (
+                    <p className="muted">
+                      Cache: <code>{plugin.cachePath}</code>
+                    </p>
+                  )}
                 </div>
               </li>
             ))}

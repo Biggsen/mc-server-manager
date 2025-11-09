@@ -21,12 +21,28 @@ import {
 } from '../lib/api'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? '/api'
-const providerLabel: Record<'hangar' | 'modrinth' | 'spiget' | 'github' | 'custom', string> = {
+const catalogProviderLabel: Record<'hangar' | 'modrinth' | 'spiget', string> = {
   hangar: 'Hangar',
   modrinth: 'Modrinth',
   spiget: 'Spigot',
-  github: 'GitHub',
-  custom: 'Custom',
+}
+
+const sourceBadgeLabel: Record<'download' | 'upload', string> = {
+  download: 'Download URL',
+  upload: 'Uploaded jar',
+}
+
+type PluginWithSource =
+  | NonNullable<ProjectSummary['plugins']>[number]
+  | StoredPluginRecord
+  | { source?: { uploadPath?: string | null } | null }
+
+function getStoredPluginSourceKind(plugin: PluginWithSource): 'download' | 'upload' {
+  const uploadPath =
+    typeof plugin === 'object' && plugin !== null && typeof plugin.source === 'object'
+      ? plugin.source?.uploadPath ?? null
+      : null
+  return uploadPath ? 'upload' : 'download'
 }
 
 interface ManifestPreview {
@@ -191,6 +207,7 @@ function ProjectDetail() {
           downloadUrl: plugin.source?.downloadUrl,
           minecraftVersionMin: plugin.minecraftVersionMin ?? plugin.source?.minecraftVersionMin,
           minecraftVersionMax: plugin.minecraftVersionMax ?? plugin.source?.minecraftVersionMax,
+          cachePath: plugin.cachePath ?? plugin.source?.cachePath,
           source: plugin.source,
         })
         setProject((prev) => (prev ? { ...prev, plugins: plugins ?? prev.plugins } : prev))
@@ -314,13 +331,17 @@ function ProjectDetail() {
                   plugin.minecraftVersionMin ?? plugin.source?.minecraftVersionMin,
                   plugin.minecraftVersionMax ?? plugin.source?.minecraftVersionMax,
                 )
+                const sourceKind = getStoredPluginSourceKind(plugin)
                 return (
                   <li key={`${plugin.id}:${plugin.version}`}>
                     <div>
                       <strong>{plugin.id}</strong>{' '}
-                      {plugin.provider && (
+                      <span className="badge">
+                        {sourceBadgeLabel[sourceKind]}
+                      </span>{' '}
+                      {plugin.provider && plugin.provider !== 'custom' && (
                         <span className="badge">
-                          {providerLabel[plugin.provider] ?? plugin.provider}
+                          {plugin.provider}
                         </span>
                       )}{' '}
                       <span className="muted">v{plugin.version}</span>
@@ -341,6 +362,11 @@ function ProjectDetail() {
                       )}
                       {plugin.source?.uploadPath && (
                         <p className="muted">Uploaded jar: {plugin.source.uploadPath}</p>
+                      )}
+                      {(plugin.cachePath ?? plugin.source?.cachePath) && (
+                        <p className="muted">
+                          Cache: {plugin.cachePath ?? plugin.source?.cachePath}
+                        </p>
                       )}
                     </div>
                   </li>
@@ -607,15 +633,12 @@ function ProjectDetail() {
                 )
                 const alreadyAdded = projectPluginKeys.has(key)
                 const busyKey = libraryBusy === key
+                const sourceKind = getStoredPluginSourceKind(plugin)
                 return (
                   <li key={key}>
                     <div>
                       <strong>{plugin.id}</strong>{' '}
-                      {plugin.provider && (
-                        <span className="badge">
-                          {providerLabel[plugin.provider] ?? plugin.provider}
-                        </span>
-                      )}{' '}
+                      <span className="badge">{sourceBadgeLabel[sourceKind]}</span>{' '}
                       <span className="muted">v{plugin.version}</span>
                       {supportRange && <p className="muted">Supports: {supportRange}</p>}
                       {plugin.source?.projectUrl && (
@@ -634,6 +657,20 @@ function ProjectDetail() {
                       )}
                       {plugin.source?.uploadPath && (
                         <p className="muted">Uploaded jar: {plugin.source.uploadPath}</p>
+                      )}
+                      {plugin.cachePath && <p className="muted">Cache: {plugin.cachePath}</p>}
+                      {plugin.artifactFileName && (
+                        <p className="muted">Artifact: {plugin.artifactFileName}</p>
+                      )}
+                      {plugin.cachedAt && (
+                        <p className="muted">
+                          Cached {new Date(plugin.cachedAt).toLocaleString()}
+                        </p>
+                      )}
+                      {plugin.lastUsedAt && (
+                        <p className="muted">
+                          Last used {new Date(plugin.lastUsedAt).toLocaleString()}
+                        </p>
                       )}
                     </div>
                     <div className="dev-buttons">
@@ -711,7 +748,7 @@ function ProjectDetail() {
                   <li key={`${result.provider}:${result.slug}`}>
                     <div>
                       <strong>{result.name}</strong>{' '}
-                      <span className="badge">{providerLabel[result.provider]}</span>
+                      <span className="badge">{catalogProviderLabel[result.provider]}</span>
                       <p className="muted">
                         {result.slug} ·{' '}
                         <a

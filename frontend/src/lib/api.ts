@@ -14,6 +14,10 @@ export interface StoredPluginRecord {
   sha256?: string
   minecraftVersionMin?: string
   minecraftVersionMax?: string
+  cachePath?: string
+  artifactFileName?: string
+  cachedAt?: string
+  lastUsedAt?: string
   source?: {
     provider: 'hangar' | 'modrinth' | 'spiget' | 'github' | 'custom'
     slug: string
@@ -26,6 +30,7 @@ export interface StoredPluginRecord {
     minecraftVersionMax?: string
     uploadPath?: string
     sha256?: string
+    cachePath?: string
   }
   createdAt: string
   updatedAt: string
@@ -148,6 +153,7 @@ export interface ProjectSummary {
     provider?: 'hangar' | 'modrinth' | 'spiget' | 'github' | 'custom'
     minecraftVersionMin?: string
     minecraftVersionMax?: string
+    cachePath?: string
     source?: {
       provider: 'hangar' | 'modrinth' | 'spiget' | 'github' | 'custom'
       slug: string
@@ -160,6 +166,7 @@ export interface ProjectSummary {
       minecraftVersionMax?: string
       uploadPath?: string
       sha256?: string
+      cachePath?: string
     }
   }>
   configs?: Array<{
@@ -343,6 +350,7 @@ export async function addProjectPlugin(
     downloadUrl?: string
     minecraftVersionMin?: string
     minecraftVersionMax?: string
+    cachePath?: string
     source?: Record<string, unknown>
   },
 ): Promise<ProjectSummary['plugins']> {

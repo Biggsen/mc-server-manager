@@ -9,6 +9,7 @@ import Projects from './pages/Projects'
 import ProjectDetail from './pages/ProjectDetail'
 import Deployments from './pages/Deployments'
 import TestTools from './pages/TestTools'
+import PluginLibrary from './pages/PluginLibrary'
 import './App.css'
 
 function App() {
@@ -68,6 +69,13 @@ function App() {
           <button
             type="button"
             className="ghost"
+            onClick={() => navigate('/plugins')}
+          >
+            Plugins
+          </button>
+          <button
+            type="button"
+            className="ghost"
             onClick={() => navigate('/dev/tools')}
           >
             Dev Tools
@@ -118,6 +126,7 @@ function App() {
           <Route path="/projects/new" element={<NewProject />} />
           <Route path="/projects/import" element={<ImportProject />} />
           <Route path="/projects/:id" element={<ProjectDetail />} />
+          <Route path="/plugins" element={<PluginLibrary />} />
           <Route path="/dev/tools" element={<TestTools />} />
           <Route path="/deployments" element={<Deployments />} />
           <Route path="*" element={<NotFound />} />

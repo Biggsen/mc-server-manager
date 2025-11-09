@@ -366,6 +366,7 @@ router.post("/:id/plugins", async (req: Request, res: Response) => {
       hash,
       minecraftVersionMin,
       minecraftVersionMax,
+      cachePath,
     } = req.body ?? {};
 
     if (!pluginId || !version) {
@@ -422,6 +423,7 @@ router.post("/:id/plugins", async (req: Request, res: Response) => {
             minecraftVersionMin: finalMin,
             minecraftVersionMax: finalMax,
             sha256: hash ?? source?.sha256,
+            cachePath: cachePath ?? source?.cachePath,
           }
         : source
         ? {
@@ -436,6 +438,7 @@ router.post("/:id/plugins", async (req: Request, res: Response) => {
             minecraftVersionMin: source.minecraftVersionMin ?? finalMin,
             minecraftVersionMax: source.minecraftVersionMax ?? finalMax,
             sha256: source.sha256,
+            cachePath: source.cachePath ?? cachePath,
           }
         : undefined;
 
@@ -445,6 +448,7 @@ router.post("/:id/plugins", async (req: Request, res: Response) => {
       provider: sourceRef?.provider ?? resolvedProvider ?? providerValue,
       minecraftVersionMin: sourceRef?.minecraftVersionMin ?? finalMin,
       minecraftVersionMax: sourceRef?.minecraftVersionMax ?? finalMax,
+      cachePath: cachePath ?? sourceRef?.cachePath,
       source: sourceRef,
     });
 
@@ -456,6 +460,7 @@ router.post("/:id/plugins", async (req: Request, res: Response) => {
       minecraftVersionMin: sourceRef?.minecraftVersionMin ?? finalMin,
       minecraftVersionMax: sourceRef?.minecraftVersionMax ?? finalMax,
       source: sourceRef,
+      cachePath: cachePath ?? sourceRef?.cachePath,
     });
 
     res.status(200).json({

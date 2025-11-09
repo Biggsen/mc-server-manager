@@ -8,6 +8,7 @@ import {
   recordManifestMetadata,
   setProjectAssets,
 } from "../storage/projectsStore";
+import { upsertStoredPlugin } from "../storage/pluginsStore";
 import type { RepoMetadata, StoredProject } from "../types/storage";
 import type { BuildJob } from "../types/build";
 import { renderManifest, type ManifestOverrides } from "./manifestService";
@@ -33,6 +34,12 @@ interface PluginMaterialization {
   sha256: string;
   relativePath: string;
   buffer: Buffer;
+  cachePath?: string;
+  fileName: string;
+  provider?: ProjectPlugin["provider"];
+  source?: ProjectPlugin["source"];
+  minecraftVersionMin?: string;
+  minecraftVersionMax?: string;
 }
 
 interface ConfigMaterialization {
@@ -105,11 +112,63 @@ async function runBuild(
 
     const updatedProject =
       (await setProjectAssets(project.id, {
-        plugins: plugins.map(({ id, version, sha256 }) => ({ id, version, sha256 })),
+        plugins: plugins.map(
+          ({
+            id,
+            version,
+            sha256,
+            provider,
+            source,
+            cachePath,
+            minecraftVersionMin,
+            minecraftVersionMax,
+          }) => {
+            const normalizedSource =
+              source && cachePath && source.cachePath !== cachePath
+                ? { ...source, cachePath }
+                : source;
+            return {
+              id,
+              version,
+              sha256,
+              provider,
+              cachePath,
+              minecraftVersionMin,
+              minecraftVersionMax,
+              source: normalizedSource,
+            };
+          },
+        ),
         configs: configs.map(({ path, sha256 }) => ({ path, sha256 })),
       })) ?? {
         ...projectWithAssets,
-        plugins: plugins.map(({ id, version, sha256 }) => ({ id, version, sha256 })),
+        plugins: plugins.map(
+          ({
+            id,
+            version,
+            sha256,
+            provider,
+            source,
+            cachePath,
+            minecraftVersionMin,
+            minecraftVersionMax,
+          }) => {
+            const normalizedSource =
+              source && cachePath && source.cachePath !== cachePath
+                ? { ...source, cachePath }
+                : source;
+            return {
+              id,
+              version,
+              sha256,
+              provider,
+              cachePath,
+              minecraftVersionMin,
+              minecraftVersionMax,
+              source: normalizedSource,
+            };
+          },
+        ),
         configs: configs.map(({ path, sha256 }) => ({ path, sha256 })),
       };
 
@@ -142,7 +201,27 @@ async function runBuild(
 
     const manifestOverrides: ManifestOverrides = {
       ...overrides,
-      plugins: plugins.map(({ id, version, sha256 }) => ({ id, version, sha256 })),
+      plugins: plugins.map(
+        ({
+          id,
+          version,
+          sha256,
+          provider,
+          source,
+          cachePath,
+          minecraftVersionMin,
+          minecraftVersionMax,
+        }) => ({
+          id,
+          version,
+          sha256,
+          provider,
+          cachePath,
+          source,
+          minecraftVersionMin,
+          minecraftVersionMax,
+        }),
+      ),
       configs: configs.map(({ path, sha256 }) => ({ path, sha256 })),
       artifact: {
         zipPath: artifactRelativePath,
@@ -252,9 +331,23 @@ async function materializePlugins(
     const version = artifact.version ?? plugin.version;
     const sha256 = hashBuffer(buffer);
     const relativePath = `plugins/${artifact.fileName}`;
+    const cachePath = artifact.cachePath;
 
     // Materialize to the project workspace for future scans.
     await writeProjectFileBuffer(project, relativePath, buffer);
+
+    await upsertStoredPlugin({
+      id: plugin.id,
+      version,
+      provider: plugin.provider,
+      source: plugin.source,
+      sha256,
+      minecraftVersionMin: plugin.minecraftVersionMin ?? plugin.source?.minecraftVersionMin,
+      minecraftVersionMax: plugin.minecraftVersionMax ?? plugin.source?.minecraftVersionMax,
+      cachePath,
+      artifactFileName: artifact.fileName,
+      lastUsedAt: new Date().toISOString(),
+    });
 
     results.push({
       id: plugin.id,
@@ -262,6 +355,12 @@ async function materializePlugins(
       sha256,
       relativePath,
       buffer,
+      cachePath,
+      fileName: artifact.fileName,
+      provider: plugin.provider,
+      source: plugin.source,
+      minecraftVersionMin: plugin.minecraftVersionMin ?? plugin.source?.minecraftVersionMin,
+      minecraftVersionMax: plugin.minecraftVersionMax ?? plugin.source?.minecraftVersionMax,
     });
   }
 

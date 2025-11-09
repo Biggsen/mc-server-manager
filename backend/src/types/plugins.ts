@@ -13,6 +13,7 @@ export interface PluginSourceReference {
   minecraftVersionMax?: string;
   uploadPath?: string;
   sha256?: string;
+  cachePath?: string;
 }
 
 export interface ProjectPlugin {
@@ -23,6 +24,7 @@ export interface ProjectPlugin {
   source?: PluginSourceReference;
   minecraftVersionMin?: string;
   minecraftVersionMax?: string;
+  cachePath?: string;
 }
 
 export interface StoredPluginRecord {
@@ -33,6 +35,10 @@ export interface StoredPluginRecord {
   sha256?: string;
   minecraftVersionMin?: string;
   minecraftVersionMax?: string;
+  cachePath?: string;
+  artifactFileName?: string;
+  cachedAt?: string;
+  lastUsedAt?: string;
   createdAt: string;
   updatedAt: string;
 }

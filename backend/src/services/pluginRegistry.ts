@@ -1,6 +1,6 @@
 import { existsSync } from "fs";
 import { mkdir, readFile, readdir, writeFile } from "fs/promises";
-import { basename, join } from "path";
+import { basename, join, relative } from "path";
 import { parse } from "yaml";
 import type { StoredProject } from "../types/storage";
 import { readProjectFile, resolveProjectRoot, writeProjectFileBuffer } from "./projectFiles";
@@ -38,6 +38,7 @@ export interface DownloadedPluginArtifact {
   fileName: string;
   buffer: Buffer;
   version: string;
+  cachePath?: string;
 }
 
 const REGISTRY_PATH = "plugins/registry.yml";
@@ -69,14 +70,32 @@ export async function fetchPluginArtifact(
   const requestedVersion = plugin.version ?? "latest";
   const pluginId = plugin.id;
 
+  const finalizeArtifact = async (
+    artifact: DownloadedPluginArtifact,
+    versionHint?: string,
+  ): Promise<DownloadedPluginArtifact> => {
+    const resolvedVersion = artifact.version ?? versionHint ?? requestedVersion;
+    const { cachePath } = await ensurePluginCache(
+      pluginId,
+      resolvedVersion,
+      artifact.fileName,
+      artifact.buffer,
+    );
+    return {
+      ...artifact,
+      version: resolvedVersion,
+      cachePath,
+    };
+  };
+
   if (plugin.source?.uploadPath) {
     const absolutePath = join(resolveProjectRoot(project), plugin.source.uploadPath);
     const buffer = await readFile(absolutePath);
-    return {
+    return finalizeArtifact({
       buffer,
       fileName: basename(plugin.source.uploadPath),
       version: requestedVersion,
-    };
+    });
   }
 
   if (plugin.source?.downloadUrl) {
@@ -85,7 +104,7 @@ export async function fetchPluginArtifact(
       { pluginId, requestedVersion },
     );
     if (artifact) {
-      return artifact;
+      return finalizeArtifact(artifact, requestedVersion);
     }
     throw new Error(`Failed to download plugin ${pluginId} from ${plugin.source.downloadUrl}`);
   }
@@ -93,7 +112,7 @@ export async function fetchPluginArtifact(
   if (plugin.provider) {
     const artifact = await downloadFromProvider(project, plugin, options);
     if (artifact) {
-      return artifact;
+      return finalizeArtifact(artifact, requestedVersion);
     }
     console.warn(
       `Provider download failed for ${plugin.id} via ${plugin.provider}, falling back to registry/local sources.`,
@@ -104,7 +123,7 @@ export async function fetchPluginArtifact(
   // 1. Look for plugin JAR in the project directory or template.
   const local = await readLocalPlugin(project, pluginId, requestedVersion);
   if (local) {
-    return local;
+    return finalizeArtifact(local, requestedVersion);
   }
 
   // 2. Look for cached artifact.
@@ -132,9 +151,9 @@ export async function fetchPluginArtifact(
       });
 
       if (artifact) {
-        await cachePlugin(pluginId, artifact.version, artifact.fileName, artifact.buffer);
-        await writeProjectPlugin(project, artifact.fileName, artifact.buffer);
-        return artifact;
+        const finalized = await finalizeArtifact(artifact, requestedVersion);
+        await writeProjectPlugin(project, finalized.fileName, finalized.buffer);
+        return finalized;
       }
     } catch (error) {
       downloadError = error instanceof Error ? error : new Error(String(error));
@@ -187,7 +206,7 @@ async function readCachedPlugin(
   pluginId: string,
   requestedVersion: string,
 ): Promise<DownloadedPluginArtifact | undefined> {
-  const cacheDir = join(CACHE_ROOT, pluginId, requestedVersion);
+  const cacheDir = getCacheDir(pluginId, requestedVersion);
   if (!existsSync(cacheDir)) {
     return undefined;
   }
@@ -198,11 +217,13 @@ async function readCachedPlugin(
     if (!jarName) {
       return undefined;
     }
-    const buffer = await readFile(join(cacheDir, jarName));
+    const absolutePath = join(cacheDir, jarName);
+    const buffer = await readFile(absolutePath);
     return {
       buffer,
       fileName: jarName,
       version: requestedVersion,
+      cachePath: toRelativeCachePath(absolutePath),
     };
   } catch (error) {
     console.warn(`Failed to read plugin cache for ${pluginId}@${requestedVersion}`, error);
@@ -210,15 +231,31 @@ async function readCachedPlugin(
   }
 }
 
-async function cachePlugin(
+function getCacheDir(pluginId: string, version: string): string {
+  return join(CACHE_ROOT, pluginId, version);
+}
+
+function toRelativeCachePath(absolutePath: string): string {
+  return toPosixPath(relative(process.cwd(), absolutePath));
+}
+
+async function ensurePluginCache(
   pluginId: string,
   version: string,
   fileName: string,
   buffer: Buffer,
-): Promise<void> {
-  const cacheDir = join(CACHE_ROOT, pluginId, version);
+): Promise<{ cachePath: string }> {
+  const cacheDir = getCacheDir(pluginId, version);
+  const absolutePath = join(cacheDir, fileName);
   await mkdir(cacheDir, { recursive: true });
-  await writeFile(join(cacheDir, fileName), buffer);
+  if (!existsSync(absolutePath)) {
+    await writeFile(absolutePath, buffer);
+  }
+  return { cachePath: toRelativeCachePath(absolutePath) };
+}
+
+function toPosixPath(pathString: string): string {
+  return pathString.replace(/\\/g, "/");
 }
 
 async function writeProjectPlugin(
