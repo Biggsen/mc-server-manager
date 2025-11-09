@@ -1,13 +1,16 @@
-import { mkdir, readFile, writeFile } from "fs/promises";
+import { mkdir, readFile, writeFile, rm } from "fs/promises";
 import { join } from "path";
 import { spawn } from "child_process";
 import { v4 as uuid } from "uuid";
+import { createServer } from "net";
+import AdmZip from "adm-zip";
 import type { StoredProject } from "../types/storage";
 import type { RunJob, RunLogEntry, RunLogStream } from "../types/run";
 import { listBuilds } from "./buildQueue";
 
 const DATA_DIR = join(process.cwd(), "data", "runs");
 const LOG_PATH = join(DATA_DIR, "runs.json");
+const WORKSPACE_ROOT = join(DATA_DIR, "workspaces");
 
 const jobs = new Map<string, RunJob>();
 
@@ -34,6 +37,7 @@ export async function enqueueRun(project: StoredProject): Promise<RunJob> {
 
   const jobId = uuid();
   const createdAt = new Date().toISOString();
+  const containerName = createContainerName(project.id, jobId);
   const job: RunJob = {
     id: jobId,
     projectId: project.id,
@@ -42,6 +46,7 @@ export async function enqueueRun(project: StoredProject): Promise<RunJob> {
     status: "pending",
     createdAt,
     logs: [],
+    containerName,
   };
 
   jobs.set(jobId, job);
@@ -77,17 +82,47 @@ async function runJob(project: StoredProject, jobId: string): Promise<void> {
 }
 
 async function ensureDockerJob(job: RunJob, project: StoredProject): Promise<void> {
-  const containerName = `${project.id.replace(/[^a-zA-Z0-9-]/g, "-")}-run-${job.id.slice(0, 6)}`;
+  const workspacePath = await prepareWorkspace(job);
+  job.workspacePath = workspacePath;
+  appendLog(job, "system", `Prepared workspace at ${workspacePath}`);
+
+  const port = await findAvailablePort(job.port ?? 25565);
+  job.port = port;
+  appendLog(job, "system", `Using local port ${port}`);
+
+  const containerName = job.containerName ?? createContainerName(project.id, job.id);
+  job.containerName = containerName;
+
+  jobs.set(job.id, job);
+  await persistRuns();
+
+  const serverType = determineServerType(project.loader);
+  const version =
+    project.minecraftVersion && project.minecraftVersion !== "unknown"
+      ? project.minecraftVersion
+      : "LATEST";
+
   const dockerArgs = [
     "run",
     "--rm",
     "--name",
     containerName,
-    "busybox",
-    "sh",
-    "-c",
-    `echo "Starting ${project.id} (build ${job.buildId})"; sleep 2; echo "Server ready"; sleep 2; echo "Stopping server";`,
+    "-p",
+    `${port}:25565`,
+    "-v",
+    `${workspacePath}:/data`,
+    "-e",
+    "EULA=TRUE",
+    "-e",
+    `TYPE=${serverType}`,
+    "-e",
+    `VERSION=${version}`,
+    "-e",
+    "USE_AIKAR_FLAGS=true",
+    "itzg/minecraft-server:latest",
   ];
+
+  appendLog(job, "system", `Launching container ${containerName} with image itzg/minecraft-server:latest`);
 
   try {
     await executeCommand(job, "docker", dockerArgs);
@@ -138,6 +173,7 @@ async function executeCommand(job: RunJob, command: string, args: string[]): Pro
 
 async function simulateLocalRun(job: RunJob, project: StoredProject): Promise<void> {
   appendLog(job, "stdout", `Simulating server startup for ${project.id}`);
+  job.port = job.port ?? 25565;
   await delay(1000);
   appendLog(job, "stdout", "Server is running (simulation)");
   await delay(1000);
@@ -190,6 +226,55 @@ async function persistRuns(): Promise<void> {
     a.createdAt < b.createdAt ? 1 : -1,
   );
   await writeFile(LOG_PATH, JSON.stringify({ runs: snapshot }, null, 2), "utf-8");
+}
+
+function createContainerName(projectId: string, jobId: string): string {
+  const safeProject = projectId.replace(/[^a-zA-Z0-9-]/g, "-");
+  return `${safeProject}-run-${jobId.slice(0, 6)}`;
+}
+
+async function prepareWorkspace(job: RunJob): Promise<string> {
+  const workspaceDir = join(WORKSPACE_ROOT, job.id);
+  await mkdir(WORKSPACE_ROOT, { recursive: true });
+  await rm(workspaceDir, { recursive: true, force: true });
+  await mkdir(workspaceDir, { recursive: true });
+
+  const zip = new AdmZip(job.artifactPath);
+  zip.extractAllTo(workspaceDir, true);
+
+  await mkdir(join(workspaceDir, "plugins"), { recursive: true });
+  return workspaceDir;
+}
+
+async function findAvailablePort(preferred: number): Promise<number> {
+  let candidate = preferred;
+  for (let attempts = 0; attempts < 20; attempts += 1, candidate += 1) {
+    if (await isPortAvailable(candidate)) {
+      return candidate;
+    }
+  }
+  throw new Error("Unable to find an available port for docker run");
+}
+
+function isPortAvailable(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const server = createServer();
+    server.once("error", () => {
+      resolve(false);
+    });
+    server.once("listening", () => {
+      server.close(() => resolve(true));
+    });
+    server.listen(port, "0.0.0.0");
+  });
+}
+
+function determineServerType(loader?: string): string {
+  const normalized = loader?.toLowerCase();
+  if (normalized === "purpur") {
+    return "PURPUR";
+  }
+  return "PAPER";
 }
 
 

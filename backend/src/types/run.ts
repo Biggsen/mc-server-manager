@@ -19,6 +19,9 @@ export interface RunJob {
   finishedAt?: string;
   error?: string;
   logs: RunLogEntry[];
+  containerName?: string;
+  port?: number;
+  workspacePath?: string;
 }
 
 

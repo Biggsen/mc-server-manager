@@ -555,6 +555,17 @@ function ProjectDetail() {
                     Status: {run.status.toUpperCase()} ·{' '}
                     {new Date(run.createdAt).toLocaleString()}
                   </p>
+                  {run.port && (
+                    <p className="muted">
+                      Port: {run.port} (exposed on localhost)
+                    </p>
+                  )}
+                  {run.containerName && <p className="muted">Container: {run.containerName}</p>}
+                  {run.workspacePath && (
+                    <p className="muted">
+                      Workspace: <code>{run.workspacePath}</code>
+                    </p>
+                  )}
                   {run.logs.length > 0 && (
                     <details>
                       <summary>View logs</summary>
