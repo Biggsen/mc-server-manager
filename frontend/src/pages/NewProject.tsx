@@ -182,6 +182,7 @@ function NewProject() {
           <div className="field">
             <label htmlFor="minecraft-version">Minecraft version</label>
             <select id="minecraft-version" name="minecraftVersion" defaultValue="1.21.1">
+              <option value="1.21.8">1.21.8</option>
               <option value="1.21.1">1.21.1</option>
               <option value="1.21">1.21</option>
               <option value="1.20.6">1.20.6</option>

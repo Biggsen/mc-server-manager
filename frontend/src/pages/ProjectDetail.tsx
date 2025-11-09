@@ -9,6 +9,7 @@ import {
   triggerManifest,
   scanProjectAssets,
   runProjectLocally,
+  stopRunJob,
   searchPlugins,
   addProjectPlugin,
   uploadProjectPlugin,
@@ -30,6 +31,18 @@ const catalogProviderLabel: Record<'hangar' | 'modrinth' | 'spiget', string> = {
 const sourceBadgeLabel: Record<'download' | 'upload', string> = {
   download: 'Download URL',
   upload: 'Uploaded jar',
+}
+
+const runStatusLabel: Record<
+  RunJob['status'],
+  'Pending' | 'Running' | 'Stopping' | 'Stopped' | 'Completed' | 'Failed'
+> = {
+  pending: 'Pending',
+  running: 'Running',
+  stopping: 'Stopping',
+  stopped: 'Stopped',
+  succeeded: 'Completed',
+  failed: 'Failed',
 }
 
 type PluginWithSource =
@@ -70,6 +83,7 @@ function ProjectDetail() {
   const [project, setProject] = useState<ProjectSummary | null>(null)
   const [builds, setBuilds] = useState<BuildJob[]>([])
   const [runs, setRuns] = useState<RunJob[]>([])
+  const [runBusy, setRunBusy] = useState<Record<string, boolean>>({})
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [manifestPreview, setManifestPreview] = useState<ManifestPreview | null>(null)
@@ -108,6 +122,28 @@ function ProjectDetail() {
       setLibraryLoading(false)
     }
   }, [])
+
+  const handleStopRun = useCallback(
+    async (target: RunJob) => {
+      try {
+        setRunBusy((prev) => ({ ...prev, [target.id]: true }))
+        const updated = await stopRunJob(target.id)
+        setRuns((prev) =>
+          prev.map((run) => (run.id === updated.id ? { ...run, ...updated } : run)),
+        )
+        setMessage(`Stop requested for run ${target.id}`)
+      } catch (err) {
+        setMessage(err instanceof Error ? err.message : 'Failed to stop run')
+      } finally {
+        setRunBusy((prev) => {
+          const next = { ...prev }
+          delete next[target.id]
+          return next
+        })
+      }
+    },
+    [],
+  )
 
   useEffect(() => {
     if (!id) return
@@ -552,8 +588,14 @@ function ProjectDetail() {
                 <div>
                   <strong>{run.id}</strong>
                   <p className="muted">
-                    Status: {run.status.toUpperCase()} ·{' '}
+                    <span className="badge">{runStatusLabel[run.status]}</span> · Started{' '}
                     {new Date(run.createdAt).toLocaleString()}
+                    {run.finishedAt && (
+                      <>
+                        {' '}
+                        · Finished {new Date(run.finishedAt).toLocaleString()}
+                      </>
+                    )}
                   </p>
                   {run.port && (
                     <p className="muted">
@@ -581,7 +623,20 @@ function ProjectDetail() {
                       </pre>
                     </details>
                   )}
+                  {run.error && <p className="error-text">{run.error}</p>}
                 </div>
+                {(run.status === 'running' || run.status === 'pending' || run.status === 'stopping') && (
+                  <div className="dev-buttons">
+                    <button
+                      type="button"
+                      className="ghost"
+                      disabled={run.status === 'stopping' || runBusy[run.id]}
+                      onClick={() => handleStopRun(run)}
+                    >
+                      {run.status === 'stopping' || runBusy[run.id] ? 'Stopping…' : 'Stop'}
+                    </button>
+                  </div>
+                )}
               </li>
             ))}
           </ul>

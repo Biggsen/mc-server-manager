@@ -1,17 +1,32 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   fetchProjects,
   triggerBuild,
   fetchPluginLibrary,
+  fetchRuns,
+  stopRunJob,
   type ProjectSummary,
   type BuildJob,
+  type RunJob,
   type StoredPluginRecord,
 } from '../lib/api'
 
 const sourceLabel: Record<'download' | 'upload', string> = {
   download: 'Download URL',
   upload: 'Uploaded jar',
+}
+
+const runStatusLabel: Record<
+  RunJob['status'],
+  'Pending' | 'Running' | 'Stopping' | 'Stopped' | 'Completed' | 'Failed'
+> = {
+  pending: 'Pending',
+  running: 'Running',
+  stopping: 'Stopping',
+  stopped: 'Stopped',
+  succeeded: 'Completed',
+  failed: 'Failed',
 }
 
 function getPluginSourceKind(plugin: StoredPluginRecord): 'download' | 'upload' {
@@ -27,6 +42,10 @@ function Dashboard() {
   const [library, setLibrary] = useState<StoredPluginRecord[]>([])
   const [libraryLoading, setLibraryLoading] = useState(true)
   const [libraryError, setLibraryError] = useState<string | null>(null)
+  const [runs, setRuns] = useState<RunJob[]>([])
+  const [runsLoading, setRunsLoading] = useState(true)
+  const [runsError, setRunsError] = useState<string | null>(null)
+  const [runBusy, setRunBusy] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
     let active = true
@@ -84,7 +103,64 @@ function Dashboard() {
     }
   }, [])
 
+  useEffect(() => {
+    let active = true
+
+    const loadRuns = () => {
+      setRunsLoading(true)
+      fetchRuns()
+        .then((items) => {
+          if (!active) return
+          setRuns(items)
+          setRunsError(null)
+        })
+        .catch((err: Error) => {
+          if (!active) return
+          setRunsError(err.message)
+        })
+        .finally(() => {
+          if (!active) return
+          setRunsLoading(false)
+        })
+    }
+
+    loadRuns()
+    const interval = window.setInterval(loadRuns, 5000)
+    return () => {
+      active = false
+      window.clearInterval(interval)
+    }
+  }, [])
+
   const recent = projects.slice(0, 3)
+  const projectLookup = useMemo(
+    () =>
+      projects.reduce<Record<string, ProjectSummary>>((acc, project) => {
+        acc[project.id] = project
+        return acc
+      }, {}),
+    [projects],
+  )
+  const activeRuns = runs.filter((run) =>
+    ['pending', 'running', 'stopping'].includes(run.status),
+  )
+
+  const handleStopRun = async (run: RunJob) => {
+    try {
+      setRunBusy((prev) => ({ ...prev, [run.id]: true }))
+      const updated = await stopRunJob(run.id)
+      setRuns((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
+    } catch (err) {
+      console.error('Failed to stop run', err)
+      setRunsError(err instanceof Error ? err.message : 'Failed to stop run')
+    } finally {
+      setRunBusy((prev) => {
+        const next = { ...prev }
+        delete next[run.id]
+        return next
+      })
+    }
+  }
 
   return (
     <>
@@ -141,6 +217,62 @@ function Dashboard() {
                 </div>
               </li>
             ))}
+          </ul>
+        )}
+      </section>
+
+      <section className="panel">
+        <header>
+          <h2>Active Local Servers</h2>
+          <Link to="/projects" className="link">
+            Manage projects
+          </Link>
+        </header>
+        {runsLoading && <p className="muted">Checking active runs…</p>}
+        {runsError && <p className="error-text">{runsError}</p>}
+        {!runsLoading && !runsError && activeRuns.length === 0 && (
+          <p className="muted">No local servers are running right now.</p>
+        )}
+        {!runsLoading && !runsError && activeRuns.length > 0 && (
+          <ul className="project-list">
+            {activeRuns.map((run) => {
+              const project = projectLookup[run.projectId]
+              return (
+                <li key={run.id}>
+                  <div>
+                    <h4>
+                      {project ? project.name : run.projectId}{' '}
+                      <span className="badge">{runStatusLabel[run.status]}</span>
+                    </h4>
+                    <p className="muted">
+                      Started {new Date(run.createdAt).toLocaleString()}
+                      {run.port && <> · Port {run.port}</>}
+                      {project?.minecraftVersion && <> · {project.minecraftVersion}</>}
+                    </p>
+                    {run.containerName && <p className="muted">Container: {run.containerName}</p>}
+                    {project && (
+                      <p className="muted">
+                        Loader: {project.loader.toUpperCase()}{' '}
+                        {project.repo?.fullName ? `· ${project.repo.fullName}` : ''}
+                      </p>
+                    )}
+                  </div>
+                  <div className="dev-buttons">
+                    <Link className="ghost" to={`/projects/${run.projectId}`}>
+                      View project
+                    </Link>
+                    <button
+                      type="button"
+                      className="ghost"
+                      disabled={run.status === 'stopping' || runBusy[run.id]}
+                      onClick={() => handleStopRun(run)}
+                    >
+                      {run.status === 'stopping' || runBusy[run.id] ? 'Stopping…' : 'Stop'}
+                    </button>
+                  </div>
+                </li>
+              )
+            })}
           </ul>
         )}
       </section>

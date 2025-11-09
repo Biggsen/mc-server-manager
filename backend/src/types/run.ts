@@ -1,4 +1,10 @@
-export type RunStatus = "pending" | "running" | "succeeded" | "failed";
+export type RunStatus =
+  | "pending"
+  | "running"
+  | "stopping"
+  | "stopped"
+  | "succeeded"
+  | "failed";
 
 export type RunLogStream = "stdout" | "stderr" | "system";
 

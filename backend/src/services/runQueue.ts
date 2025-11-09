@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile, rm } from "fs/promises";
 import { join } from "path";
-import { spawn } from "child_process";
+import { spawn, type ChildProcess } from "child_process";
 import { v4 as uuid } from "uuid";
 import { createServer } from "net";
 import AdmZip from "adm-zip";
@@ -13,6 +13,7 @@ const LOG_PATH = join(DATA_DIR, "runs.json");
 const WORKSPACE_ROOT = join(DATA_DIR, "workspaces");
 
 const jobs = new Map<string, RunJob>();
+const processes = new Map<string, ChildProcess>();
 
 void loadRunsFromDisk();
 
@@ -55,9 +56,59 @@ export async function enqueueRun(project: StoredProject): Promise<RunJob> {
   return job;
 }
 
+export async function stopRun(jobId: string): Promise<RunJob> {
+  const job = jobs.get(jobId);
+  if (!job) {
+    throw new Error("Run not found.");
+  }
+
+  if (job.status === "succeeded" || job.status === "failed" || job.status === "stopped") {
+    return job;
+  }
+
+  appendLog(job, "system", "Stop requested.");
+  job.status = "stopping";
+  jobs.set(jobId, job);
+  await persistRuns();
+
+  const containerName = job.containerName;
+  if (containerName) {
+    try {
+      await stopDockerContainer(job, containerName);
+    } catch (error) {
+      appendLog(
+        job,
+        "stderr",
+        error instanceof Error ? error.message : "Failed to stop docker container",
+      );
+    }
+  }
+
+  const child = processes.get(jobId);
+  if (child && !child.killed) {
+    child.kill();
+  }
+  processes.delete(jobId);
+
+  job.status = "stopped";
+  job.finishedAt = new Date().toISOString();
+  jobs.set(jobId, job);
+  await persistRuns();
+  return job;
+}
+
 async function runJob(project: StoredProject, jobId: string): Promise<void> {
   const job = jobs.get(jobId);
   if (!job) return;
+
+  if (job.status === "stopped" || job.status === "stopping") {
+    appendLog(job, "system", "Run was stopped before start; skipping execution.");
+    job.status = "stopped";
+    job.finishedAt = job.finishedAt ?? new Date().toISOString();
+    jobs.set(jobId, job);
+    await persistRuns();
+    return;
+  }
 
   job.status = "running";
   job.startedAt = new Date().toISOString();
@@ -143,6 +194,7 @@ async function ensureDockerJob(job: RunJob, project: StoredProject): Promise<voi
 async function executeCommand(job: RunJob, command: string, args: string[]): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+    processes.set(job.id, child);
 
     child.stdout?.on("data", (chunk: Buffer) => {
       appendLog(job, "stdout", chunk.toString("utf-8"));
@@ -157,11 +209,27 @@ async function executeCommand(job: RunJob, command: string, args: string[]): Pro
     });
 
     child.on("close", (code) => {
+      processes.delete(job.id);
+      const currentJob = jobs.get(job.id);
+      if (!currentJob) {
+        resolve();
+        return;
+      }
+
+      if (currentJob.status === "stopping" || currentJob.status === "stopped") {
+        currentJob.status = "stopped";
+        currentJob.finishedAt = currentJob.finishedAt ?? new Date().toISOString();
+        jobs.set(currentJob.id, currentJob);
+        void persistRuns();
+        resolve();
+        return;
+      }
+
       if (code === 0) {
         appendLog(job, "system", "Docker run completed successfully.");
-        job.status = "succeeded";
-        job.finishedAt = new Date().toISOString();
-        jobs.set(job.id, job);
+        currentJob.status = "succeeded";
+        currentJob.finishedAt = new Date().toISOString();
+        jobs.set(currentJob.id, currentJob);
         void persistRuns();
         resolve();
       } else {
@@ -174,10 +242,18 @@ async function executeCommand(job: RunJob, command: string, args: string[]): Pro
 async function simulateLocalRun(job: RunJob, project: StoredProject): Promise<void> {
   appendLog(job, "stdout", `Simulating server startup for ${project.id}`);
   job.port = job.port ?? 25565;
-  await delay(1000);
-  appendLog(job, "stdout", "Server is running (simulation)");
-  await delay(1000);
-  appendLog(job, "stdout", "Server shutdown complete (simulation)");
+  for (let step = 0; step < 2; step += 1) {
+    if (job.status === "stopping" || job.status === "stopped") {
+      appendLog(job, "system", "Simulation interrupted by stop request.");
+      job.status = "stopped";
+      job.finishedAt = new Date().toISOString();
+      jobs.set(job.id, job);
+      await persistRuns();
+      return;
+    }
+    await delay(1000);
+    appendLog(job, "stdout", step === 0 ? "Server is running (simulation)" : "Server shutdown complete (simulation)");
+  }
   job.status = "succeeded";
   job.finishedAt = new Date().toISOString();
   jobs.set(job.id, job);
@@ -226,6 +302,39 @@ async function persistRuns(): Promise<void> {
     a.createdAt < b.createdAt ? 1 : -1,
   );
   await writeFile(LOG_PATH, JSON.stringify({ runs: snapshot }, null, 2), "utf-8");
+}
+
+async function stopDockerContainer(job: RunJob, containerName: string): Promise<void> {
+  appendLog(job, "system", `Stopping docker container ${containerName}`);
+  await new Promise<void>((resolve, reject) => {
+    const stopper = spawn("docker", ["stop", containerName], { stdio: ["ignore", "pipe", "pipe"] });
+
+    stopper.stdout?.on("data", (chunk: Buffer) => {
+      appendLog(job, "stdout", chunk.toString("utf-8"));
+    });
+
+    stopper.stderr?.on("data", (chunk: Buffer) => {
+      appendLog(job, "stderr", chunk.toString("utf-8"));
+    });
+
+    stopper.on("error", (error) => {
+      reject(error);
+    });
+
+    stopper.on("close", (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`docker stop exited with status ${code}`));
+      }
+    });
+  }).catch((error) => {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      appendLog(job, "system", "Docker CLI not found while attempting to stop container.");
+      return;
+    }
+    throw error;
+  });
 }
 
 function createContainerName(projectId: string, jobId: string): string {

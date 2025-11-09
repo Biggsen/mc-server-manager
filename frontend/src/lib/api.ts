@@ -303,7 +303,13 @@ export async function scanProjectAssets(projectId: string): Promise<{
   return data.project
 }
 
-export type RunStatus = 'pending' | 'running' | 'succeeded' | 'failed'
+export type RunStatus =
+  | 'pending'
+  | 'running'
+  | 'stopping'
+  | 'stopped'
+  | 'succeeded'
+  | 'failed'
 
 export interface RunLogEntry {
   timestamp: string
@@ -337,6 +343,24 @@ export async function runProjectLocally(projectId: string): Promise<RunJob> {
 export async function fetchProjectRuns(projectId: string): Promise<RunJob[]> {
   const data = await request<{ runs: RunJob[] }>(`/projects/${projectId}/runs`)
   return data.runs
+}
+
+export async function fetchRuns(status?: RunStatus): Promise<RunJob[]> {
+  const params = new URLSearchParams()
+  if (status) {
+    params.set('status', status)
+  }
+  const query = params.toString()
+  const path = query ? `/runs?${query}` : '/runs'
+  const data = await request<{ runs: RunJob[] }>(path)
+  return data.runs
+}
+
+export async function stopRunJob(runId: string): Promise<RunJob> {
+  const data = await request<{ run: RunJob }>(`/runs/${runId}/stop`, {
+    method: 'POST',
+  })
+  return data.run
 }
 
 export async function fetchProject(projectId: string): Promise<ProjectSummary> {
