@@ -3,12 +3,14 @@
   display: flex;
   flex-direction: column;
   gap: 2rem;
+  align-items: center;
 }
 
 .app-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  width: min(1400px, 100%);
   padding: 1.5rem 2rem 0;
 }
 
@@ -97,10 +99,11 @@
 
 .app-content {
   flex: 1;
-  padding: 0 2rem 2rem;
+  width: min(1400px, 100%);
+  padding: 0 2rem 2.5rem;
   display: flex;
   flex-direction: column;
-  gap: 2rem;
+  gap: 2.5rem;
 }
 
 .panel {
@@ -172,6 +175,21 @@ ul {
 .project-list h4 {
   margin: 0;
   font-size: 1rem;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: rgba(125, 249, 255, 0.15);
+  border: 1px solid rgba(125, 249, 255, 0.35);
+  color: var(--accent-color);
 }
 
 .project-list time {

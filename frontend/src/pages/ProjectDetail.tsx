@@ -20,6 +20,11 @@ import {
 } from '../lib/api'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? '/api'
+const providerLabel: Record<PluginSearchResult['provider'], string> = {
+  hangar: 'Hangar',
+  modrinth: 'Modrinth',
+  spiget: 'Spigot',
+}
 
 interface ManifestPreview {
   buildId: string
@@ -194,19 +199,18 @@ function ProjectDetail() {
               {project.plugins.map((plugin) => (
                 <li key={`${plugin.id}:${plugin.version}`}>
                   <div>
-                    <strong>{plugin.id}</strong> <span className="muted">v{plugin.version}</span>
+                    <strong>{plugin.id}</strong>{' '}
                     {plugin.provider && (
+                      <span className="badge">
+                        {plugin.provider.charAt(0).toUpperCase() + plugin.provider.slice(1)}
+                      </span>
+                    )}{' '}
+                    <span className="muted">v{plugin.version}</span>
+                    {plugin.source?.projectUrl && (
                       <p className="muted">
-                        Source: {plugin.provider}
-                        {plugin.source?.projectUrl && (
-                          <>
-                            {' '}
-                            —{' '}
-                            <a href={plugin.source.projectUrl} target="_blank" rel="noreferrer">
-                              View project
-                            </a>
-                          </>
-                        )}
+                        <a href={plugin.source.projectUrl} target="_blank" rel="noreferrer">
+                          View project
+                        </a>
                       </p>
                     )}
                   </div>
@@ -478,7 +482,7 @@ function ProjectDetail() {
               {loadingPlugins ? 'Searching…' : 'Search'}
             </button>
           </div>
-          {pluginStatus && <p className="muted">{pluginStatus}</p>}
+            {pluginStatus && <p className="muted">{pluginStatus}</p>}
         </form>
 
         {pluginResults.length > 0 && (
@@ -491,7 +495,8 @@ function ProjectDetail() {
                 {pluginResults.map((result) => (
                   <li key={result.slug}>
                     <div>
-                      <strong>{result.name}</strong>
+                      <strong>{result.name}</strong>{' '}
+                      <span className="badge">{providerLabel[result.provider]}</span>
                       {result.summary && <p className="muted">{result.summary}</p>}
                       {result.projectUrl && (
                         <a href={result.projectUrl} target="_blank" rel="noreferrer">
@@ -520,11 +525,11 @@ function ProjectDetail() {
                               ),
                             )
                             setPluginVersions(filtered.length > 0 ? filtered : versions)
-                            setPluginStatus(
-                              filtered.length === 0
-                                ? 'No exact version match for this Minecraft version, showing all releases.'
-                                : null,
-                            )
+                  setPluginStatus(
+                    filtered.length === 0
+                      ? 'No exact version match for this Minecraft version, showing recent releases.'
+                      : null,
+                  )
                           } catch (err) {
                             setPluginStatus(
                               err instanceof Error ? err.message : 'Failed to load versions.',

@@ -16,6 +16,7 @@ export async function searchPlugins(
     query,
     loader,
     minecraftVersion,
+    fallback: '1',
   })
   const data = await request<{ results: PluginSearchResult[] }>(`/plugins/search?${params.toString()}`)
   return data.results

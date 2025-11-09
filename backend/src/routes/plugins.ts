@@ -15,6 +15,7 @@ router.get("/search", async (req: Request, res: Response) => {
     const loader = typeof req.query.loader === "string" ? req.query.loader : "paper";
     const minecraftVersion =
       typeof req.query.minecraftVersion === "string" ? req.query.minecraftVersion : "latest";
+    const allowFallback = req.query.fallback === "1";
 
     const searchTerm = rawQuery.trim();
     if (!searchTerm) {
@@ -22,7 +23,10 @@ router.get("/search", async (req: Request, res: Response) => {
       return;
     }
 
-    const results = await searchPlugins(searchTerm, loader, minecraftVersion);
+    let results = await searchPlugins(searchTerm, loader, minecraftVersion, false);
+    if (results.length === 0 && allowFallback) {
+      results = await searchPlugins(searchTerm, loader, minecraftVersion, true);
+    }
     res.json({ results });
   } catch (error) {
     console.error("Plugin search failed", error);

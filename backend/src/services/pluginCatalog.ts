@@ -30,14 +30,15 @@ export async function searchPlugins(
   query: string,
   loader: string,
   minecraftVersion: string,
+  allowFallback = false,
 ): Promise<PluginSearchResult[]> {
   const trimmed = query.trim();
   if (!trimmed) return [];
 
   const results = await Promise.allSettled([
-    searchHangar(trimmed, loader, minecraftVersion),
-    searchModrinth(trimmed, loader, minecraftVersion),
-    searchSpiget(trimmed),
+    searchHangar(trimmed, loader, minecraftVersion, allowFallback),
+    searchModrinth(trimmed, loader, minecraftVersion, allowFallback),
+    searchSpiget(trimmed, allowFallback),
   ]);
 
   const merged: PluginSearchResult[] = [];
@@ -82,6 +83,7 @@ async function searchHangar(
   query: string,
   loader: string,
   minecraftVersion: string,
+  allowFallback: boolean,
 ): Promise<PluginSearchResult[]> {
   const response = await fetch(
     `${HANGAR_API}/projects?limit=25&offset=0&query=${encodeURIComponent(query)}`,
@@ -120,8 +122,10 @@ async function searchHangar(
       ),
     );
 
-    if (!compatible && versions.length > 0 && !withinCutoff(versions[0].releasedAt)) {
-      continue;
+    if (!compatible) {
+      if (!allowFallback) continue;
+      const recent = versions.find((version) => withinCutoff(version.releasedAt));
+      if (!recent) continue;
     }
 
     filtered.push({
@@ -183,6 +187,7 @@ async function searchModrinth(
   query: string,
   loader: string,
   minecraftVersion: string,
+  allowFallback: boolean,
 ): Promise<PluginSearchResult[]> {
   const facets = [
     `["project_type:mod"]`,
@@ -214,17 +219,23 @@ async function searchModrinth(
       title: string;
       description?: string;
       project_url: string;
+      versions?: string[];
     }>;
   };
 
-  return (payload.hits ?? []).map((hit) => ({
-    provider: "modrinth" as const,
-    id: hit.project_id,
-    slug: hit.project_id,
-    name: hit.title,
-    summary: hit.description,
-    projectUrl: hit.project_url,
-  }));
+  return (payload.hits ?? [])
+    .filter((hit) => {
+      if (allowFallback) return true;
+      return hit.versions?.includes(minecraftVersion);
+    })
+    .map((hit) => ({
+      provider: "modrinth" as const,
+      id: hit.project_id,
+      slug: hit.project_id,
+      name: hit.title,
+      summary: hit.description,
+      projectUrl: hit.project_url,
+    }));
 }
 
 async function fetchModrinthVersions(
@@ -277,7 +288,10 @@ async function fetchModrinthVersions(
     }));
 }
 
-async function searchSpiget(query: string): Promise<PluginSearchResult[]> {
+async function searchSpiget(query: string, allowFallback: boolean): Promise<PluginSearchResult[]> {
+  if (!allowFallback) {
+    return [];
+  }
   const response = await fetch(
     `https://api.spiget.org/v2/search/resources/${encodeURIComponent(query)}?size=25`,
     {
