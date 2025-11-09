@@ -1,6 +1,8 @@
 import type { Request, Response } from "express";
 import { Router } from "express";
 import { writeFile } from "fs/promises";
+import multer from "multer";
+import { createHash } from "crypto";
 import {
   createProject,
   findProject,
@@ -21,10 +23,21 @@ import { commitFiles, getOctokitForRequest } from "../services/githubClient";
 import {
   collectProjectDefinitionFiles,
   renderConfigFiles,
+  writeProjectFileBuffer,
 } from "../services/projectFiles";
 import { enqueueRun, listRuns } from "../services/runQueue";
 
 const router = Router();
+const pluginUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 64 * 1024 * 1024,
+  },
+});
+
+function sanitizeFileName(name: string): string {
+  return name.replace(/[^a-zA-Z0-9._-]/g, "_");
+}
 
 interface RepoParseSuccess {
   success: true;
@@ -343,7 +356,16 @@ router.post("/:id/plugins", async (req: Request, res: Response) => {
       return;
     }
 
-    const { pluginId, version, provider, source } = req.body ?? {};
+    const {
+      pluginId,
+      version,
+      provider,
+      source,
+      downloadUrl,
+      hash,
+      minecraftVersionMin,
+      minecraftVersionMax,
+    } = req.body ?? {};
 
     if (!pluginId || !version) {
       res.status(400).json({ error: "pluginId and version are required" });
@@ -361,24 +383,62 @@ router.post("/:id/plugins", async (req: Request, res: Response) => {
       providerValue = normalized as PluginProvider;
     }
 
-    let sourceRef: PluginSourceReference | undefined;
-    if (source && providerValue) {
-      sourceRef = {
-        provider: providerValue,
-        slug: typeof source.slug === "string" ? source.slug : pluginId,
-        displayName: source.displayName,
-        projectUrl: source.projectUrl,
-        versionId: source.versionId,
-        downloadUrl: source.downloadUrl,
-        loader: source.loader,
-        minecraftVersion: source.minecraftVersion,
-      };
+    const normalizedMin =
+      typeof minecraftVersionMin === "string" && minecraftVersionMin.trim().length > 0
+        ? minecraftVersionMin.trim()
+        : undefined;
+    const normalizedMax =
+      typeof minecraftVersionMax === "string" && minecraftVersionMax.trim().length > 0
+        ? minecraftVersionMax.trim()
+        : undefined;
+
+    const resolvedProvider: PluginProvider | undefined =
+      providerValue ?? (downloadUrl ? "custom" : undefined);
+
+    if (resolvedProvider === "custom" && (!normalizedMin || !normalizedMax)) {
+      res.status(400).json({
+        error: "minecraftVersionMin and minecraftVersionMax are required for custom plugins",
+      });
+      return;
     }
+
+    const sourceRef: PluginSourceReference | undefined =
+      source || downloadUrl
+        ? {
+            provider: resolvedProvider ?? "custom",
+            slug: typeof source?.slug === "string" ? source.slug : pluginId,
+            displayName: source?.displayName,
+            projectUrl: source?.projectUrl,
+            versionId: source?.versionId,
+            downloadUrl: downloadUrl ?? source?.downloadUrl,
+            loader: source?.loader,
+            minecraftVersion: source?.minecraftVersion,
+            minecraftVersionMin: normalizedMin ?? source?.minecraftVersionMin,
+            minecraftVersionMax: normalizedMax ?? source?.minecraftVersionMax,
+            sha256: hash ?? source?.sha256,
+          }
+        : source
+        ? {
+            provider: providerValue ?? source.provider,
+            slug: typeof source.slug === "string" ? source.slug : pluginId,
+            displayName: source.displayName,
+            projectUrl: source.projectUrl,
+            versionId: source.versionId,
+            downloadUrl: source.downloadUrl,
+            loader: source.loader,
+            minecraftVersion: source.minecraftVersion,
+            minecraftVersionMin: source.minecraftVersionMin,
+            minecraftVersionMax: source.minecraftVersionMax,
+            sha256: source.sha256,
+          }
+        : undefined;
 
     const updated = await upsertProjectPlugin(id, {
       id: pluginId,
       version,
-      provider: providerValue,
+      provider: sourceRef?.provider ?? resolvedProvider ?? providerValue,
+      minecraftVersionMin: sourceRef?.minecraftVersionMin,
+      minecraftVersionMax: sourceRef?.minecraftVersionMax,
       source: sourceRef,
     });
 
@@ -393,6 +453,80 @@ router.post("/:id/plugins", async (req: Request, res: Response) => {
     res.status(500).json({ error: "Failed to add plugin" });
   }
 });
+
+router.post(
+  "/:id/plugins/upload",
+  pluginUpload.single("file"),
+  async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const project = await findProject(id);
+      if (!project) {
+        res.status(404).json({ error: "Project not found" });
+        return;
+      }
+
+      const file = req.file;
+      const { pluginId, version, minecraftVersionMin, minecraftVersionMax } = req.body ?? {};
+
+      if (!file) {
+        res.status(400).json({ error: "Plugin file is required" });
+        return;
+      }
+      if (!pluginId || !version) {
+        res.status(400).json({ error: "pluginId and version are required" });
+        return;
+      }
+
+      const normalizedMin =
+        typeof minecraftVersionMin === "string" && minecraftVersionMin.trim().length > 0
+          ? minecraftVersionMin.trim()
+          : undefined;
+      const normalizedMax =
+        typeof minecraftVersionMax === "string" && minecraftVersionMax.trim().length > 0
+          ? minecraftVersionMax.trim()
+          : undefined;
+
+      if (!normalizedMin || !normalizedMax) {
+        res
+          .status(400)
+          .json({ error: "minecraftVersionMin and minecraftVersionMax are required for uploads" });
+        return;
+      }
+
+      const safeName = sanitizeFileName(file.originalname || `${pluginId}-${version}.jar`);
+      const relativePath = `plugins/uploads/${Date.now()}-${safeName}`;
+      await writeProjectFileBuffer(project, relativePath, file.buffer);
+      const sha256 = createHash("sha256").update(file.buffer).digest("hex");
+
+      const updated = await upsertProjectPlugin(id, {
+        id: pluginId,
+        version,
+        provider: "custom",
+        source: {
+          provider: "custom",
+          slug: pluginId,
+          uploadPath: relativePath,
+          sha256,
+          minecraftVersionMin: normalizedMin,
+          minecraftVersionMax: normalizedMax,
+        },
+        minecraftVersionMin: normalizedMin,
+        minecraftVersionMax: normalizedMax,
+      });
+
+      res.status(201).json({
+        project: {
+          id,
+          plugins: updated?.plugins ?? [],
+        },
+      });
+    } catch (error) {
+      console.error("Failed to upload plugin", error);
+      res.status(500).json({ error: "Failed to upload plugin" });
+    }
+  },
+);
 
 router.post("/:id/manifest", async (req: Request, res: Response) => {
   try {

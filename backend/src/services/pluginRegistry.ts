@@ -69,6 +69,27 @@ export async function fetchPluginArtifact(
   const requestedVersion = plugin.version ?? "latest";
   const pluginId = plugin.id;
 
+  if (plugin.source?.uploadPath) {
+    const absolutePath = join(resolveProjectRoot(project), plugin.source.uploadPath);
+    const buffer = await readFile(absolutePath);
+    return {
+      buffer,
+      fileName: basename(plugin.source.uploadPath),
+      version: requestedVersion,
+    };
+  }
+
+  if (plugin.source?.downloadUrl) {
+    const artifact = await downloadFromHttp(
+      { type: "http", url: plugin.source.downloadUrl },
+      { pluginId, requestedVersion },
+    );
+    if (artifact) {
+      return artifact;
+    }
+    throw new Error(`Failed to download plugin ${pluginId} from ${plugin.source.downloadUrl}`);
+  }
+
   if (plugin.provider) {
     const artifact = await downloadFromProvider(project, plugin, options);
     if (artifact) {

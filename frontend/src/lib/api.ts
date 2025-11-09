@@ -122,6 +122,8 @@ export interface ProjectSummary {
     version: string
     sha256?: string
     provider?: 'hangar' | 'modrinth' | 'spiget' | 'github' | 'custom'
+    minecraftVersionMin?: string
+    minecraftVersionMax?: string
     source?: {
       provider: 'hangar' | 'modrinth' | 'spiget' | 'github' | 'custom'
       slug: string
@@ -130,6 +132,10 @@ export interface ProjectSummary {
       downloadUrl?: string
       loader?: string
       minecraftVersion?: string
+      minecraftVersionMin?: string
+      minecraftVersionMax?: string
+      uploadPath?: string
+      sha256?: string
     }
   }>
   configs?: Array<{
@@ -310,6 +316,9 @@ export async function addProjectPlugin(
     pluginId: string
     version: string
     provider?: string
+    downloadUrl?: string
+    minecraftVersionMin: string
+    minecraftVersionMax: string
     source?: Record<string, unknown>
   },
 ): Promise<ProjectSummary['plugins']> {
@@ -320,6 +329,44 @@ export async function addProjectPlugin(
       body: JSON.stringify(payload),
     },
   )
+  emitProjectsUpdated()
+  return data.project.plugins
+}
+
+export async function uploadProjectPlugin(
+  projectId: string,
+  payload: {
+    pluginId: string
+    version: string
+    file: File
+    minecraftVersionMin: string
+    minecraftVersionMax: string
+  },
+): Promise<ProjectSummary['plugins']> {
+  const formData = new FormData()
+  formData.append('pluginId', payload.pluginId)
+  formData.append('version', payload.version)
+  formData.append('file', payload.file)
+  formData.append('minecraftVersionMin', payload.minecraftVersionMin)
+  formData.append('minecraftVersionMax', payload.minecraftVersionMax)
+
+  const response = await fetch(
+    `${API_BASE}/projects/${projectId}/plugins/upload`,
+    {
+      method: 'POST',
+      body: formData,
+      credentials: 'include',
+    },
+  )
+
+  if (!response.ok) {
+    const message = await response.text()
+    throw new Error(message || `Upload failed with status ${response.status}`)
+  }
+
+  const data = (await response.json()) as {
+    project: { plugins: ProjectSummary['plugins'] }
+  }
   emitProjectsUpdated()
   return data.project.plugins
 }

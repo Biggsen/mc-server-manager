@@ -10,25 +10,36 @@ import {
   scanProjectAssets,
   runProjectLocally,
   searchPlugins,
-  fetchPluginVersions,
   addProjectPlugin,
+  uploadProjectPlugin,
   type ProjectSummary,
   type BuildJob,
   type RunJob,
   type PluginSearchResult,
-  type PluginVersionInfo,
 } from '../lib/api'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? '/api'
-const providerLabel: Record<PluginSearchResult['provider'], string> = {
+const providerLabel: Record<'hangar' | 'modrinth' | 'spiget' | 'github' | 'custom', string> = {
   hangar: 'Hangar',
   modrinth: 'Modrinth',
   spiget: 'Spigot',
+  github: 'GitHub',
+  custom: 'Custom',
 }
 
 interface ManifestPreview {
   buildId: string
   content: unknown
+}
+
+function formatMinecraftRange(min?: string | null, max?: string | null): string | null {
+  if (!min && !max) {
+    return null
+  }
+  if (min && max) {
+    return min === max ? min : `${min} – ${max}`
+  }
+  return min ?? max ?? null
 }
 
 function ProjectDetail() {
@@ -46,10 +57,21 @@ function ProjectDetail() {
   const [manifestPreview, setManifestPreview] = useState<ManifestPreview | null>(null)
   const [pluginQuery, setPluginQuery] = useState('')
   const [pluginResults, setPluginResults] = useState<PluginSearchResult[]>([])
-  const [pluginVersions, setPluginVersions] = useState<PluginVersionInfo[]>([])
-  const [pluginSelection, setPluginSelection] = useState<PluginSearchResult | null>(null)
-  const [pluginStatus, setPluginStatus] = useState<string | null>(null)
+  const [searchStatus, setSearchStatus] = useState<string | null>(null)
   const [loadingPlugins, setLoadingPlugins] = useState(false)
+  const [manualPluginId, setManualPluginId] = useState('')
+  const [manualPluginVersion, setManualPluginVersion] = useState('')
+  const [manualPluginUrl, setManualPluginUrl] = useState('')
+  const [manualMinVersion, setManualMinVersion] = useState('')
+  const [manualMaxVersion, setManualMaxVersion] = useState('')
+  const [uploadPluginId, setUploadPluginId] = useState('')
+  const [uploadPluginVersion, setUploadPluginVersion] = useState('')
+  const [uploadPluginFile, setUploadPluginFile] = useState<File | null>(null)
+  const [uploadMinVersion, setUploadMinVersion] = useState('')
+  const [uploadMaxVersion, setUploadMaxVersion] = useState('')
+  const [manualBusy, setManualBusy] = useState(false)
+  const [uploadBusy, setUploadBusy] = useState(false)
+  const [pluginMessage, setPluginMessage] = useState<string | null>(null)
 
   useEffect(() => {
     if (!id) return
@@ -88,6 +110,16 @@ function ProjectDetail() {
       window.clearInterval(interval)
     }
   }, [id])
+
+  useEffect(() => {
+    if (!project) {
+      return
+    }
+    setManualMinVersion((prev) => prev || project.minecraftVersion)
+    setManualMaxVersion((prev) => prev || project.minecraftVersion)
+    setUploadMinVersion((prev) => prev || project.minecraftVersion)
+    setUploadMaxVersion((prev) => prev || project.minecraftVersion)
+  }, [project])
 
   const latestBuild = useMemo(
     () => builds.find((build) => build.status === 'succeeded'),
@@ -196,26 +228,43 @@ function ProjectDetail() {
               <h3>Configured Plugins</h3>
             </header>
             <ul className="project-list">
-              {project.plugins.map((plugin) => (
-                <li key={`${plugin.id}:${plugin.version}`}>
-                  <div>
-                    <strong>{plugin.id}</strong>{' '}
-                    {plugin.provider && (
-                      <span className="badge">
-                        {plugin.provider.charAt(0).toUpperCase() + plugin.provider.slice(1)}
-                      </span>
-                    )}{' '}
-                    <span className="muted">v{plugin.version}</span>
-                    {plugin.source?.projectUrl && (
-                      <p className="muted">
-                        <a href={plugin.source.projectUrl} target="_blank" rel="noreferrer">
-                          View project
-                        </a>
-                      </p>
-                    )}
-                  </div>
-                </li>
-              ))}
+              {project.plugins.map((plugin) => {
+                const supportRange = formatMinecraftRange(
+                  plugin.minecraftVersionMin ?? plugin.source?.minecraftVersionMin,
+                  plugin.minecraftVersionMax ?? plugin.source?.minecraftVersionMax,
+                )
+                return (
+                  <li key={`${plugin.id}:${plugin.version}`}>
+                    <div>
+                      <strong>{plugin.id}</strong>{' '}
+                      {plugin.provider && (
+                        <span className="badge">
+                          {providerLabel[plugin.provider] ?? plugin.provider}
+                        </span>
+                      )}{' '}
+                      <span className="muted">v{plugin.version}</span>
+                      {supportRange && <p className="muted">Supports: {supportRange}</p>}
+                      {plugin.source?.projectUrl && (
+                        <p className="muted">
+                          <a href={plugin.source.projectUrl} target="_blank" rel="noreferrer">
+                            View project
+                          </a>
+                        </p>
+                      )}
+                      {plugin.source?.downloadUrl && (
+                        <p className="muted">
+                          <a href={plugin.source.downloadUrl} target="_blank" rel="noreferrer">
+                            Download URL
+                          </a>
+                        </p>
+                      )}
+                      {plugin.source?.uploadPath && (
+                        <p className="muted">Uploaded jar: {plugin.source.uploadPath}</p>
+                      )}
+                    </div>
+                  </li>
+                )
+              })}
             </ul>
           </article>
         )}
@@ -450,17 +499,18 @@ function ProjectDetail() {
             if (!pluginQuery.trim()) return
             try {
               setLoadingPlugins(true)
+              setSearchStatus(null)
               const results = await searchPlugins(
                 pluginQuery,
                 project.loader,
                 project.minecraftVersion,
               )
               setPluginResults(results)
-              setPluginSelection(null)
-              setPluginVersions([])
-              setPluginStatus(null)
+              if (results.length === 0) {
+                setSearchStatus('No plugins found for that query.')
+              }
             } catch (err) {
-              setPluginStatus(err instanceof Error ? err.message : 'Search failed')
+              setSearchStatus(err instanceof Error ? err.message : 'Search failed')
             } finally {
               setLoadingPlugins(false)
             }
@@ -482,7 +532,7 @@ function ProjectDetail() {
               {loadingPlugins ? 'Searching…' : 'Search'}
             </button>
           </div>
-            {pluginStatus && <p className="muted">{pluginStatus}</p>}
+          {searchStatus && <p className="muted">{searchStatus}</p>}
         </form>
 
         {pluginResults.length > 0 && (
@@ -493,10 +543,20 @@ function ProjectDetail() {
               </header>
               <ul className="project-list">
                 {pluginResults.map((result) => (
-                  <li key={result.slug}>
+                  <li key={`${result.provider}:${result.slug}`}>
                     <div>
                       <strong>{result.name}</strong>{' '}
                       <span className="badge">{providerLabel[result.provider]}</span>
+                      <p className="muted">
+                        {result.slug} ·{' '}
+                        <a
+                          href={`https://google.com/search?q=${encodeURIComponent(`${result.name} ${project.loader} ${project.minecraftVersion}`)}`}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Search releases
+                        </a>
+                      </p>
                       {result.summary && <p className="muted">{result.summary}</p>}
                       {result.projectUrl && (
                         <a href={result.projectUrl} target="_blank" rel="noreferrer">
@@ -504,106 +564,218 @@ function ProjectDetail() {
                         </a>
                       )}
                     </div>
-                    <div className="dev-buttons">
-                      <button
-                        type="button"
-                        className="ghost"
-                        onClick={async () => {
-                          setPluginSelection(result)
-                          try {
-                          const versions = await fetchPluginVersions(
-                            result.provider,
-                            result.slug,
-                            project.loader,
-                            project.minecraftVersion,
-                          )
-                            const filtered = versions.filter((version) =>
-                              version.supports.some(
-                                (support) =>
-                                  support.loader.toLowerCase() === project.loader.toLowerCase() &&
-                                  support.minecraftVersions.includes(project.minecraftVersion),
-                              ),
-                            )
-                            setPluginVersions(filtered.length > 0 ? filtered : versions)
-                  setPluginStatus(
-                    filtered.length === 0
-                      ? 'No exact version match for this Minecraft version, showing recent releases.'
-                      : null,
-                  )
-                          } catch (err) {
-                            setPluginStatus(
-                              err instanceof Error ? err.message : 'Failed to load versions.',
-                            )
-                          }
-                        }}
-                      >
-                        View Versions
-                      </button>
-                    </div>
                   </li>
                 ))}
               </ul>
             </section>
-
-            {pluginSelection && (
-              <section className="panel">
-                <header>
-                  <h4>Versions for {pluginSelection.name}</h4>
-                </header>
-                {pluginVersions.length === 0 && <p className="muted">No versions found.</p>}
-                {pluginVersions.length > 0 && (
-                  <ul className="project-list">
-                    {pluginVersions.slice(0, 10).map((version) => (
-                      <li key={version.versionId}>
-                        <div>
-                          <strong>{version.name}</strong>
-                          {version.releasedAt && (
-                            <p className="muted">
-                              Released {new Date(version.releasedAt).toLocaleString()}
-                            </p>
-                          )}
-                        </div>
-                        <div className="dev-buttons">
-                          <button
-                            type="button"
-                            className="ghost"
-                            onClick={async () => {
-                              try {
-                                setBusy(true)
-                                const plugins = await addProjectPlugin(project.id, {
-                                  pluginId: pluginSelection.slug,
-                                  version: version.name,
-                                  provider: pluginSelection.provider,
-                                  source: {
-                                    slug: pluginSelection.slug,
-                                    projectUrl: pluginSelection.projectUrl,
-                                    versionId: version.versionId,
-                                  },
-                                })
-                                setProject((prev) =>
-                                  prev ? { ...prev, plugins: plugins ?? prev.plugins } : prev,
-                                )
-                                setMessage(`Added ${pluginSelection.name} ${version.name}`)
-                              } catch (err) {
-                                setMessage(
-                                  err instanceof Error ? err.message : 'Failed to add plugin.',
-                                )
-                              } finally {
-                                setBusy(false)
-                              }
-                            }}
-                          >
-                            Add to server
-                          </button>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </section>
-            )}
           </div>
         )}
+        <div className="layout-grid">
+          <section className="panel">
+            <header>
+              <h4>Add via Download URL</h4>
+            </header>
+            <form
+              className="page-form"
+              onSubmit={async (event) => {
+                event.preventDefault()
+                if (
+                  !manualPluginId.trim() ||
+                  !manualPluginVersion.trim() ||
+                  !manualPluginUrl.trim() ||
+                  !manualMinVersion.trim() ||
+                  !manualMaxVersion.trim()
+                ) {
+                  setPluginMessage(
+                    'Plugin ID, version, download URL, and Minecraft version range are required.',
+                  )
+                  return
+                }
+                try {
+                  setManualBusy(true)
+                  const plugins = await addProjectPlugin(project.id, {
+                    pluginId: manualPluginId.trim(),
+                    version: manualPluginVersion.trim(),
+                    provider: 'custom',
+                    downloadUrl: manualPluginUrl.trim(),
+                    minecraftVersionMin: manualMinVersion.trim(),
+                    minecraftVersionMax: manualMaxVersion.trim(),
+                  })
+                  setProject((prev) =>
+                    prev ? { ...prev, plugins: plugins ?? prev.plugins } : prev,
+                  )
+                  setPluginMessage(`Added ${manualPluginId.trim()} ${manualPluginVersion.trim()}`)
+                  setManualPluginId('')
+                  setManualPluginVersion('')
+                  setManualPluginUrl('')
+                  setManualMinVersion('')
+                  setManualMaxVersion('')
+                } catch (err) {
+                  setPluginMessage(err instanceof Error ? err.message : 'Failed to add plugin.')
+                } finally {
+                  setManualBusy(false)
+                }
+              }}
+            >
+              <div className="form-grid">
+                <div className="field">
+                  <label htmlFor="manual-plugin-id">Plugin ID</label>
+                  <input
+                    id="manual-plugin-id"
+                    value={manualPluginId}
+                    onChange={(event) => setManualPluginId(event.target.value)}
+                    placeholder="worldguard"
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="manual-plugin-version">Version</label>
+                  <input
+                    id="manual-plugin-version"
+                    value={manualPluginVersion}
+                    onChange={(event) => setManualPluginVersion(event.target.value)}
+                    placeholder="7.0.10"
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="manual-plugin-min-version">Min Minecraft Version</label>
+                  <input
+                    id="manual-plugin-min-version"
+                    value={manualMinVersion}
+                    onChange={(event) => setManualMinVersion(event.target.value)}
+                    placeholder={project.minecraftVersion}
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="manual-plugin-max-version">Max Minecraft Version</label>
+                  <input
+                    id="manual-plugin-max-version"
+                    value={manualMaxVersion}
+                    onChange={(event) => setManualMaxVersion(event.target.value)}
+                    placeholder={project.minecraftVersion}
+                  />
+                </div>
+                <div className="field span-2">
+                  <label htmlFor="manual-plugin-url">Download URL</label>
+                  <input
+                    id="manual-plugin-url"
+                    value={manualPluginUrl}
+                    onChange={(event) => setManualPluginUrl(event.target.value)}
+                    placeholder="https://example.com/plugin.jar"
+                  />
+                </div>
+              </div>
+              <div className="form-actions">
+                <button type="submit" className="primary" disabled={manualBusy}>
+                  {manualBusy ? 'Adding…' : 'Add Plugin'}
+                </button>
+              </div>
+            </form>
+          </section>
+
+          <section className="panel">
+            <header>
+              <h4>Upload Plugin Jar</h4>
+            </header>
+            <form
+              className="page-form"
+              onSubmit={async (event) => {
+                event.preventDefault()
+                if (
+                  !uploadPluginId.trim() ||
+                  !uploadPluginVersion.trim() ||
+                  !uploadPluginFile ||
+                  !uploadMinVersion.trim() ||
+                  !uploadMaxVersion.trim()
+                ) {
+                  setPluginMessage(
+                    'Plugin ID, version, file, and Minecraft version range are required.',
+                  )
+                  return
+                }
+                try {
+                  setUploadBusy(true)
+                  const plugins = await uploadProjectPlugin(project.id, {
+                    pluginId: uploadPluginId.trim(),
+                    version: uploadPluginVersion.trim(),
+                    file: uploadPluginFile,
+                    minecraftVersionMin: uploadMinVersion.trim(),
+                    minecraftVersionMax: uploadMaxVersion.trim(),
+                  })
+                  setProject((prev) =>
+                    prev ? { ...prev, plugins: plugins ?? prev.plugins } : prev,
+                  )
+                  setPluginMessage(`Uploaded ${uploadPluginId.trim()} ${uploadPluginVersion.trim()}`)
+                  setUploadPluginId('')
+                  setUploadPluginVersion('')
+                  setUploadPluginFile(null)
+                  setUploadMinVersion('')
+                  setUploadMaxVersion('')
+                  if (event.currentTarget instanceof HTMLFormElement) {
+                    event.currentTarget.reset()
+                  }
+                } catch (err) {
+                  setPluginMessage(err instanceof Error ? err.message : 'Failed to upload plugin.')
+                } finally {
+                  setUploadBusy(false)
+                }
+              }}
+            >
+              <div className="form-grid">
+                <div className="field">
+                  <label htmlFor="upload-plugin-id">Plugin ID</label>
+                  <input
+                    id="upload-plugin-id"
+                    value={uploadPluginId}
+                    onChange={(event) => setUploadPluginId(event.target.value)}
+                    placeholder="my-custom-plugin"
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="upload-plugin-version">Version</label>
+                  <input
+                    id="upload-plugin-version"
+                    value={uploadPluginVersion}
+                    onChange={(event) => setUploadPluginVersion(event.target.value)}
+                    placeholder="1.0.0"
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="upload-plugin-min-version">Min Minecraft Version</label>
+                  <input
+                    id="upload-plugin-min-version"
+                    value={uploadMinVersion}
+                    onChange={(event) => setUploadMinVersion(event.target.value)}
+                    placeholder={project.minecraftVersion}
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="upload-plugin-max-version">Max Minecraft Version</label>
+                  <input
+                    id="upload-plugin-max-version"
+                    value={uploadMaxVersion}
+                    onChange={(event) => setUploadMaxVersion(event.target.value)}
+                    placeholder={project.minecraftVersion}
+                  />
+                </div>
+                <div className="field span-2">
+                  <label htmlFor="upload-plugin-file">Plugin Jar</label>
+                  <input
+                    id="upload-plugin-file"
+                    type="file"
+                    accept=".jar,.zip"
+                    onChange={(event) => setUploadPluginFile(event.target.files?.[0] ?? null)}
+                  />
+                </div>
+              </div>
+              <div className="form-actions">
+                <button type="submit" className="primary" disabled={uploadBusy}>
+                  {uploadBusy ? 'Uploading…' : 'Upload Plugin'}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+        {pluginMessage && <p className="muted">{pluginMessage}</p>}
       </article>
     </section>
   )

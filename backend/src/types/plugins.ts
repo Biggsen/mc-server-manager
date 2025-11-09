@@ -9,6 +9,10 @@ export interface PluginSourceReference {
   downloadUrl?: string;
   loader?: string;
   minecraftVersion?: string;
+  minecraftVersionMin?: string;
+  minecraftVersionMax?: string;
+  uploadPath?: string;
+  sha256?: string;
 }
 
 export interface ProjectPlugin {
@@ -17,6 +21,8 @@ export interface ProjectPlugin {
   sha256?: string;
   provider?: PluginProvider;
   source?: PluginSourceReference;
+  minecraftVersionMin?: string;
+  minecraftVersionMax?: string;
 }
 
 
