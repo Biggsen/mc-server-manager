@@ -29,12 +29,25 @@ import {
 import { enqueueRun, listRuns } from "../services/runQueue";
 import { upsertStoredPlugin } from "../storage/pluginsStore";
 import { deleteProjectResources } from "../services/projectDeletion";
+import {
+  listUploadedConfigFiles,
+  overwriteUploadedConfigFile,
+  readUploadedConfigFile,
+  saveUploadedConfigFile,
+} from "../services/configUploads";
 
 const router = Router();
 const pluginUpload = multer({
   storage: multer.memoryStorage(),
   limits: {
     fileSize: 64 * 1024 * 1024,
+  },
+});
+
+const configUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 16 * 1024 * 1024,
   },
 });
 
@@ -716,6 +729,118 @@ router.delete("/:id", async (req: Request, res: Response) => {
   } catch (error) {
     console.error("Failed to delete project", error);
     res.status(500).json({ error: "Failed to delete project" });
+  }
+});
+
+router.get("/:id/configs", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const project = await findProject(id);
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    const configs = await listUploadedConfigFiles(project);
+    res.json({ configs });
+  } catch (error) {
+    console.error("Failed to list project configs", error);
+    res.status(500).json({ error: "Failed to list project configs" });
+  }
+});
+
+router.get("/:id/configs/file", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const path = typeof req.query.path === "string" ? req.query.path : undefined;
+    const project = await findProject(id);
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    if (!path) {
+      res.status(400).json({ error: "path query parameter is required" });
+      return;
+    }
+    const file = await readUploadedConfigFile(project, path);
+    res.json({ file });
+  } catch (error) {
+    console.error("Failed to read config file", error);
+    res.status(500).json({ error: "Failed to read config file" });
+  }
+});
+
+async function updateProjectConfigMetadata(
+  projectId: string,
+  project: StoredProject,
+  configPath: string,
+  sha256: string,
+): Promise<void> {
+  const currentConfigs = project.configs ?? [];
+  const nextConfigs = currentConfigs.filter((entry) => entry.path !== configPath);
+  nextConfigs.push({ path: configPath, sha256 });
+  nextConfigs.sort((a, b) => a.path.localeCompare(b.path));
+  await setProjectAssets(projectId, { configs: nextConfigs });
+}
+
+router.post(
+  "/:id/configs/upload",
+  configUpload.single("file"),
+  async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const project = await findProject(id);
+      if (!project) {
+        res.status(404).json({ error: "Project not found" });
+        return;
+      }
+
+      const file = req.file;
+      const relativePath = typeof req.body?.relativePath === "string" ? req.body.relativePath : "";
+
+      if (!file) {
+        res.status(400).json({ error: "Config file is required" });
+        return;
+      }
+      if (!relativePath.trim()) {
+        res.status(400).json({ error: "relativePath is required" });
+        return;
+      }
+
+      const saved = await saveUploadedConfigFile(project, relativePath, file.buffer);
+      await updateProjectConfigMetadata(id, project, saved.path, saved.sha256);
+      const refreshed = (await findProject(id)) ?? project;
+      const configs = await listUploadedConfigFiles(refreshed);
+      res.status(201).json({ configs });
+    } catch (error) {
+      console.error("Failed to upload config file", error);
+      const message = error instanceof Error ? error.message : "Failed to upload config file";
+      const status = message.toLowerCase().includes("relativepath") ? 400 : 500;
+      res.status(status).json({ error: message });
+    }
+  },
+);
+
+router.put("/:id/configs/file", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { path, content } = req.body ?? {};
+    const project = await findProject(id);
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    if (typeof path !== "string" || typeof content !== "string") {
+      res.status(400).json({ error: "path and content are required" });
+      return;
+    }
+    const saved = await overwriteUploadedConfigFile(project, path, content);
+    await updateProjectConfigMetadata(id, project, saved.path, saved.sha256);
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Failed to update config file", error);
+    const message = error instanceof Error ? error.message : "Failed to update config file";
+    const status = message.toLowerCase().includes("relativepath") ? 400 : 500;
+    res.status(status).json({ error: message });
   }
 });
 

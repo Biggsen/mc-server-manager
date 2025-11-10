@@ -114,6 +114,11 @@
   backdrop-filter: blur(12px);
 }
 
+.panel > .panel:not(:first-child),
+.panel > details.panel:not(:first-child) {
+  margin-top: 1.75rem;
+}
+
 .panel header {
   display: flex;
   align-items: center;

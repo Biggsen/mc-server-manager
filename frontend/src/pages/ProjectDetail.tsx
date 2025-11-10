@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   fetchProject,
@@ -14,6 +14,10 @@ import {
   addProjectPlugin,
   uploadProjectPlugin,
   fetchPluginLibrary,
+  fetchProjectConfigs,
+  uploadProjectConfig,
+  fetchProjectConfigFile,
+  updateProjectConfigFile,
   deleteProject,
   type ProjectSummary,
   type BuildJob,
@@ -21,6 +25,7 @@ import {
   type RunLogEntry,
   type PluginSearchResult,
   type StoredPluginRecord,
+  type ProjectConfigSummary,
 } from '../lib/api'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? '/api'
@@ -75,6 +80,20 @@ function formatMinecraftRange(min?: string | null, max?: string | null): string 
   return min ?? max ?? null
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes} B`
+  }
+  const units = ['KB', 'MB', 'GB', 'TB']
+  let value = bytes
+  let unitIndex = 0
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024
+    unitIndex += 1
+  }
+  return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[unitIndex]}`
+}
+
 function ProjectDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -111,6 +130,15 @@ function ProjectDetail() {
   const [libraryError, setLibraryError] = useState<string | null>(null)
   const [libraryQuery, setLibraryQuery] = useState('')
   const [libraryBusy, setLibraryBusy] = useState<string | null>(null)
+  const [configFiles, setConfigFiles] = useState<ProjectConfigSummary[]>([])
+  const [configsLoading, setConfigsLoading] = useState(false)
+  const [configsError, setConfigsError] = useState<string | null>(null)
+  const [configUploadPath, setConfigUploadPath] = useState('')
+  const [configUploadFile, setConfigUploadFile] = useState<File | null>(null)
+  const [configUploadBusy, setConfigUploadBusy] = useState(false)
+  const [configEditor, setConfigEditor] = useState<{ path: string; content: string } | null>(null)
+  const [configEditorBusy, setConfigEditorBusy] = useState(false)
+  const [configEditorError, setConfigEditorError] = useState<string | null>(null)
   const [deleteRepo, setDeleteRepo] = useState(false)
   const [deleteBusy, setDeleteBusy] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
@@ -127,6 +155,20 @@ function ProjectDetail() {
       setLibraryLoading(false)
     }
   }, [])
+
+  const loadConfigs = useCallback(async () => {
+    if (!id) return
+    try {
+      setConfigsLoading(true)
+      const files = await fetchProjectConfigs(id)
+      setConfigFiles(files)
+      setConfigsError(null)
+    } catch (err) {
+      setConfigsError(err instanceof Error ? err.message : 'Failed to load config files.')
+    } finally {
+      setConfigsLoading(false)
+    }
+  }, [id])
 
   const handleStopRun = useCallback(
     async (target: RunJob) => {
@@ -303,6 +345,10 @@ function ProjectDetail() {
     void loadLibrary()
   }, [loadLibrary])
 
+useEffect(() => {
+  void loadConfigs()
+}, [loadConfigs])
+
   useEffect(() => {
     if (!project) {
       return
@@ -381,6 +427,65 @@ function ProjectDetail() {
     },
     [id, loadLibrary],
   )
+
+  const handleUploadConfig = useCallback(
+    async (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault()
+      if (!id) return
+      if (!configUploadFile || !configUploadPath.trim()) {
+        setConfigsError('Config path and file are required.')
+        return
+      }
+      try {
+        setConfigUploadBusy(true)
+        const configs = await uploadProjectConfig(id, {
+          path: configUploadPath.trim(),
+          file: configUploadFile,
+        })
+        setConfigFiles(configs)
+        setConfigsError(null)
+        setConfigUploadPath('')
+        setConfigUploadFile(null)
+        if (event.currentTarget instanceof HTMLFormElement) {
+          event.currentTarget.reset()
+        }
+      } catch (err) {
+        setConfigsError(err instanceof Error ? err.message : 'Failed to upload config file.')
+      } finally {
+        setConfigUploadBusy(false)
+      }
+    },
+    [configUploadFile, configUploadPath, id],
+  )
+
+  const handleEditConfig = useCallback(
+    async (path: string) => {
+      if (!id) return
+      try {
+        const file = await fetchProjectConfigFile(id, path)
+        setConfigEditor({ path: file.path, content: file.content })
+        setConfigEditorError(null)
+      } catch (err) {
+        setConfigsError(err instanceof Error ? err.message : 'Failed to load config file.')
+      }
+    },
+    [id],
+  )
+
+  const handleSaveConfig = useCallback(async () => {
+    if (!id || !configEditor) return
+    try {
+      setConfigEditorBusy(true)
+      setConfigEditorError(null)
+      await updateProjectConfigFile(id, configEditor)
+      setConfigEditor(null)
+      await loadConfigs()
+    } catch (err) {
+      setConfigEditorError(err instanceof Error ? err.message : 'Failed to save configuration.')
+    } finally {
+      setConfigEditorBusy(false)
+    }
+  }, [configEditor, id, loadConfigs])
 
   const handleDeleteProject = useCallback(async () => {
     if (!id || !project) {
@@ -720,10 +825,8 @@ function ProjectDetail() {
         )}
       </article>
 
-      <article className="panel">
-        <header>
-          <h3>Local Runs</h3>
-        </header>
+      <details className="panel" open>
+        <summary>Local Runs</summary>
         {runs.length === 0 && <p className="muted">No local run activity yet.</p>}
         {runs.length > 0 && (
           <ul className="project-list">
@@ -785,7 +888,7 @@ function ProjectDetail() {
             ))}
           </ul>
         )}
-      </article>
+      </details>
 
       {manifestPreview && (
         <article className="panel">
@@ -802,6 +905,119 @@ function ProjectDetail() {
           <pre className="log-box">
             {JSON.stringify(manifestPreview.content, null, 2)}
           </pre>
+        </article>
+      )}
+
+      <article className="panel">
+        <header>
+          <h3>Plugin Config Files</h3>
+        </header>
+        <form className="page-form" onSubmit={handleUploadConfig}>
+          <div className="form-grid">
+            <div className="field">
+              <label htmlFor="config-upload-path">Relative path</label>
+              <input
+                id="config-upload-path"
+                value={configUploadPath}
+                onChange={(event) => setConfigUploadPath(event.target.value)}
+                placeholder="plugins/WorldGuard/worlds/world/regions.yml"
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="config-upload-file">Config file</label>
+              <input
+                id="config-upload-file"
+                type="file"
+                onChange={(event) => setConfigUploadFile(event.target.files?.[0] ?? null)}
+              />
+            </div>
+          </div>
+          <div className="form-actions">
+            <button type="submit" className="ghost" disabled={configUploadBusy}>
+              {configUploadBusy ? 'Uploading…' : 'Upload config'}
+            </button>
+          </div>
+        </form>
+        {configsError && <p className="error-text">{configsError}</p>}
+        {configsLoading && <p className="muted">Loading config files…</p>}
+        {!configsLoading && configFiles.length === 0 && (
+          <p className="muted">
+            No plugin configs uploaded yet. Upload files to be included in your builds.
+          </p>
+        )}
+        {!configsLoading && configFiles.length > 0 && (
+          <ul className="project-list">
+            {configFiles.map((file) => (
+              <li key={file.path}>
+                <div>
+                  <strong>{file.path}</strong>
+                  <p className="muted">
+                    {formatBytes(file.size)} · Updated {new Date(file.modifiedAt).toLocaleString()}
+                  </p>
+                </div>
+                <div className="dev-buttons">
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={() => void handleEditConfig(file.path)}
+                  >
+                    Edit
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </article>
+
+      {configEditor && (
+        <article className="panel">
+          <header>
+            <h3>Edit Config: {configEditor.path}</h3>
+            <button
+              type="button"
+              className="ghost"
+              onClick={() => {
+                setConfigEditor(null)
+                setConfigEditorError(null)
+              }}
+            >
+              Close
+            </button>
+          </header>
+          {configEditorError && <p className="error-text">{configEditorError}</p>}
+          <textarea
+            value={configEditor.content}
+            onChange={(event) =>
+              setConfigEditor((prev) =>
+                prev ? { ...prev, content: event.target.value } : prev,
+              )
+            }
+            rows={18}
+            spellCheck={false}
+            style={{ width: '100%' }}
+          />
+          <div className="form-actions">
+            <button
+              type="button"
+              className="primary"
+              onClick={() => void handleSaveConfig()}
+              disabled={configEditorBusy}
+            >
+              {configEditorBusy ? 'Saving…' : 'Save changes'}
+            </button>
+            <button
+              type="button"
+              className="ghost"
+              onClick={() => {
+                setConfigEditor(null)
+                setConfigEditorError(null)
+              }}
+              disabled={configEditorBusy}
+            >
+              Cancel
+            </button>
+          </div>
         </article>
       )}
 

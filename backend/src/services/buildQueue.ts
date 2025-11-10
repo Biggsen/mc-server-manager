@@ -14,7 +14,6 @@ import type { BuildJob } from "../types/build";
 import { renderManifest, type ManifestOverrides } from "./manifestService";
 import {
   collectProjectDefinitionFiles,
-  readProjectFile,
   renderConfigFiles,
   resolveProjectRoot,
   writeProjectFileBuffer,
@@ -23,6 +22,7 @@ import { scanProjectAssets } from "./projectScanner";
 import { commitFiles, getOctokitWithToken } from "./githubClient";
 import { fetchPluginArtifact } from "./pluginRegistry";
 import type { ProjectPlugin } from "../types/plugins";
+import { collectUploadedConfigMaterials } from "./configUploads";
 
 const DATA_DIR = join(process.cwd(), "data", "builds");
 const LOG_PATH = join(DATA_DIR, "builds.json");
@@ -412,29 +412,30 @@ async function materializePlugins(
 
 async function materializeConfigs(project: StoredProject): Promise<ConfigMaterialization[]> {
   const rendered = await renderConfigFiles(project);
-  const renderedMap = new Map(rendered.map((item) => [item.path, item.content]));
+  const uploaded = await collectUploadedConfigMaterials(project);
 
-  const uniquePaths = new Set<string>([
-    ...(project.configs?.map((config) => config.path) ?? []),
-    ...rendered.map((item) => item.path),
-  ]);
+  const map = new Map<string, ConfigMaterialization>();
 
-  const results: ConfigMaterialization[] = [];
-  for (const path of uniquePaths) {
-    let content = renderedMap.get(path);
-    if (!content) {
-      content = await readProjectFile(project, path);
-    }
-    if (!content) continue;
-
-    await writeProjectFileBuffer(project, path, Buffer.from(content, "utf-8"));
-
-    const sha256 = hashBuffer(Buffer.from(content, "utf-8"));
-    results.push({
-      path,
-      content,
-      sha256,
+  for (const config of uploaded) {
+    map.set(config.path, {
+      path: config.path,
+      content: config.content,
+      sha256: config.sha256,
     });
+  }
+
+  for (const config of rendered) {
+    const buffer = Buffer.from(config.content, "utf-8");
+    map.set(config.path, {
+      path: config.path,
+      content: config.content,
+      sha256: hashBuffer(buffer),
+    });
+  }
+
+  const results = Array.from(map.values());
+  for (const entry of results) {
+    await writeProjectFileBuffer(project, entry.path, Buffer.from(entry.content, "utf-8"));
   }
 
   return results;

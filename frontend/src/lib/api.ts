@@ -368,6 +368,61 @@ export async function fetchProject(projectId: string): Promise<ProjectSummary> {
   return data.project
 }
 
+export interface ProjectConfigSummary {
+  path: string
+  size: number
+  modifiedAt: string
+  sha256?: string
+}
+
+export async function fetchProjectConfigs(projectId: string): Promise<ProjectConfigSummary[]> {
+  const data = await request<{ configs: ProjectConfigSummary[] }>(`/projects/${projectId}/configs`)
+  return data.configs
+}
+
+export async function uploadProjectConfig(
+  projectId: string,
+  payload: { path: string; file: File },
+): Promise<ProjectConfigSummary[]> {
+  const form = new FormData()
+  form.append('relativePath', payload.path)
+  form.append('file', payload.file)
+  const response = await fetch(`${API_BASE}/projects/${projectId}/configs/upload`, {
+    method: 'POST',
+    body: form,
+    credentials: 'include',
+  })
+  if (!response.ok) {
+    const message = await response.text()
+    throw new Error(message || `Upload failed with status ${response.status}`)
+  }
+  const data = (await response.json()) as { configs: ProjectConfigSummary[] }
+  emitProjectsUpdated()
+  return data.configs
+}
+
+export async function fetchProjectConfigFile(
+  projectId: string,
+  path: string,
+): Promise<{ path: string; content: string; sha256: string }> {
+  const params = new URLSearchParams({ path })
+  const data = await request<{ file: { path: string; content: string; sha256: string } }>(
+    `/projects/${projectId}/configs/file?${params.toString()}`,
+  )
+  return data.file
+}
+
+export async function updateProjectConfigFile(
+  projectId: string,
+  payload: { path: string; content: string },
+): Promise<void> {
+  await request(`/projects/${projectId}/configs/file`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
+  emitProjectsUpdated()
+}
+
 export async function deleteProject(
   projectId: string,
   options?: { deleteRepo?: boolean },
