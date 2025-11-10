@@ -25,6 +25,7 @@ import { commitFiles, getOctokitForRequest } from "../services/githubClient";
 import {
   collectProjectDefinitionFiles,
   renderConfigFiles,
+  writeProjectFile,
   writeProjectFileBuffer,
 } from "../services/projectFiles";
 import { enqueueRun, listRuns } from "../services/runQueue";
@@ -339,6 +340,43 @@ router.post("/:id/assets", async (req: Request, res: Response) => {
   }
 });
 
+router.post("/:id/profile", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const project = await findProject(id);
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+
+    const yaml = typeof req.body?.yaml === "string" ? req.body.yaml : undefined;
+    if (!yaml || !yaml.trim()) {
+      res.status(400).json({ error: "yaml content is required" });
+      return;
+    }
+
+    const profilePath = project.profilePath?.trim() ? project.profilePath : "profiles/base.yml";
+    const savedPath = await writeProjectFile(project, profilePath, yaml);
+
+    const assets = await scanProjectAssets(project);
+    const updated = await setProjectAssets(id, assets);
+
+    res.status(201).json({
+      profile: {
+        path: savedPath,
+      },
+      project: {
+        id,
+        plugins: updated?.plugins ?? assets.plugins,
+        configs: updated?.configs ?? assets.configs,
+      },
+    });
+  } catch (error) {
+    console.error("Failed to persist project profile", error);
+    res.status(500).json({ error: "Failed to save project profile" });
+  }
+});
+
 router.post("/:id/scan", async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
@@ -611,6 +649,11 @@ router.post("/:id/manifest", async (req: Request, res: Response) => {
     };
 
     await recordManifestMetadata(project.id, metadata);
+    console.info("Manifest generated", {
+      projectId: project.id,
+      buildId,
+      manifestPath,
+    });
 
     res.status(201).json({ manifest: metadata, content: JSON.parse(manifestContent) });
   } catch (error) {

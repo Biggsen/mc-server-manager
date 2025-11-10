@@ -303,6 +303,32 @@ export async function scanProjectAssets(projectId: string): Promise<{
   return data.project
 }
 
+export async function saveProjectProfile(
+  projectId: string,
+  payload: { yaml: string },
+): Promise<{
+  path: string
+  plugins: NonNullable<ProjectSummary['plugins']>
+  configs: NonNullable<ProjectSummary['configs']>
+}> {
+  const data = await request<{
+    profile: { path: string }
+    project: {
+      plugins: NonNullable<ProjectSummary['plugins']>
+      configs: NonNullable<ProjectSummary['configs']>
+    }
+  }>(`/projects/${projectId}/profile`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+  emitProjectsUpdated()
+  return {
+    path: data.profile.path,
+    plugins: data.project.plugins,
+    configs: data.project.configs,
+  }
+}
+
 export type RunStatus =
   | 'pending'
   | 'running'

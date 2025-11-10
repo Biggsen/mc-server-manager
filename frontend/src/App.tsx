@@ -10,6 +10,7 @@ import ProjectDetail from './pages/ProjectDetail'
 import Deployments from './pages/Deployments'
 import TestTools from './pages/TestTools'
 import PluginLibrary from './pages/PluginLibrary'
+import GenerateProfile from './pages/GenerateProfile'
 import './App.css'
 
 function App() {
@@ -126,6 +127,7 @@ function App() {
           <Route path="/projects/new" element={<NewProject />} />
           <Route path="/projects/import" element={<ImportProject />} />
           <Route path="/projects/:id" element={<ProjectDetail />} />
+          <Route path="/projects/:id/profile" element={<GenerateProfile />} />
           <Route path="/plugins" element={<PluginLibrary />} />
           <Route path="/dev/tools" element={<TestTools />} />
           <Route path="/deployments" element={<Deployments />} />

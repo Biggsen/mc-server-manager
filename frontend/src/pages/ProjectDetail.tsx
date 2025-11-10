@@ -716,7 +716,9 @@ useEffect(() => {
                   setBusy(true)
                   const manifest = await triggerManifest(project.id)
                   setMessage(
-                    `Manifest ${manifest.manifest?.lastBuildId ?? 'generated'} queued`,
+                    manifest.manifest?.lastBuildId
+                      ? `Manifest ${manifest.manifest.lastBuildId} generated`
+                      : 'Manifest generated',
                   )
                 } catch (err) {
                   setMessage(
@@ -728,6 +730,14 @@ useEffect(() => {
               }}
             >
               Generate Manifest
+            </button>
+            <button
+              type="button"
+              className="ghost"
+              disabled={busy}
+              onClick={() => navigate(`/projects/${project.id}/profile`)}
+            >
+              Generate Profile YAML
             </button>
             <button
               type="button"

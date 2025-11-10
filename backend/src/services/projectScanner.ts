@@ -85,7 +85,9 @@ export async function scanProjectAssets(project: StoredProject): Promise<Scanned
     overlayFiles.map((file) => readYamlDocument(join(overlayDir, file))),
   );
 
-  const docs = [profile, ...overlayDocs.filter(Boolean)] as ProfileDocument[];
+  const docs = [profile, ...overlayDocs].filter(
+    (doc): doc is ProfileDocument => doc !== null,
+  );
 
   const pluginEntries = uniqueBy(
     docs.flatMap((doc) => doc.plugins ?? []),

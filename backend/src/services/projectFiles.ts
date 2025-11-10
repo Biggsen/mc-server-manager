@@ -184,4 +184,12 @@ export async function writeProjectFileBuffer(
   return targetPath;
 }
 
+export async function writeProjectFile(
+  project: StoredProject,
+  relativePath: string,
+  contents: string,
+): Promise<string> {
+  return writeProjectFileBuffer(project, relativePath, Buffer.from(contents, "utf-8"));
+}
+
 
