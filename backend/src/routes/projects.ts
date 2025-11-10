@@ -13,6 +13,7 @@ import {
   setProjectAssets,
   upsertProjectPlugin,
   deleteProjectRecord,
+  removeProjectPlugin,
 } from "../storage/projectsStore";
 import type { ProjectSummary } from "../types/projects";
 import type { ManifestMetadata, RepoMetadata, StoredProject } from "../types/storage";
@@ -828,7 +829,7 @@ router.put("/:id/configs/file", async (req: Request, res: Response) => {
     if (!project) {
       res.status(404).json({ error: "Project not found" });
       return;
-    }
+  }
     if (typeof path !== "string" || typeof content !== "string") {
       res.status(400).json({ error: "path and content are required" });
       return;
@@ -841,6 +842,27 @@ router.put("/:id/configs/file", async (req: Request, res: Response) => {
     const message = error instanceof Error ? error.message : "Failed to update config file";
     const status = message.toLowerCase().includes("relativepath") ? 400 : 500;
     res.status(status).json({ error: message });
+  }
+});
+
+router.delete("/:id/plugins/:pluginId", async (req: Request, res: Response) => {
+  try {
+    const { id, pluginId } = req.params;
+    const project = await findProject(id);
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    const updated = await removeProjectPlugin(id, pluginId);
+    res.json({
+      project: {
+        id,
+        plugins: updated?.plugins ?? [],
+      },
+    });
+  } catch (error) {
+    console.error("Failed to delete project plugin", error);
+    res.status(500).json({ error: "Failed to delete project plugin" });
   }
 });
 

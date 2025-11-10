@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   fetchPluginLibrary,
+  deleteLibraryPlugin,
   fetchProjects,
   type StoredPluginRecord,
   type ProjectSummary,
@@ -192,6 +193,7 @@ function PluginLibrary() {
               <th>Minecraft</th>
               <th>Cache</th>
               <th>Projects</th>
+              <th />
             </tr>
           </thead>
           <tbody>
@@ -264,6 +266,25 @@ function PluginLibrary() {
                         ))}
                       </ul>
                     )}
+                  </td>
+                  <td className="dev-buttons">
+                    <button
+                      type="button"
+                      className="ghost"
+                      onClick={async () => {
+                        if (!window.confirm(`Remove ${plugin.id} ${plugin.version} from library?`)) {
+                          return
+                        }
+                        try {
+                          const remaining = await deleteLibraryPlugin(plugin.id, plugin.version)
+                          setPlugins(remaining)
+                        } catch (err) {
+                          setError(err instanceof Error ? err.message : 'Failed to delete plugin.')
+                        }
+                      }}
+                    >
+                      Delete
+                    </button>
                   </td>
                 </tr>
               )

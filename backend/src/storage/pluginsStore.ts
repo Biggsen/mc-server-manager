@@ -44,6 +44,18 @@ export async function listStoredPlugins(): Promise<StoredPluginRecord[]> {
   return snapshot.plugins.slice().sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
 }
 
+export async function deleteStoredPlugin(id: string, version: string): Promise<boolean> {
+  const snapshot = await loadSnapshot();
+  const key = keyFor({ id, version });
+  const index = snapshot.plugins.findIndex((plugin) => keyFor(plugin) === key);
+  if (index === -1) {
+    return false;
+  }
+  snapshot.plugins.splice(index, 1);
+  await persistSnapshot(snapshot);
+  return true;
+}
+
 export async function findStoredPlugin(
   id: string,
   version: string,

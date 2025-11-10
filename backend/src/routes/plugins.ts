@@ -1,7 +1,7 @@
 import type { Request, Response } from "express";
 import { Router } from "express";
 import { fetchPluginVersions, searchPlugins } from "../services/pluginCatalog";
-import { listStoredPlugins } from "../storage/pluginsStore";
+import { deleteStoredPlugin, listStoredPlugins } from "../storage/pluginsStore";
 
 const router = Router();
 
@@ -12,6 +12,28 @@ router.get("/library", async (_req: Request, res: Response) => {
   } catch (error) {
     console.error("Failed to load stored plugins", error);
     res.status(500).json({ error: "Failed to load stored plugins" });
+  }
+});
+
+router.delete("/library/:id/:version", async (req: Request, res: Response) => {
+  try {
+    const { id, version } = req.params;
+    if (!id || !version) {
+      res.status(400).json({ error: "Plugin id and version are required" });
+      return;
+    }
+
+    const removed = await deleteStoredPlugin(id, version);
+    if (!removed) {
+      res.status(404).json({ error: "Plugin not found in library" });
+      return;
+    }
+
+    const plugins = await listStoredPlugins();
+    res.json({ plugins });
+  } catch (error) {
+    console.error("Failed to delete stored plugin", error);
+    res.status(500).json({ error: "Failed to delete stored plugin" });
   }
 });
 

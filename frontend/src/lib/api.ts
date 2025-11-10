@@ -506,6 +506,33 @@ export async function fetchPluginLibrary(): Promise<StoredPluginRecord[]> {
   return data.plugins
 }
 
+export async function deleteLibraryPlugin(
+  id: string,
+  version: string,
+): Promise<StoredPluginRecord[]> {
+  const data = await request<{ plugins: StoredPluginRecord[] }>(
+    `/plugins/library/${encodeURIComponent(id)}/${encodeURIComponent(version)}`,
+    {
+      method: 'DELETE',
+    },
+  )
+  return data.plugins
+}
+
+export async function deleteProjectPlugin(
+  projectId: string,
+  pluginId: string,
+): Promise<ProjectSummary['plugins']> {
+  const data = await request<{ project: { plugins: ProjectSummary['plugins'] } }>(
+    `/projects/${projectId}/plugins/${encodeURIComponent(pluginId)}`,
+    {
+      method: 'DELETE',
+    },
+  )
+  emitProjectsUpdated()
+  return data.project.plugins
+}
+
 export type DeploymentType = 'folder' | 'sftp'
 
 export interface DeploymentTarget {

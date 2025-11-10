@@ -247,7 +247,9 @@ function Dashboard() {
             {recent.map((project) => (
               <li key={project.id}>
                 <div>
-                  <h4>{project.name}</h4>
+                  <h4>
+                    <Link to={`/projects/${project.id}`}>{project.name}</Link>
+                  </h4>
                   <p className="muted">
                     {[
                       project.minecraftVersion,

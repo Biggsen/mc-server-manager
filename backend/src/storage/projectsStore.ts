@@ -265,6 +265,16 @@ export async function upsertProjectPlugin(
   });
 }
 
+export async function removeProjectPlugin(
+  id: string,
+  pluginId: string,
+): Promise<StoredProject | undefined> {
+  return updateProject(id, (project) => {
+    project.plugins = (project.plugins ?? []).filter((plugin) => plugin.id !== pluginId);
+    return project;
+  });
+}
+
 export async function deleteProjectRecord(id: string): Promise<StoredProject | undefined> {
   const snapshot = await loadSnapshot();
   const index = snapshot.projects.findIndex((project) => project.id === id);

@@ -14,6 +14,7 @@ import {
   addProjectPlugin,
   uploadProjectPlugin,
   fetchPluginLibrary,
+  deleteProjectPlugin,
   fetchProjectConfigs,
   uploadProjectConfig,
   fetchProjectConfigFile,
@@ -428,6 +429,23 @@ useEffect(() => {
     [id, loadLibrary],
   )
 
+  const handleRemovePlugin = useCallback(
+    async (pluginId: string) => {
+      if (!id) return
+      if (!window.confirm(`Remove plugin ${pluginId} from this project?`)) {
+        return
+      }
+      try {
+        const plugins = await deleteProjectPlugin(id, pluginId)
+        setProject((prev) => (prev ? { ...prev, plugins: plugins ?? [] } : prev))
+        setPluginMessage(`Removed plugin ${pluginId}`)
+      } catch (err) {
+        setPluginMessage(err instanceof Error ? err.message : 'Failed to remove plugin.')
+      }
+    },
+    [id],
+  )
+
   const handleUploadConfig = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault()
@@ -621,13 +639,9 @@ useEffect(() => {
                   <li key={`${plugin.id}:${plugin.version}`}>
                     <div>
                       <strong>{plugin.id}</strong>{' '}
-                      <span className="badge">
-                        {sourceBadgeLabel[sourceKind]}
-                      </span>{' '}
+                      <span className="badge">{sourceBadgeLabel[sourceKind]}</span>{' '}
                       {plugin.provider && plugin.provider !== 'custom' && (
-                        <span className="badge">
-                          {plugin.provider}
-                        </span>
+                        <span className="badge">{plugin.provider}</span>
                       )}{' '}
                       <span className="muted">v{plugin.version}</span>
                       {supportRange && <p className="muted">Supports: {supportRange}</p>}
@@ -653,6 +667,15 @@ useEffect(() => {
                           Cache: {plugin.cachePath ?? plugin.source?.cachePath}
                         </p>
                       )}
+                    </div>
+                    <div className="dev-buttons">
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={() => handleRemovePlugin(plugin.id)}
+                      >
+                        Remove
+                      </button>
                     </div>
                   </li>
                 )
