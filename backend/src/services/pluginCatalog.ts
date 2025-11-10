@@ -88,10 +88,10 @@ async function searchHangar(
   const response = await fetch(
     `${HANGAR_API}/projects?limit=25&offset=0&query=${encodeURIComponent(query)}`,
     {
-      headers: {
-        Accept: "application/json",
-        "User-Agent": USER_AGENT,
-      },
+    headers: {
+      Accept: "application/json",
+      "User-Agent": USER_AGENT,
+    },
     },
   );
 
@@ -129,10 +129,10 @@ async function searchHangar(
     }
 
     filtered.push({
-      provider: "hangar" as const,
-      id: project.slug,
-      slug: project.slug,
-      name: project.name,
+    provider: "hangar" as const,
+    id: project.slug,
+    slug: project.slug,
+    name: project.name,
       summary: project.description,
       projectUrl: project.urls?.project,
     });
@@ -200,10 +200,10 @@ async function searchModrinth(
       ",",
     )}]`,
     {
-      headers: {
-        Accept: "application/json",
-        "User-Agent": USER_AGENT,
-      },
+    headers: {
+      Accept: "application/json",
+      "User-Agent": USER_AGENT,
+    },
     },
   );
 
@@ -235,7 +235,7 @@ async function searchModrinth(
       name: hit.title,
       summary: hit.description,
       projectUrl: hit.project_url,
-    }));
+  }));
 }
 
 async function fetchModrinthVersions(
@@ -315,17 +315,17 @@ async function searchSpiget(query: string, allowFallback: boolean): Promise<Plug
     name: resource.name,
     summary: resource.tag,
     projectUrl: `https://www.spigotmc.org/resources/${resource.id}`,
-  }));
+    }));
 }
 
 async function fetchSpigetVersions(resourceId: string): Promise<PluginVersionResult[]> {
   const response = await fetch(
     `https://api.spiget.org/v2/resources/${resourceId}/versions?size=30`,
     {
-      headers: {
-        Accept: "application/json",
-        "User-Agent": USER_AGENT,
-      },
+    headers: {
+      Accept: "application/json",
+      "User-Agent": USER_AGENT,
+    },
     },
   );
 

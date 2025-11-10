@@ -7,12 +7,62 @@ import {
   scanProjectAssets,
   fetchBuilds,
   runProjectLocally,
+  fetchRuns,
   type ProjectSummary,
   type BuildJob,
+  type RunJob,
 } from '../lib/api'
 import { subscribeProjectsUpdated } from '../lib/events'
 
 type ProjectMessage = { type: 'success' | 'error'; text: string }
+
+const API_BASE = import.meta.env.VITE_API_BASE ?? '/api'
+
+const ACTIVE_STATUSES = new Set<RunJob['status']>(['pending', 'running', 'stopping'])
+
+function isActiveRun(run: RunJob | undefined): boolean {
+  return !!run && ACTIVE_STATUSES.has(run.status)
+}
+
+function preferRun(current: RunJob | undefined, candidate: RunJob): RunJob {
+  if (!current) {
+    return candidate
+  }
+  if (isActiveRun(candidate)) {
+    return candidate
+  }
+  if (isActiveRun(current)) {
+    return current
+  }
+  return candidate.createdAt > current.createdAt ? candidate : current
+}
+
+function describeRunStatus(run: RunJob): string {
+  const portInfo = run.port ? ` on port ${run.port}` : ''
+  switch (run.status) {
+    case 'pending':
+      return 'Local server starting…'
+    case 'running':
+      return `Local server started${portInfo}`
+    case 'stopping':
+      return 'Stopping local server…'
+    case 'stopped':
+      return 'Local server stopped'
+    case 'succeeded':
+      return 'Local server exited normally'
+    case 'failed':
+      return `Local server failed${run.error ? ` — ${run.error}` : ''}`
+    default:
+      return `Local server ${run.status}`
+  }
+}
+
+function projectMessageForRun(run: RunJob): ProjectMessage {
+  return {
+    type: run.status === 'failed' ? 'error' : 'success',
+    text: describeRunStatus(run),
+  }
+}
 
 function Projects() {
   const [projects, setProjects] = useState<ProjectSummary[]>([])
@@ -100,6 +150,113 @@ function Projects() {
   const setProjectBusy = (projectId: string, value: boolean) => {
     setBusy((prev) => ({ ...prev, [projectId]: value }))
   }
+
+  useEffect(() => {
+    let cancelled = false
+    fetchRuns()
+      .then((runs) => {
+        if (cancelled) return
+        const latestByProject = runs.reduce<Record<string, RunJob>>((acc, run) => {
+          acc[run.projectId] = preferRun(acc[run.projectId], run)
+          return acc
+        }, {})
+        setMessages((prev) => {
+          const next = { ...prev }
+          Object.entries(latestByProject).forEach(([projectId, run]) => {
+            next[projectId] = projectMessageForRun(run)
+          })
+          return next
+        })
+      })
+      .catch((err: Error) => {
+        console.error('Failed to load run status', err)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    const base =
+      API_BASE.startsWith('http://') || API_BASE.startsWith('https://')
+        ? API_BASE
+        : `${window.location.origin}${API_BASE}`
+    const urlBase = base.endsWith('/') ? base.slice(0, -1) : base
+    const source = new EventSource(`${urlBase}/runs/stream`, { withCredentials: true })
+
+    const latestRunsRef = new Map<string, RunJob>()
+
+    const updateMessage = (run: RunJob) => {
+      const preferred = preferRun(latestRunsRef.get(run.projectId), run)
+      latestRunsRef.set(run.projectId, preferred)
+
+      if (isActiveRun(preferred) || preferred.status === 'failed') {
+        setMessages((prev) => ({
+          ...prev,
+          [run.projectId]: projectMessageForRun(preferred),
+        }))
+      } else if (preferred.status === 'stopped' || preferred.status === 'succeeded') {
+        setMessages((prev) => {
+          const next = { ...prev }
+          delete next[run.projectId]
+          return next
+        })
+      } else {
+        setMessages((prev) => ({
+          ...prev,
+          [run.projectId]: projectMessageForRun(preferred),
+        }))
+      }
+    }
+
+    const handleInit = (event: MessageEvent) => {
+      try {
+        const payload = JSON.parse(event.data) as { runs: RunJob[] }
+        if (Array.isArray(payload.runs)) {
+          payload.runs.forEach((run) => {
+            const preferred = preferRun(latestRunsRef.get(run.projectId), run)
+            latestRunsRef.set(run.projectId, preferred)
+          })
+          const nextMessages: Record<string, ProjectMessage> = {}
+          latestRunsRef.forEach((storedRun, projectId) => {
+            if (isActiveRun(storedRun) || storedRun.status === 'failed') {
+              nextMessages[projectId] = projectMessageForRun(storedRun)
+            }
+          })
+          setMessages((prev) => ({ ...prev, ...nextMessages }))
+        }
+      } catch (err) {
+        console.error('Failed to parse run stream init payload', err)
+      }
+    }
+
+    const handleRunUpdate = (event: MessageEvent) => {
+      try {
+        const payload = JSON.parse(event.data) as { run: RunJob }
+        if (payload.run) {
+          updateMessage(payload.run)
+        }
+      } catch (err) {
+        console.error('Failed to parse run update payload', err)
+      }
+    }
+
+    source.addEventListener('init', handleInit as EventListener)
+    source.addEventListener('run-update', handleRunUpdate as EventListener)
+    source.onerror = (event) => {
+      console.error('Run stream error', event)
+    }
+
+    return () => {
+      source.removeEventListener('init', handleInit as EventListener)
+      source.removeEventListener('run-update', handleRunUpdate as EventListener)
+      source.close()
+    }
+  }, [])
 
   return (
     <section className="panel">
@@ -259,8 +416,7 @@ function Projects() {
                         setProjectBusy(project.id, true)
                         const run = await runProjectLocally(project.id)
                         setProjectMessage(project.id, {
-                          type: 'success',
-                          text: `Local run queued (${run.status.toUpperCase()})`,
+                        ...projectMessageForRun(run),
                         })
                       } catch (err) {
                         console.error('Failed to queue local run', err)
