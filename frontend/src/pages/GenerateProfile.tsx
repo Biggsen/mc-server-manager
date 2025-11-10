@@ -110,6 +110,7 @@ function buildProfileDocument(options: {
         enforceSecureProfile: options.serverProperties.enforceSecureProfile,
         viewDistance: Number.parseInt(options.serverProperties.viewDistance, 10) || 10,
         onlineMode: options.serverProperties.onlineMode,
+        levelSeed: options.worldSeed.trim() ? options.worldSeed.trim() : undefined,
       },
     })
   }

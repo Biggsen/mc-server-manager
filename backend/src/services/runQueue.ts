@@ -230,6 +230,8 @@ async function ensureDockerJob(job: RunJob, project: StoredProject): Promise<voi
     `VERSION=${version}`,
     "-e",
     "USE_AIKAR_FLAGS=true",
+    "-e",
+    "MEMORY=4G",
     "itzg/minecraft-server:latest",
   ];
 
