@@ -265,6 +265,18 @@ export async function upsertProjectPlugin(
   });
 }
 
+export async function deleteProjectRecord(id: string): Promise<StoredProject | undefined> {
+  const snapshot = await loadSnapshot();
+  const index = snapshot.projects.findIndex((project) => project.id === id);
+  if (index === -1) {
+    return undefined;
+  }
+
+  const [removed] = snapshot.projects.splice(index, 1);
+  await persistSnapshot(snapshot);
+  return removed;
+}
+
 function createRepoMetadataFromUrl(repoUrl: string, defaultBranch: string): RepoMetadata | undefined {
   const trimmed = repoUrl.trim();
   const match =

@@ -14,6 +14,7 @@ import {
   addProjectPlugin,
   uploadProjectPlugin,
   fetchPluginLibrary,
+  deleteProject,
   type ProjectSummary,
   type BuildJob,
   type RunJob,
@@ -110,6 +111,9 @@ function ProjectDetail() {
   const [libraryError, setLibraryError] = useState<string | null>(null)
   const [libraryQuery, setLibraryQuery] = useState('')
   const [libraryBusy, setLibraryBusy] = useState<string | null>(null)
+  const [deleteRepo, setDeleteRepo] = useState(false)
+  const [deleteBusy, setDeleteBusy] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   const loadLibrary = useCallback(async () => {
     try {
@@ -309,6 +313,12 @@ function ProjectDetail() {
     setUploadMaxVersion((prev) => prev || project.minecraftVersion)
   }, [project])
 
+  useEffect(() => {
+    if (!project?.repo) {
+      setDeleteRepo(false)
+    }
+  }, [project?.repo])
+
   const latestBuild = useMemo(
     () => builds.find((build) => build.status === 'succeeded'),
     [builds],
@@ -371,6 +381,28 @@ function ProjectDetail() {
     },
     [id, loadLibrary],
   )
+
+  const handleDeleteProject = useCallback(async () => {
+    if (!id || !project) {
+      return
+    }
+    const warning = deleteRepo && project.repo
+      ? `Delete project “${project.name}” and its GitHub repository (${project.repo.fullName})? This cannot be undone.`
+      : `Delete project “${project.name}”? This cannot be undone.`
+    if (!window.confirm(warning)) {
+      return
+    }
+    try {
+      setDeleteBusy(true)
+      setDeleteError(null)
+      await deleteProject(id, { deleteRepo: deleteRepo && Boolean(project.repo) })
+      navigate('/projects')
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : 'Failed to delete project.')
+    } finally {
+      setDeleteBusy(false)
+    }
+  }, [deleteRepo, id, navigate, project])
 
   if (!id) {
     return (
@@ -772,6 +804,37 @@ function ProjectDetail() {
           </pre>
         </article>
       )}
+
+      <article className="panel">
+        <header>
+          <h3>Danger Zone</h3>
+        </header>
+        {deleteError && <p className="error-text">{deleteError}</p>}
+        <p className="muted">
+          Deleting removes this project&apos;s builds, run history, and local workspace. This action
+          cannot be undone.
+        </p>
+        {project.repo && (
+          <label className="checkbox">
+            <input
+              type="checkbox"
+              checked={deleteRepo}
+              onChange={(event) => setDeleteRepo(event.target.checked)}
+            />
+            Also delete GitHub repository {project.repo.fullName}
+          </label>
+        )}
+        <div className="form-actions">
+          <button
+            type="button"
+            className="danger"
+            onClick={handleDeleteProject}
+            disabled={deleteBusy}
+          >
+            {deleteBusy ? 'Deleting…' : 'Delete project'}
+          </button>
+        </div>
+      </article>
 
       <article className="panel">
         <header>

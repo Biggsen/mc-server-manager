@@ -1,5 +1,5 @@
 import { createHash } from "crypto";
-import { mkdir, readFile, writeFile } from "fs/promises";
+import { mkdir, readFile, writeFile, rm, readdir } from "fs/promises";
 import { dirname, join } from "path";
 import { v4 as uuid } from "uuid";
 import { ZipFile } from "yazl";
@@ -65,6 +65,49 @@ export function listBuilds(projectId?: string): BuildJob[] {
 
 export function getBuild(jobId: string): BuildJob | undefined {
   return jobs.get(jobId);
+}
+
+export async function deleteBuildsForProject(projectId: string): Promise<void> {
+  let changed = false;
+  const targets = Array.from(jobs.values()).filter((job) => job.projectId === projectId);
+
+  for (const job of targets) {
+    jobs.delete(job.id);
+    changed = true;
+    if (job.artifactPath) {
+      await rm(job.artifactPath, { force: true }).catch(() => {});
+    }
+    if (job.manifestPath) {
+      await rm(job.manifestPath, { force: true }).catch(() => {});
+    }
+    if (job.manifestBuildId) {
+      const projectArtifactPath = join(DATA_DIR, projectId, `${job.manifestBuildId}.zip`);
+      await rm(projectArtifactPath, { force: true }).catch(() => {});
+    }
+  }
+
+  await rm(join(DATA_DIR, projectId), { recursive: true, force: true }).catch(() => {});
+  await cleanupDistArtifacts(projectId);
+
+  if (changed) {
+    await persistBuilds();
+  }
+}
+
+async function cleanupDistArtifacts(projectId: string): Promise<void> {
+  try {
+    const entries = await readdir(DIST_DIR);
+    await Promise.all(
+      entries
+        .filter((entry) => entry.startsWith(`${projectId}-`) && entry.endsWith(".zip"))
+        .map((entry) => rm(join(DIST_DIR, entry), { force: true })),
+    );
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT") {
+      console.warn(`Failed to clean build dist artifacts for ${projectId}`, error);
+    }
+  }
 }
 
 export async function enqueueBuild(

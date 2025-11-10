@@ -12,6 +12,7 @@ import {
   recordManifestMetadata,
   setProjectAssets,
   upsertProjectPlugin,
+  deleteProjectRecord,
 } from "../storage/projectsStore";
 import type { ProjectSummary } from "../types/projects";
 import type { ManifestMetadata, RepoMetadata, StoredProject } from "../types/storage";
@@ -27,6 +28,7 @@ import {
 } from "../services/projectFiles";
 import { enqueueRun, listRuns } from "../services/runQueue";
 import { upsertStoredPlugin } from "../storage/pluginsStore";
+import { deleteProjectResources } from "../services/projectDeletion";
 
 const router = Router();
 const pluginUpload = multer({
@@ -657,6 +659,63 @@ router.post("/:id/run", async (req: Request, res: Response) => {
   } catch (error) {
     console.error("Failed to trigger local run", error);
     res.status(500).json({ error: "Failed to trigger local run" });
+  }
+});
+
+router.delete("/:id", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const deleteRepo = Boolean(req.body?.deleteRepo);
+
+    const project = await findProject(id);
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+
+    if (deleteRepo) {
+      if (!project.repo) {
+        res.status(400).json({ error: "Project does not have a linked repository" });
+        return;
+      }
+      if (!req.session.github?.accessToken) {
+        res.status(401).json({ error: "GitHub authentication required to delete repository" });
+        return;
+      }
+    }
+
+    if (deleteRepo && project.repo) {
+      try {
+        const octokit = getOctokitForRequest(req);
+        await octokit.repos.delete({
+          owner: project.repo.owner,
+          repo: project.repo.name,
+        });
+      } catch (error) {
+        const status = (error as { status?: number }).status;
+        if (status === 404) {
+          // Repo already gone; continue.
+          console.warn(`Repository ${project.repo.fullName} already deleted.`);
+        } else if (status === 403) {
+          res
+            .status(403)
+            .json({ error: "GitHub token is missing delete_repo scope for repository deletion" });
+          return;
+        } else {
+          console.error("Failed to delete GitHub repository", error);
+          res.status(502).json({ error: "Failed to delete GitHub repository" });
+          return;
+        }
+      }
+    }
+
+    await deleteProjectResources(project);
+    await deleteProjectRecord(project.id);
+
+    res.status(204).send();
+  } catch (error) {
+    console.error("Failed to delete project", error);
+    res.status(500).json({ error: "Failed to delete project" });
   }
 });
 

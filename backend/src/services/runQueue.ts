@@ -30,6 +30,23 @@ export function getRun(jobId: string): RunJob | undefined {
   return jobs.get(jobId);
 }
 
+export async function deleteRunsForProject(projectId: string): Promise<void> {
+  let changed = false;
+  for (const job of Array.from(jobs.values())) {
+    if (job.projectId !== projectId) {
+      continue;
+    }
+    jobs.delete(job.id);
+    changed = true;
+    const workspacePath = job.workspacePath ?? join(WORKSPACE_ROOT, job.id);
+    await rm(workspacePath, { recursive: true, force: true }).catch(() => {});
+  }
+
+  if (changed) {
+    await persistRuns();
+  }
+}
+
 export type RunStreamEvent =
   | { type: "run-update"; run: RunJob }
   | { type: "run-log"; runId: string; projectId: string; entry: RunLogEntry };

@@ -368,6 +368,18 @@ export async function fetchProject(projectId: string): Promise<ProjectSummary> {
   return data.project
 }
 
+export async function deleteProject(
+  projectId: string,
+  options?: { deleteRepo?: boolean },
+): Promise<void> {
+  await request(`/projects/${projectId}`, {
+    method: 'DELETE',
+    body: JSON.stringify({ deleteRepo: Boolean(options?.deleteRepo) }),
+    parseJson: false,
+  })
+  emitProjectsUpdated()
+}
+
 export async function addProjectPlugin(
   projectId: string,
   payload: {
