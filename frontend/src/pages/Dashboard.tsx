@@ -12,6 +12,8 @@ import {
   type StoredPluginRecord,
 } from '../lib/api'
 
+const API_BASE = import.meta.env.VITE_API_BASE ?? '/api'
+
 const sourceLabel: Record<'download' | 'upload', string> = {
   download: 'Download URL',
   upload: 'Uploaded jar',
@@ -105,30 +107,94 @@ function Dashboard() {
 
   useEffect(() => {
     let active = true
-
-    const loadRuns = () => {
-      setRunsLoading(true)
-      fetchRuns()
-        .then((items) => {
-          if (!active) return
-          setRuns(items)
-          setRunsError(null)
-        })
-        .catch((err: Error) => {
-          if (!active) return
-          setRunsError(err.message)
-        })
-        .finally(() => {
-          if (!active) return
-          setRunsLoading(false)
-        })
-    }
-
-    loadRuns()
-    const interval = window.setInterval(loadRuns, 5000)
+    setRunsLoading(true)
+    fetchRuns()
+      .then((items) => {
+        if (!active) return
+        setRuns(items)
+        setRunsError(null)
+      })
+      .catch((err: Error) => {
+        if (!active) return
+        setRunsError(err.message)
+      })
+      .finally(() => {
+        if (!active) return
+        setRunsLoading(false)
+      })
     return () => {
       active = false
-      window.clearInterval(interval)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const base =
+      API_BASE.startsWith('http://') || API_BASE.startsWith('https://')
+        ? API_BASE
+        : `${window.location.origin}${API_BASE}`
+    const urlBase = base.endsWith('/') ? base.slice(0, -1) : base
+    const source = new EventSource(`${urlBase}/runs/stream`, { withCredentials: true })
+
+    const handleInit = (event: MessageEvent) => {
+      try {
+        const payload = JSON.parse(event.data) as { runs: RunJob[] }
+        if (Array.isArray(payload.runs)) {
+          setRuns(
+            payload.runs.map((run) => ({
+              ...run,
+              logs: Array.isArray(run.logs) ? run.logs : [],
+            })),
+          )
+          setRunsLoading(false)
+          setRunsError(null)
+        }
+      } catch (err) {
+        console.error('Failed to parse run stream init payload', err)
+      }
+    }
+
+    const handleRunUpdate = (event: MessageEvent) => {
+      try {
+        const payload = JSON.parse(event.data) as { run: RunJob }
+        if (!payload.run) {
+          return
+        }
+        setRuns((prev) => {
+          const normalized: RunJob = {
+            ...payload.run,
+            logs: Array.isArray(payload.run.logs) ? payload.run.logs : [],
+          }
+          const index = prev.findIndex((item) => item.id === normalized.id)
+          if (index === -1) {
+            return [normalized, ...prev]
+          }
+          const existing = prev[index]
+          const merged: RunJob = {
+            ...existing,
+            ...normalized,
+            logs: existing.logs ?? normalized.logs ?? [],
+          }
+          const next = prev.slice()
+          next[index] = merged
+          return next
+        })
+      } catch (err) {
+        console.error('Failed to parse run update payload', err)
+      }
+    }
+
+    source.addEventListener('init', handleInit as EventListener)
+    source.addEventListener('run-update', handleRunUpdate as EventListener)
+    source.onerror = (event) => {
+      console.error('Run stream error', event)
+    }
+
+    return () => {
+      source.removeEventListener('init', handleInit as EventListener)
+      source.removeEventListener('run-update', handleRunUpdate as EventListener)
+      source.close()
     }
   }, [])
 

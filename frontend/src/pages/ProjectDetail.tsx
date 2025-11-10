@@ -17,6 +17,7 @@ import {
   type ProjectSummary,
   type BuildJob,
   type RunJob,
+  type RunLogEntry,
   type PluginSearchResult,
   type StoredPluginRecord,
 } from '../lib/api'
@@ -154,15 +155,20 @@ function ProjectDetail() {
         if (initialLoadRef.current) {
           setLoading(true)
         }
+        const runsPromise = initialLoadRef.current
+          ? fetchProjectRuns(id)
+          : Promise.resolve<RunJob[] | null>(null)
         const [proj, projBuilds, projRuns] = await Promise.all([
           fetchProject(id),
           fetchBuilds(id),
-          fetchProjectRuns(id),
+          runsPromise,
         ])
         if (cancelled) return
         setProject(proj)
         setBuilds(projBuilds)
-        setRuns(projRuns)
+        if (projRuns) {
+          setRuns(projRuns)
+        }
         setError(null)
       } catch (err) {
         if (cancelled) return
@@ -180,6 +186,112 @@ function ProjectDetail() {
     return () => {
       cancelled = true
       window.clearInterval(interval)
+    }
+  }, [id])
+
+  useEffect(() => {
+    if (!id) return
+    if (typeof window === 'undefined') return
+
+    const base =
+      API_BASE.startsWith('http://') || API_BASE.startsWith('https://')
+        ? API_BASE
+        : `${window.location.origin}${API_BASE}`
+    const urlBase = base.endsWith('/') ? base.slice(0, -1) : base
+    const source = new EventSource(`${urlBase}/runs/stream?projectId=${encodeURIComponent(id)}`, {
+      withCredentials: true,
+    })
+
+    const mergeRun = (incoming: RunJob) => {
+      setRuns((prev) => {
+        const normalized: RunJob = {
+          ...incoming,
+          logs: Array.isArray(incoming.logs) ? incoming.logs : [],
+        }
+        const existingIndex = prev.findIndex((run) => run.id === normalized.id)
+        if (existingIndex >= 0) {
+          const existing = prev[existingIndex]
+          const merged: RunJob = {
+            ...existing,
+            ...normalized,
+            logs:
+              normalized.logs && normalized.logs.length > 0
+                ? normalized.logs
+                : existing.logs ?? [],
+          }
+          const next = prev.slice()
+          next[existingIndex] = merged
+          return next
+        }
+        return [normalized, ...prev]
+      })
+    }
+
+    const handleInit = (event: MessageEvent) => {
+      try {
+        const payload = JSON.parse(event.data) as { runs: RunJob[] }
+        if (Array.isArray(payload.runs)) {
+          setRuns(
+            payload.runs.map((run) => ({
+              ...run,
+              logs: Array.isArray(run.logs) ? run.logs : [],
+            })),
+          )
+        }
+      } catch (err) {
+        console.error('Failed to parse run stream init payload', err)
+      }
+    }
+
+    const handleRunUpdate = (event: MessageEvent) => {
+      try {
+        const payload = JSON.parse(event.data) as { run: RunJob }
+        if (payload.run) {
+          mergeRun(payload.run)
+        }
+      } catch (err) {
+        console.error('Failed to parse run update payload', err)
+      }
+    }
+
+    const handleRunLog = (event: MessageEvent) => {
+      try {
+        const payload = JSON.parse(event.data) as {
+          runId: string
+          entry: RunLogEntry
+        }
+        if (!payload.runId || !payload.entry) {
+          return
+        }
+        setRuns((prev) => {
+          const index = prev.findIndex((run) => run.id === payload.runId)
+          if (index === -1) {
+            return prev
+          }
+          const target = prev[index]
+          const nextLogs = [...(target.logs ?? []), payload.entry].slice(-500)
+          const nextRun: RunJob = { ...target, logs: nextLogs }
+          const next = prev.slice()
+          next[index] = nextRun
+          return next
+        })
+      } catch (err) {
+        console.error('Failed to parse run log payload', err)
+      }
+    }
+
+    source.addEventListener('init', handleInit as EventListener)
+    source.addEventListener('run-update', handleRunUpdate as EventListener)
+    source.addEventListener('run-log', handleRunLog as EventListener)
+    source.onerror = (event) => {
+      console.error('Run stream error', event)
+    }
+
+    return () => {
+      source.removeEventListener('init', handleInit as EventListener)
+      source.removeEventListener('run-update', handleRunUpdate as EventListener)
+      source.removeEventListener('run-log', handleRunLog as EventListener)
+      source.close()
     }
   }, [id])
 

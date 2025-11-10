@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile, rm } from "fs/promises";
 import { join } from "path";
 import { spawn, type ChildProcess } from "child_process";
+import { EventEmitter } from "events";
 import { v4 as uuid } from "uuid";
 import { createServer } from "net";
 import AdmZip from "adm-zip";
@@ -14,6 +15,8 @@ const WORKSPACE_ROOT = join(DATA_DIR, "workspaces");
 
 const jobs = new Map<string, RunJob>();
 const processes = new Map<string, ChildProcess>();
+const runEvents = new EventEmitter();
+runEvents.setMaxListeners(0);
 
 void loadRunsFromDisk();
 
@@ -25,6 +28,39 @@ export function listRuns(projectId?: string): RunJob[] {
 
 export function getRun(jobId: string): RunJob | undefined {
   return jobs.get(jobId);
+}
+
+export type RunStreamEvent =
+  | { type: "run-update"; run: RunJob }
+  | { type: "run-log"; runId: string; projectId: string; entry: RunLogEntry };
+
+export function subscribeRunEvents(listener: (event: RunStreamEvent) => void): () => void {
+  const updateHandler = (run: RunJob) => listener({ type: "run-update", run });
+  const logHandler = (payload: { runId: string; projectId: string; entry: RunLogEntry }) =>
+    listener({ type: "run-log", ...payload });
+
+  runEvents.on("run-update", updateHandler);
+  runEvents.on("run-log", logHandler);
+  return () => {
+    runEvents.off("run-update", updateHandler);
+    runEvents.off("run-log", logHandler);
+  };
+}
+
+function emitRunUpdate(run: RunJob): void {
+  runEvents.emit("run-update", cloneRun(run));
+}
+
+function emitRunLog(run: RunJob, entry: RunLogEntry): void {
+  runEvents.emit("run-log", {
+    runId: run.id,
+    projectId: run.projectId,
+    entry: { ...entry },
+  });
+}
+
+function cloneRun(run: RunJob): RunJob {
+  return JSON.parse(JSON.stringify(run)) as RunJob;
 }
 
 export async function enqueueRun(project: StoredProject): Promise<RunJob> {
@@ -51,6 +87,7 @@ export async function enqueueRun(project: StoredProject): Promise<RunJob> {
   };
 
   jobs.set(jobId, job);
+  emitRunUpdate(job);
   void runJob(project, jobId);
   await persistRuns();
   return job;
@@ -69,6 +106,7 @@ export async function stopRun(jobId: string): Promise<RunJob> {
   appendLog(job, "system", "Stop requested.");
   job.status = "stopping";
   jobs.set(jobId, job);
+  emitRunUpdate(job);
   await persistRuns();
 
   const containerName = job.containerName;
@@ -94,6 +132,7 @@ export async function stopRun(jobId: string): Promise<RunJob> {
   job.finishedAt = new Date().toISOString();
   jobs.set(jobId, job);
   await persistRuns();
+  emitRunUpdate(job);
   return job;
 }
 
@@ -106,6 +145,7 @@ async function runJob(project: StoredProject, jobId: string): Promise<void> {
     job.status = "stopped";
     job.finishedAt = job.finishedAt ?? new Date().toISOString();
     jobs.set(jobId, job);
+    emitRunUpdate(job);
     await persistRuns();
     return;
   }
@@ -114,6 +154,7 @@ async function runJob(project: StoredProject, jobId: string): Promise<void> {
   job.startedAt = new Date().toISOString();
   appendLog(job, "system", `Starting docker run for project ${project.id}`);
   jobs.set(jobId, job);
+  emitRunUpdate(job);
   await persistRuns();
 
   try {
@@ -128,6 +169,7 @@ async function runJob(project: StoredProject, jobId: string): Promise<void> {
     job.error = error instanceof Error ? error.message : String(error);
     job.finishedAt = new Date().toISOString();
     jobs.set(jobId, job);
+    emitRunUpdate(job);
     await persistRuns();
   }
 }
@@ -145,6 +187,7 @@ async function ensureDockerJob(job: RunJob, project: StoredProject): Promise<voi
   job.containerName = containerName;
 
   jobs.set(job.id, job);
+  emitRunUpdate(job);
   await persistRuns();
 
   const serverType = determineServerType(project.loader);
@@ -220,6 +263,7 @@ async function executeCommand(job: RunJob, command: string, args: string[]): Pro
         currentJob.status = "stopped";
         currentJob.finishedAt = currentJob.finishedAt ?? new Date().toISOString();
         jobs.set(currentJob.id, currentJob);
+        emitRunUpdate(currentJob);
         void persistRuns();
         resolve();
         return;
@@ -230,6 +274,7 @@ async function executeCommand(job: RunJob, command: string, args: string[]): Pro
         currentJob.status = "succeeded";
         currentJob.finishedAt = new Date().toISOString();
         jobs.set(currentJob.id, currentJob);
+        emitRunUpdate(currentJob);
         void persistRuns();
         resolve();
       } else {
@@ -248,6 +293,7 @@ async function simulateLocalRun(job: RunJob, project: StoredProject): Promise<vo
       job.status = "stopped";
       job.finishedAt = new Date().toISOString();
       jobs.set(job.id, job);
+      emitRunUpdate(job);
       await persistRuns();
       return;
     }
@@ -257,6 +303,7 @@ async function simulateLocalRun(job: RunJob, project: StoredProject): Promise<vo
   job.status = "succeeded";
   job.finishedAt = new Date().toISOString();
   jobs.set(job.id, job);
+  emitRunUpdate(job);
   await persistRuns();
 }
 
@@ -266,11 +313,13 @@ function appendLog(job: RunJob, stream: RunLogStream, message: string): void {
     .map((line) => line.trim())
     .filter(Boolean);
   for (const line of lines) {
-    job.logs.push({
+    const entry: RunLogEntry = {
       timestamp: new Date().toISOString(),
       stream,
       message: line,
-    });
+    };
+    job.logs.push(entry);
+    emitRunLog(job, entry);
   }
 }
 
