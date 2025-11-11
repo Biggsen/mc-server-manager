@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { ReactNode, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Building, Plug } from '@phosphor-icons/react'
+import { Button, type ButtonProps } from '../components/ui'
 import {
   fetchProjects,
   triggerBuild,
@@ -213,18 +214,26 @@ function Dashboard() {
     ['pending', 'running', 'stopping'].includes(run.status),
   )
 
-  const quickActions = useMemo(
+  type QuickAction = {
+    label: string
+    action: () => void
+    icon: ReactNode
+    variant?: ButtonProps['variant']
+  }
+
+  const quickActions = useMemo<QuickAction[]>(
     () => [
       {
         label: 'New Project',
         action: () => navigate('/projects/new'),
-        variant: 'primary' as const,
+        variant: 'primary',
         icon: <Building size={18} weight="fill" aria-hidden="true" />,
       },
       {
         label: 'Open Plugin Library',
         action: () => navigate('/plugins'),
         icon: <Plug size={18} weight="fill" aria-hidden="true" />,
+        variant: 'pill',
       },
     ],
     [navigate],
@@ -297,15 +306,14 @@ function Dashboard() {
 
         <div className="quick-actions">
           {quickActions.map((action) => (
-            <button
+            <Button
               key={action.label}
-              type="button"
-              className={action.variant === 'primary' ? 'primary' : 'pill-button'}
+              variant={action.variant}
+              icon={action.icon}
               onClick={action.action}
             >
-              <span className="button-icon">{action.icon}</span>
               {action.label}
-            </button>
+            </Button>
           ))}
         </div>
       </section>

@@ -23,6 +23,8 @@ import TestTools from './pages/TestTools'
 import PluginLibrary from './pages/PluginLibrary'
 import GenerateProfile from './pages/GenerateProfile'
 import './App.css'
+import './components/ui/styles.css'
+import { Button, ToastProvider, ToastViewport } from './components/ui'
 
 const ENVIRONMENT_LABEL = import.meta.env.VITE_ENV_LABEL ?? 'Local'
 
@@ -143,8 +145,9 @@ function App() {
   }
 
   return (
-    <div className="app-frame">
-      <aside className="app-sidebar">
+    <ToastProvider>
+      <div className="app-frame">
+        <aside className="app-sidebar">
         <button
           type="button"
           className="brand-button"
@@ -187,77 +190,79 @@ function App() {
         </footer>
       </aside>
 
-      <div className="app-main">
-        <header className="app-topbar">
-          <div className="topbar-context">
-            <small>{ENVIRONMENT_LABEL} mode</small>
-            <h2>{currentTitle}</h2>
-          </div>
+        <div className="app-main">
+          <header className="app-topbar">
+            <div className="topbar-context">
+              <small>{ENVIRONMENT_LABEL} mode</small>
+              <h2>{currentTitle}</h2>
+            </div>
 
-          <label className="topbar-search">
-            <MagnifyingGlass size={18} weight="bold" aria-hidden="true" />
-            <input
-              type="search"
-              placeholder="Search projects, builds, plugins"
-              aria-label="Global search"
-            />
-          </label>
+            <label className="topbar-search">
+              <MagnifyingGlass size={18} weight="bold" aria-hidden="true" />
+              <input
+                type="search"
+                placeholder="Search projects, builds, plugins"
+                aria-label="Global search"
+              />
+            </label>
 
-          <div className="topbar-actions">
-            <button
-              type="button"
-              className="ghost ghost-with-icon"
-              onClick={() => navigate('/projects/new')}
-            >
-              <Building size={16} weight="fill" aria-hidden="true" />
-              New Project
-            </button>
-            {authStatus?.authenticated ? (
-              <>
-                <span className="avatar" aria-hidden="true">
-                  {initials}
-                </span>
-                <button
-                  type="button"
-                  className="utility-button"
-                  onClick={handleSignOut}
-                  disabled={signingOut}
-                >
-                  {signingOut ? 'Signing out…' : 'Sign out'}
-                </button>
-              </>
-            ) : (
-              <button
-                type="button"
-                className="primary primary-with-icon"
-                onClick={() =>
-                  startGitHubLogin(`${window.location.origin}${location.pathname}`)
-                }
+            <div className="topbar-actions">
+              <Button
+                variant="ghost"
+                icon={<Building size={16} weight="fill" aria-hidden="true" />}
+                onClick={() => navigate('/projects/new')}
               >
-                <GithubLogo size={18} weight="fill" aria-hidden="true" />
-                Sign in with GitHub
-              </button>
-            )}
-          </div>
-        </header>
+                New Project
+              </Button>
+              {authStatus?.authenticated ? (
+                <>
+                  <span className="avatar" aria-hidden="true">
+                    {initials}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="utility-button"
+                    onClick={handleSignOut}
+                    disabled={signingOut}
+                  >
+                    {signingOut ? 'Signing out…' : 'Sign out'}
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  variant="primary"
+                  className="primary-with-icon"
+                  icon={<GithubLogo size={18} weight="fill" aria-hidden="true" />}
+                  onClick={() =>
+                    startGitHubLogin(`${window.location.origin}${location.pathname}`)
+                  }
+                >
+                  Sign in with GitHub
+                </Button>
+              )}
+            </div>
+          </header>
 
-        <main className="app-content" data-route={location.pathname}>
-          {authError && <p className="error-text">{authError}</p>}
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/projects" element={<Projects />} />
-            <Route path="/projects/new" element={<NewProject />} />
-            <Route path="/projects/import" element={<ImportProject />} />
-            <Route path="/projects/:id" element={<ProjectDetail />} />
-            <Route path="/projects/:id/profile" element={<GenerateProfile />} />
-            <Route path="/plugins" element={<PluginLibrary />} />
-            <Route path="/dev/tools" element={<TestTools />} />
-            <Route path="/deployments" element={<Deployments />} />
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </main>
+          <main className="app-content" data-route={location.pathname}>
+            {authError && <p className="error-text">{authError}</p>}
+            <Routes>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/projects" element={<Projects />} />
+              <Route path="/projects/new" element={<NewProject />} />
+              <Route path="/projects/import" element={<ImportProject />} />
+              <Route path="/projects/:id" element={<ProjectDetail />} />
+              <Route path="/projects/:id/profile" element={<GenerateProfile />} />
+              <Route path="/plugins" element={<PluginLibrary />} />
+              <Route path="/dev/tools" element={<TestTools />} />
+              <Route path="/deployments" element={<Deployments />} />
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </main>
+        </div>
       </div>
-    </div>
+      <ToastViewport />
+    </ToastProvider>
   )
 }
 
