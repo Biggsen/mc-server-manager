@@ -42,7 +42,9 @@ import {
   TabTrigger,
   TabPanels,
   TabPanel,
+  Skeleton,
 } from '../components/ui'
+import { useToast } from '../components/ui/toast'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? '/api'
 const catalogProviderLabel: Record<'hangar' | 'modrinth' | 'spiget', string> = {
@@ -113,6 +115,7 @@ function formatBytes(bytes: number): string {
 function ProjectDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const { toast } = useToast()
 
   const [loading, setLoading] = useState(true)
   const initialLoadRef = useRef(true)
@@ -122,7 +125,6 @@ function ProjectDetail() {
   const [runs, setRuns] = useState<RunJob[]>([])
   const [runBusy, setRunBusy] = useState<Record<string, boolean>>({})
   const [busy, setBusy] = useState(false)
-  const [message, setMessage] = useState<string | null>(null)
   const [manifestPreview, setManifestPreview] = useState<ManifestPreview | null>(null)
   const [pluginQuery, setPluginQuery] = useState('')
   const [pluginResults, setPluginResults] = useState<PluginSearchResult[]>([])
@@ -140,7 +142,6 @@ function ProjectDetail() {
   const [uploadMaxVersion, setUploadMaxVersion] = useState('')
   const [manualBusy, setManualBusy] = useState(false)
   const [uploadBusy, setUploadBusy] = useState(false)
-  const [pluginMessage, setPluginMessage] = useState<string | null>(null)
   const [libraryPlugins, setLibraryPlugins] = useState<StoredPluginRecord[]>([])
   const [libraryLoading, setLibraryLoading] = useState(false)
   const [libraryError, setLibraryError] = useState<string | null>(null)
@@ -194,9 +195,17 @@ function ProjectDetail() {
         setRuns((prev) =>
           prev.map((run) => (run.id === updated.id ? { ...run, ...updated } : run)),
         )
-        setMessage(`Stop requested for run ${target.id}`)
+        toast({
+          title: 'Stopping run',
+          description: `Stop requested for ${target.id}.`,
+          variant: 'warning',
+        })
       } catch (err) {
-        setMessage(err instanceof Error ? err.message : 'Failed to stop run')
+        toast({
+          title: 'Failed to stop run',
+          description: err instanceof Error ? err.message : 'Failed to stop run',
+          variant: 'danger',
+        })
       } finally {
         setRunBusy((prev) => {
           const next = { ...prev }
@@ -205,7 +214,7 @@ function ProjectDetail() {
         })
       }
     },
-    [],
+    [toast],
   )
 
   useEffect(() => {
@@ -431,17 +440,23 @@ useEffect(() => {
           source: plugin.source,
         })
         setProject((prev) => (prev ? { ...prev, plugins: plugins ?? prev.plugins } : prev))
-        setPluginMessage(`Added ${plugin.id} ${plugin.version} from saved plugins.`)
+        toast({
+          title: 'Plugin added',
+          description: `${plugin.id} ${plugin.version} added from library.`,
+          variant: 'success',
+        })
         await loadLibrary()
       } catch (err) {
-        setPluginMessage(
-          err instanceof Error ? err.message : 'Failed to add plugin from saved library.',
-        )
+        toast({
+          title: 'Failed to add plugin',
+          description: err instanceof Error ? err.message : 'Failed to add plugin from saved library.',
+          variant: 'danger',
+        })
       } finally {
         setLibraryBusy(null)
       }
     },
-    [id, loadLibrary],
+    [id, loadLibrary, toast],
   )
 
   const handleRemovePlugin = useCallback(
@@ -453,12 +468,20 @@ useEffect(() => {
       try {
         const plugins = await deleteProjectPlugin(id, pluginId)
         setProject((prev) => (prev ? { ...prev, plugins: plugins ?? [] } : prev))
-        setPluginMessage(`Removed plugin ${pluginId}`)
+        toast({
+          title: 'Plugin removed',
+          description: `${pluginId} removed from project.`,
+          variant: 'warning',
+        })
       } catch (err) {
-        setPluginMessage(err instanceof Error ? err.message : 'Failed to remove plugin.')
+        toast({
+          title: 'Failed to remove plugin',
+          description: err instanceof Error ? err.message : 'Failed to remove plugin.',
+          variant: 'danger',
+        })
       }
     },
-    [id],
+    [id, toast],
   )
 
   const handleUploadConfig = useCallback(
@@ -534,13 +557,24 @@ useEffect(() => {
       setDeleteBusy(true)
       setDeleteError(null)
       await deleteProject(id, { deleteRepo: deleteRepo && Boolean(project.repo) })
+      toast({
+        title: 'Project deleted',
+        description: `${project.name} removed successfully.`,
+        variant: 'warning',
+      })
       navigate('/projects')
     } catch (err) {
-      setDeleteError(err instanceof Error ? err.message : 'Failed to delete project.')
+      const description = err instanceof Error ? err.message : 'Failed to delete project.'
+      setDeleteError(description)
+      toast({
+        title: 'Delete failed',
+        description,
+        variant: 'danger',
+      })
     } finally {
       setDeleteBusy(false)
     }
-  }, [deleteRepo, id, navigate, project])
+  }, [deleteRepo, id, navigate, project, toast])
 
   if (!id) {
     return (
@@ -552,9 +586,50 @@ useEffect(() => {
 
   if (loading) {
     return (
-      <section className="panel">
-        <p className="muted">Loading project…</p>
-      </section>
+      <div className="project-detail-loading">
+        <Card className="project-summary-card">
+          <CardHeader>
+            <div className="project-summary-card__header">
+              <div>
+                <Skeleton style={{ width: '220px', height: '28px' }} />
+                <Skeleton style={{ width: '160px', height: '18px', marginTop: '8px' }} />
+              </div>
+              <Skeleton style={{ width: '110px', height: '18px' }} />
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="project-summary-card__meta">
+              {[0, 1, 2].map((index) => (
+                <div key={index}>
+                  <Skeleton style={{ width: '72px', height: '12px' }} />
+                  <Skeleton
+                    style={{ width: '96px', height: '20px', marginTop: '8px', borderRadius: '8px' }}
+                  />
+                </div>
+              ))}
+            </div>
+            <div className="project-summary-card__actions">
+              {[0, 1, 2].map((index) => (
+                <Skeleton
+                  key={index}
+                  style={{ width: '140px', height: '40px', borderRadius: '999px' }}
+                />
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        <article className="panel">
+          <header>
+            <Skeleton style={{ width: '180px', height: '24px' }} />
+          </header>
+          <div className="layout-grid" style={{ gap: '16px', marginTop: '16px' }}>
+            {[0, 1].map((index) => (
+              <Skeleton key={index} style={{ width: '100%', height: '180px', borderRadius: '16px' }} />
+            ))}
+          </div>
+        </article>
+      </div>
     )
   }
 
@@ -596,9 +671,17 @@ useEffect(() => {
     try {
       setBusy(true)
       const build = await triggerBuild(project.id)
-      setMessage(`Triggered build ${build.id}`)
+      toast({
+        title: 'Build queued',
+        description: `Build ${build.id} is running.`,
+        variant: 'success',
+      })
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : 'Failed to queue build')
+      toast({
+        title: 'Build failed to queue',
+        description: err instanceof Error ? err.message : 'Failed to queue build',
+        variant: 'danger',
+      })
     } finally {
       setBusy(false)
     }
@@ -608,13 +691,19 @@ useEffect(() => {
     try {
       setBusy(true)
       const manifest = await triggerManifest(project.id)
-      setMessage(
-        manifest.manifest?.lastBuildId
-          ? `Manifest ${manifest.manifest.lastBuildId} generated`
-          : 'Manifest generated',
-      )
+      toast({
+        title: 'Manifest generated',
+        description: manifest.manifest?.lastBuildId
+          ? `Build ${manifest.manifest.lastBuildId}`
+          : 'Latest manifest is ready.',
+        variant: 'success',
+      })
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : 'Manifest generation failed')
+      toast({
+        title: 'Manifest generation failed',
+        description: err instanceof Error ? err.message : 'Manifest generation failed',
+        variant: 'danger',
+      })
     } finally {
       setBusy(false)
     }
@@ -624,9 +713,17 @@ useEffect(() => {
     try {
       setBusy(true)
       const assets = await scanProjectAssets(project.id)
-      setMessage(`Scanned ${assets.plugins.length} plugins, ${assets.configs.length} configs`)
+      toast({
+        title: 'Assets scanned',
+        description: `Found ${assets.plugins.length} plugins and ${assets.configs.length} configs.`,
+        variant: 'success',
+      })
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : 'Asset scan failed')
+      toast({
+        title: 'Asset scan failed',
+        description: err instanceof Error ? err.message : 'Asset scan failed',
+        variant: 'danger',
+      })
     } finally {
       setBusy(false)
     }
@@ -636,10 +733,18 @@ useEffect(() => {
     try {
       setBusy(true)
       const run = await runProjectLocally(project.id)
-      setMessage(`Run queued (${run.status.toUpperCase()})`)
+      toast({
+        title: 'Run queued',
+        description: `Run ${run.id} status: ${run.status.toUpperCase()}`,
+        variant: 'success',
+      })
       setRuns((prev) => [run, ...prev.filter((item) => item.id !== run.id)])
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : 'Run failed to queue')
+      toast({
+        title: 'Run failed',
+        description: err instanceof Error ? err.message : 'Run failed to queue',
+        variant: 'danger',
+      })
     } finally {
       setBusy(false)
     }
@@ -723,7 +828,6 @@ useEffect(() => {
               Generate profile YAML
             </Button>
           </div>
-          {message && <p className="project-summary-card__message">{message}</p>}
         </CardContent>
       </Card>
 
@@ -884,9 +988,13 @@ useEffect(() => {
                                     content: manifest,
                                   })
                                 } catch (err) {
-                                  setMessage(
-                                    err instanceof Error ? err.message : 'Failed to load manifest',
-                                  )
+                                  toast({
+                                    title: 'Failed to load manifest',
+                                    description: err instanceof Error
+                                      ? err.message
+                                      : 'Failed to load manifest',
+                                    variant: 'danger',
+                                  })
                                 }
                               }}
                             >
@@ -1010,7 +1118,22 @@ useEffect(() => {
                     </div>
                   </div>
                   {libraryError && <p className="error-text">{libraryError}</p>}
-                  {libraryLoading && <p className="muted">Loading saved plugins…</p>}
+                  {libraryLoading && (
+                    <ul className="project-list">
+                      {[0, 1, 2].map((index) => (
+                        <li key={index}>
+                          <div>
+                            <Skeleton style={{ width: '60%', height: '18px' }} />
+                            <Skeleton style={{ width: '40%', height: '14px', marginTop: '8px' }} />
+                            <Skeleton style={{ width: '50%', height: '14px', marginTop: '8px' }} />
+                          </div>
+                          <div className="dev-buttons">
+                            <Skeleton style={{ width: '120px', height: '36px', borderRadius: '999px' }} />
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                   {!libraryLoading && filteredLibrary.length === 0 && (
                     <p className="muted">
                       {libraryQuery.trim()
@@ -1181,9 +1304,11 @@ useEffect(() => {
                           !manualMinVersion.trim() ||
                           !manualMaxVersion.trim()
                         ) {
-                          setPluginMessage(
-                            'Plugin ID, version, download URL, and Minecraft version range are required.',
-                          )
+                          toast({
+                            title: 'Failed to add plugin',
+                            description: 'Plugin ID, version, download URL, and Minecraft version range are required.',
+                            variant: 'danger',
+                          })
                           return
                         }
                         try {
@@ -1198,14 +1323,22 @@ useEffect(() => {
                           })
                           setProject((prev) => (prev ? { ...prev, plugins: plugins ?? prev.plugins } : prev))
                           await loadLibrary()
-                          setPluginMessage(`Added ${manualPluginId.trim()} ${manualPluginVersion.trim()}`)
+                          toast({
+                            title: 'Plugin added',
+                            description: `${manualPluginId.trim()} ${manualPluginVersion.trim()} added to project.`,
+                            variant: 'success',
+                          })
                           setManualPluginId('')
                           setManualPluginVersion('')
                           setManualPluginUrl('')
                           setManualMinVersion('')
                           setManualMaxVersion('')
                         } catch (err) {
-                          setPluginMessage(err instanceof Error ? err.message : 'Failed to add plugin.')
+                          toast({
+                            title: 'Failed to add plugin',
+                            description: err instanceof Error ? err.message : 'Failed to add plugin.',
+                            variant: 'danger',
+                          })
                         } finally {
                           setManualBusy(false)
                         }
@@ -1281,9 +1414,11 @@ useEffect(() => {
                           !uploadMinVersion.trim() ||
                           !uploadMaxVersion.trim()
                         ) {
-                          setPluginMessage(
-                            'Plugin ID, version, file, and Minecraft version range are required.',
-                          )
+                          toast({
+                            title: 'Failed to upload plugin',
+                            description: 'Plugin ID, version, file, and Minecraft version range are required.',
+                            variant: 'danger',
+                          })
                           return
                         }
                         try {
@@ -1297,7 +1432,11 @@ useEffect(() => {
                           })
                           setProject((prev) => (prev ? { ...prev, plugins: plugins ?? prev.plugins } : prev))
                           await loadLibrary()
-                          setPluginMessage(`Uploaded ${uploadPluginId.trim()} ${uploadPluginVersion.trim()}`)
+                          toast({
+                            title: 'Plugin uploaded',
+                            description: `${uploadPluginId.trim()} ${uploadPluginVersion.trim()} uploaded successfully.`,
+                            variant: 'success',
+                          })
                           setUploadPluginId('')
                           setUploadPluginVersion('')
                           setUploadPluginFile(null)
@@ -1307,7 +1446,11 @@ useEffect(() => {
                             event.currentTarget.reset()
                           }
                         } catch (err) {
-                          setPluginMessage(err instanceof Error ? err.message : 'Failed to upload plugin.')
+                          toast({
+                            title: 'Upload failed',
+                            description: err instanceof Error ? err.message : 'Failed to upload plugin.',
+                            variant: 'danger',
+                          })
                         } finally {
                           setUploadBusy(false)
                         }
@@ -1361,14 +1504,13 @@ useEffect(() => {
                         </div>
                       </div>
                       <div className="form-actions">
-                        <Button type="submit" className="primary" disabled={uploadBusy}>
+                        <Button type="submit" variant="primary" disabled={uploadBusy}>
                           {uploadBusy ? 'Uploading…' : 'Upload Plugin'}
                         </Button>
                       </div>
                     </form>
                   </section>
 
-                  {pluginMessage && <p className="muted">{pluginMessage}</p>}
                 </article>
               </div>
             </TabPanel>
@@ -1406,7 +1548,21 @@ useEffect(() => {
                     </div>
                   </form>
                   {configsError && <p className="error-text">{configsError}</p>}
-                  {configsLoading && <p className="muted">Loading config files…</p>}
+                  {configsLoading && (
+                    <ul className="project-list">
+                      {[0, 1, 2].map((index) => (
+                        <li key={index}>
+                          <div>
+                            <Skeleton style={{ width: '70%', height: '18px' }} />
+                            <Skeleton style={{ width: '50%', height: '14px', marginTop: '8px' }} />
+                          </div>
+                          <div className="dev-buttons">
+                            <Skeleton style={{ width: '88px', height: '32px', borderRadius: '999px' }} />
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                   {!configsLoading && configFiles.length === 0 && (
                     <p className="muted">
                       No plugin configs uploaded yet. Upload files to be included in your builds.
@@ -1511,7 +1667,9 @@ useEffect(() => {
                   <Button
                     type="button"
                     variant="danger"
-                    onClick={handleDeleteProject}
+                    onClick={() => {
+                      void handleDeleteProject()
+                    }}
                     disabled={deleteBusy}
                   >
                     {deleteBusy ? 'Deleting…' : 'Delete project'}
