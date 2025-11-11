@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Play, FileText, MagnifyingGlass, Package as PackageIcon } from '@phosphor-icons/react'
 import {
   fetchProject,
   fetchBuilds,
@@ -28,6 +29,15 @@ import {
   type StoredPluginRecord,
   type ProjectConfigSummary,
 } from '../lib/api'
+import {
+  Badge,
+  Button,
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '../components/ui'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? '/api'
 const catalogProviderLabel: Record<'hangar' | 'modrinth' | 'spiget', string> = {
@@ -573,22 +583,146 @@ useEffect(() => {
     )
   }
 
-  return (
-    <section className="panel">
-      <header>
-        <h2>{project.name}</h2>
-        <p className="muted">
-          {[project.minecraftVersion, project.loader.toUpperCase(), project.source === 'imported' ? 'Imported' : null]
-            .filter(Boolean)
-            .join(' · ')}
-        </p>
-        <div className="dev-buttons">
-          <Link className="ghost" to="/projects">
-            ← All Projects
-          </Link>
-        </div>
-      </header>
+  const pluginCount = project.plugins?.length ?? 0
+  const lastManifestGenerated =
+    project.manifest?.generatedAt ? new Date(project.manifest.generatedAt).toLocaleString() : '—'
 
+  const handleTriggerBuild = async () => {
+    try {
+      setBusy(true)
+      const build = await triggerBuild(project.id)
+      setMessage(`Triggered build ${build.id}`)
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Failed to queue build')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleGenerateManifest = async () => {
+    try {
+      setBusy(true)
+      const manifest = await triggerManifest(project.id)
+      setMessage(
+        manifest.manifest?.lastBuildId
+          ? `Manifest ${manifest.manifest.lastBuildId} generated`
+          : 'Manifest generated',
+      )
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Manifest generation failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleScanAssets = async () => {
+    try {
+      setBusy(true)
+      const assets = await scanProjectAssets(project.id)
+      setMessage(`Scanned ${assets.plugins.length} plugins, ${assets.configs.length} configs`)
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Asset scan failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleRunLocally = async () => {
+    try {
+      setBusy(true)
+      const run = await runProjectLocally(project.id)
+      setMessage(`Run queued (${run.status.toUpperCase()})`)
+      setRuns((prev) => [run, ...prev.filter((item) => item.id !== run.id)])
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Run failed to queue')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <>
+      <Card className="project-summary-card">
+        <CardHeader>
+          <div className="project-summary-card__header">
+            <div>
+              <CardTitle>{project.name}</CardTitle>
+              <CardDescription>
+                {[project.minecraftVersion, project.loader.toUpperCase(), project.source === 'imported' ? 'Imported' : null]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </CardDescription>
+            </div>
+            <Link className="link" to="/projects">
+              ← All Projects
+            </Link>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="project-summary-card__meta">
+            <div>
+              <span className="project-summary-card__meta-label">Minecraft</span>
+              <strong>{project.minecraftVersion}</strong>
+            </div>
+            <div>
+              <span className="project-summary-card__meta-label">Loader</span>
+              <strong>{project.loader.toUpperCase()}</strong>
+            </div>
+            <div>
+              <span className="project-summary-card__meta-label">Plugins</span>
+              <strong>{pluginCount}</strong>
+            </div>
+            <div>
+              <span className="project-summary-card__meta-label">Last manifest</span>
+              <strong>{lastManifestGenerated}</strong>
+            </div>
+          </div>
+          <div className="project-summary-card__actions">
+            <Button
+              variant="primary"
+              icon={<PackageIcon size={18} weight="fill" aria-hidden="true" />}
+              onClick={handleTriggerBuild}
+              disabled={busy}
+            >
+              Trigger build
+            </Button>
+            <Button
+              variant="ghost"
+              icon={<FileText size={18} weight="fill" aria-hidden="true" />}
+              onClick={handleGenerateManifest}
+              disabled={busy}
+            >
+              Generate manifest
+            </Button>
+            <Button
+              variant="ghost"
+              icon={<MagnifyingGlass size={18} weight="bold" aria-hidden="true" />}
+              onClick={handleScanAssets}
+              disabled={busy}
+            >
+              Scan assets
+            </Button>
+            <Button
+              variant="pill"
+              icon={<Play size={18} weight="fill" aria-hidden="true" />}
+              onClick={handleRunLocally}
+              disabled={busy}
+            >
+              Run locally
+            </Button>
+            <Button
+              variant="link"
+              onClick={() => navigate(`/projects/${project.id}/profile`)}
+              disabled={busy}
+            >
+              Generate profile YAML
+            </Button>
+          </div>
+          {message && <p className="project-summary-card__message">{message}</p>}
+        </CardContent>
+      </Card>
+
+      <section className="panel">
       <div className="layout-grid">
         <article className="panel">
           <header>
@@ -639,9 +773,9 @@ useEffect(() => {
                   <li key={`${plugin.id}:${plugin.version}`}>
                     <div>
                       <strong>{plugin.id}</strong>{' '}
-                      <span className="badge">{sourceBadgeLabel[sourceKind]}</span>{' '}
+                      <Badge variant="outline">{sourceBadgeLabel[sourceKind]}</Badge>{' '}
                       {plugin.provider && plugin.provider !== 'custom' && (
-                        <span className="badge">{plugin.provider}</span>
+                        <Badge variant="accent">{plugin.provider}</Badge>
                       )}{' '}
                       <span className="muted">v{plugin.version}</span>
                       {supportRange && <p className="muted">Supports: {supportRange}</p>}
@@ -669,13 +803,13 @@ useEffect(() => {
                       )}
                     </div>
                     <div className="dev-buttons">
-                      <button
+                      <Button
                         type="button"
-                        className="ghost"
+                        variant="ghost"
                         onClick={() => handleRemovePlugin(plugin.id)}
                       >
                         Remove
-                      </button>
+                      </Button>
                     </div>
                   </li>
                 )
@@ -684,105 +818,6 @@ useEffect(() => {
           </article>
         )}
 
-        <article className="panel">
-          <header>
-            <h3>Actions</h3>
-          </header>
-          <div className="dev-buttons vertical">
-            <button
-              type="button"
-              className="primary"
-              disabled={busy}
-              onClick={async () => {
-                try {
-                  setBusy(true)
-                  const build = await triggerBuild(project.id)
-                  setMessage(`Triggered build ${build.id}`)
-                } catch (err) {
-                  setMessage(err instanceof Error ? err.message : 'Failed to queue build')
-                } finally {
-                  setBusy(false)
-                }
-              }}
-            >
-              Trigger Build
-            </button>
-            <button
-              type="button"
-              className="ghost"
-              disabled={busy}
-              onClick={async () => {
-                try {
-                  setBusy(true)
-                  const manifest = await triggerManifest(project.id)
-                  setMessage(
-                    manifest.manifest?.lastBuildId
-                      ? `Manifest ${manifest.manifest.lastBuildId} generated`
-                      : 'Manifest generated',
-                  )
-                } catch (err) {
-                  setMessage(
-                    err instanceof Error ? err.message : 'Manifest generation failed',
-                  )
-                } finally {
-                  setBusy(false)
-                }
-              }}
-            >
-              Generate Manifest
-            </button>
-            <button
-              type="button"
-              className="ghost"
-              disabled={busy}
-              onClick={() => navigate(`/projects/${project.id}/profile`)}
-            >
-              Generate Profile YAML
-            </button>
-            <button
-              type="button"
-              className="ghost"
-              disabled={busy}
-              onClick={async () => {
-                try {
-                  setBusy(true)
-                  const assets = await scanProjectAssets(project.id)
-                  setMessage(
-                    `Scanned ${assets.plugins.length} plugins, ${assets.configs.length} configs`,
-                  )
-                } catch (err) {
-                  setMessage(
-                    err instanceof Error ? err.message : 'Asset scan failed',
-                  )
-                } finally {
-                  setBusy(false)
-                }
-              }}
-            >
-              Scan Assets
-            </button>
-            <button
-              type="button"
-              className="ghost"
-              disabled={busy}
-              onClick={async () => {
-                try {
-                  setBusy(true)
-                  const run = await runProjectLocally(project.id)
-                  setMessage(`Run queued (${run.status.toUpperCase()})`)
-                  setRuns((prev) => [run, ...prev.filter((item) => item.id !== run.id)])
-                } catch (err) {
-                  setMessage(err instanceof Error ? err.message : 'Run failed to queue')
-                } finally {
-                  setBusy(false)
-                }
-              }}
-            >
-              Run Locally
-            </button>
-          </div>
-          {message && <p className="success-text">{message}</p>}
-        </article>
       </div>
 
       <article className="panel">
@@ -1472,6 +1507,7 @@ useEffect(() => {
         {pluginMessage && <p className="muted">{pluginMessage}</p>}
       </article>
     </section>
+  </>
   )
 }
 
