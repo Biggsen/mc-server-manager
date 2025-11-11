@@ -33,11 +33,18 @@ export interface TabsProps extends HTMLAttributes<HTMLDivElement> {
   children: ReactNode
 }
 
-export function Tabs({ defaultValue, value, onValueChange, children, className, ...props }: TabsProps) {
+export function Tabs({
+  defaultValue,
+  value,
+  onValueChange,
+  children,
+  className,
+  ...props
+}: TabsProps) {
   const autoId = useId()
   const [internalValue, setInternalValue] = useState<string>(defaultValue ?? '')
 
-  const activeId = value ?? internalValue
+  const activeId = value ?? internalValue ?? defaultValue ?? autoId
 
   const setActiveId = useCallback(
     (next: string) => {
@@ -51,10 +58,10 @@ export function Tabs({ defaultValue, value, onValueChange, children, className, 
 
   const context = useMemo<TabsContextValue>(
     () => ({
-      activeId: activeId || defaultValue || autoId,
+      activeId,
       setActiveId,
     }),
-    [activeId, autoId, defaultValue, setActiveId],
+    [activeId, setActiveId],
   )
 
   return (
