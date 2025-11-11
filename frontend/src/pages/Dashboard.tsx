@@ -37,6 +37,7 @@ function getPluginSourceKind(plugin: StoredPluginRecord): 'download' | 'upload' 
   return plugin.source?.uploadPath ? 'upload' : 'download'
 }
 import { subscribeProjectsUpdated } from '../lib/events'
+import { ContentSection } from '../components/layout'
 import { useAsyncAction } from '../lib/useAsyncAction'
 
 function Dashboard() {
@@ -367,7 +368,7 @@ function Dashboard() {
       </section>
 
       <section className="dashboard-stack">
-        <article className="panel">
+        <ContentSection as="article">
         <header>
           <h2>Recent Projects</h2>
             <Link to="/projects" className="link">
@@ -417,9 +418,9 @@ function Dashboard() {
             ))}
           </ul>
         )}
-        </article>
+        </ContentSection>
 
-        <article className="panel">
+        <ContentSection as="article">
         <header>
           <h2>Active Local Servers</h2>
         </header>
@@ -472,11 +473,11 @@ function Dashboard() {
             })}
           </ul>
         )}
-        </article>
+        </ContentSection>
       </section>
 
       <section className="dashboard-stack">
-        <article className="panel">
+        <ContentSection as="article">
         <header>
           <h2>Saved Plugins</h2>
           <Link to="/plugins" className="link">
@@ -506,9 +507,9 @@ function Dashboard() {
             ))}
           </ul>
         )}
-        </article>
+        </ContentSection>
 
-        <article className="panel">
+        <ContentSection as="article">
           <header>
             <h3>Resources</h3>
           </header>
@@ -517,7 +518,7 @@ function Dashboard() {
             <li>Overlay configuration guide</li>
             <li>Deterministic build checklist</li>
           </ul>
-        </article>
+        </ContentSection>
       </section>
     </>
   )

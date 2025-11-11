@@ -6,6 +6,7 @@ import {
   type DeploymentTarget,
   type DeploymentType,
 } from '../lib/api'
+import { ContentSection } from '../components/layout'
 
 type FormState = {
   name: string
@@ -125,7 +126,7 @@ function Deployments() {
   }
 
   return (
-    <section className="panel">
+    <ContentSection as="section">
       <header>
         <h2>Deployment Targets</h2>
         <p className="muted">
@@ -247,17 +248,17 @@ function Deployments() {
             Reset
           </button>
         </div>
-        {message && <p className="muted">{message}</p>}
+        {message && <p className={message.startsWith('Error') ? 'error-text' : 'success-text'}>{message}</p>}
       </form>
 
-      <article className="panel">
+      <ContentSection as="article">
         <header>
           <h3>Configured Targets</h3>
         </header>
         {targets.length === 0 && <p className="muted">No deployment targets configured yet.</p>}
         {targets.length > 0 && (
           <div className="layout-grid">
-            <section className="panel">
+            <ContentSection as="section">
               <header>
                 <h4>Local Folders</h4>
               </header>
@@ -273,8 +274,8 @@ function Deployments() {
                   ))}
                 </ul>
               )}
-            </section>
-            <section className="panel">
+            </ContentSection>
+            <ContentSection as="section">
               <header>
                 <h4>SFTP Servers</h4>
               </header>
@@ -293,11 +294,11 @@ function Deployments() {
                   ))}
                 </ul>
               )}
-            </section>
+            </ContentSection>
           </div>
         )}
-      </article>
-    </section>
+      </ContentSection>
+    </ContentSection>
   )
 }
 

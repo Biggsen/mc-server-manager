@@ -8,6 +8,7 @@ import {
   type ProjectConfigSummary,
   type ProjectSummary,
 } from '../lib/api'
+import { ContentSection } from '../components/layout'
 
 interface PluginFormEntry {
   id: string
@@ -267,47 +268,47 @@ function GenerateProfile() {
 
   if (!id) {
     return (
-      <section className="panel">
+      <ContentSection as="section">
         <p className="error-text">Project identifier missing.</p>
         <Link className="ghost" to="/projects">
           Back to Projects
         </Link>
-      </section>
+      </ContentSection>
     )
   }
 
   if (loading) {
     return (
-      <section className="panel">
+      <ContentSection as="section">
         <p className="muted">Loading project details…</p>
-      </section>
+      </ContentSection>
     )
   }
 
   if (error) {
     return (
-      <section className="panel">
+      <ContentSection as="section">
         <p className="error-text">{error}</p>
         <Link className="ghost" to={`/projects/${id}`}>
           Back to project
         </Link>
-      </section>
+      </ContentSection>
     )
   }
 
   if (!project || !profileDocument) {
     return (
-      <section className="panel">
+      <ContentSection as="section">
         <p className="error-text">Project not found.</p>
         <Link className="ghost" to="/projects">
           Back to Projects
         </Link>
-      </section>
+      </ContentSection>
     )
   }
 
   return (
-    <section className="panel">
+    <ContentSection as="section">
       <header>
         <h2>Generate profile for {project.name}</h2>
         <p className="muted">
@@ -327,7 +328,7 @@ function GenerateProfile() {
         }}
       >
         <div className="layout-grid">
-          <section className="panel">
+          <ContentSection as="section">
             <header>
               <h3>Project Basics</h3>
             </header>
@@ -358,9 +359,9 @@ function GenerateProfile() {
                 />
               </div>
             </div>
-          </section>
+          </ContentSection>
 
-          <section className="panel">
+          <ContentSection as="section">
             <header>
               <h3>World</h3>
             </header>
@@ -393,10 +394,10 @@ function GenerateProfile() {
                 />
               </div>
             </div>
-          </section>
+          </ContentSection>
         </div>
 
-        <section className="panel">
+        <ContentSection as="section">
           <header>
             <h3>Plugins</h3>
           </header>
@@ -466,10 +467,10 @@ function GenerateProfile() {
               Add plugin entry
             </button>
           </div>
-        </section>
+        </ContentSection>
 
         <div className="layout-grid">
-          <section className="panel">
+          <ContentSection as="section">
             <header>
               <h3>Server Properties</h3>
             </header>
@@ -540,9 +541,9 @@ function GenerateProfile() {
                 </label>
               </div>
             )}
-          </section>
+          </ContentSection>
 
-          <section className="panel">
+          <ContentSection as="section">
             <header>
               <h3>Paper Global Config</h3>
             </header>
@@ -570,11 +571,11 @@ function GenerateProfile() {
                 </div>
               </div>
             )}
-          </section>
+          </ContentSection>
         </div>
 
         {configs.length > 0 && (
-          <section className="panel">
+          <ContentSection as="section">
             <header>
               <h3>Detected Config Files</h3>
             </header>
@@ -594,13 +595,13 @@ function GenerateProfile() {
                 </li>
               ))}
             </ul>
-          </section>
+          </ContentSection>
         )}
       </form>
 
-      <article className="panel">
+      <ContentSection as="article">
         <header>
-          <h3>Preview</h3>
+          <h3>Export Preview</h3>
           <div className="dev-buttons">
             <button
               type="button"
@@ -664,8 +665,8 @@ function GenerateProfile() {
           spellCheck={false}
           style={{ width: '100%', fontFamily: 'monospace' }}
         />
-      </article>
-    </section>
+      </ContentSection>
+    </ContentSection>
   )
 }
 

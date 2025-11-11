@@ -41,6 +41,7 @@ import {
   Skeleton,
 } from '../components/ui'
 import { useToast } from '../components/ui/toast'
+import { ContentSection } from '../components/layout'
 import { useAsyncAction } from '../lib/useAsyncAction'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? '/api'
@@ -662,9 +663,9 @@ useEffect(() => {
 
   if (!id) {
     return (
-      <section className="panel">
+      <ContentSection as="section">
         <p className="error-text">Project identifier missing.</p>
-      </section>
+      </ContentSection>
     )
   }
 
@@ -703,7 +704,7 @@ useEffect(() => {
           </CardContent>
         </Card>
 
-        <article className="panel">
+        <ContentSection as="article">
           <header>
             <Skeleton style={{ width: '180px', height: '24px' }} />
           </header>
@@ -712,14 +713,14 @@ useEffect(() => {
               <Skeleton key={index} style={{ width: '100%', height: '180px', borderRadius: '16px' }} />
             ))}
           </div>
-        </article>
+        </ContentSection>
       </div>
     )
   }
 
   if (error) {
     return (
-      <section className="panel">
+      <ContentSection as="section">
         <p className="error-text">{error}</p>
         <button
           type="button"
@@ -728,13 +729,13 @@ useEffect(() => {
         >
           Back to Projects
         </button>
-      </section>
+      </ContentSection>
     )
   }
 
   if (!project) {
     return (
-      <section className="panel">
+      <ContentSection as="section">
         <p className="error-text">Project not found.</p>
         <button
           type="button"
@@ -743,7 +744,7 @@ useEffect(() => {
         >
           Back to Projects
         </button>
-      </section>
+      </ContentSection>
     )
   }
 
@@ -832,7 +833,7 @@ useEffect(() => {
         </CardContent>
       </Card>
 
-      <section className="panel project-detail-tabs">
+      <ContentSection as="section" className="project-detail-tabs">
         <Tabs defaultValue="overview">
           <TabList>
             <TabTrigger value="overview">Overview</TabTrigger>
@@ -845,7 +846,7 @@ useEffect(() => {
           <TabPanels>
             <TabPanel value="overview">
               <div className="layout-grid">
-                <article className="panel">
+                <ContentSection as="article">
                   <header>
                     <h3>Repository</h3>
                   </header>
@@ -876,9 +877,9 @@ useEffect(() => {
                       ) : null}
                     </p>
                   )}
-                </article>
+                </ContentSection>
 
-                <article className="panel">
+                <ContentSection as="article">
                   <header>
                     <h3>Configured Plugins</h3>
                   </header>
@@ -939,12 +940,12 @@ useEffect(() => {
                   ) : (
                     <p className="muted">No plugins configured yet.</p>
                   )}
-                </article>
+                </ContentSection>
               </div>
             </TabPanel>
 
             <TabPanel value="builds">
-              <article className="panel">
+              <ContentSection as="article">
                 <header>
                   <h3>Build History</h3>
                   {latestBuild?.artifactPath && (
@@ -1017,10 +1018,10 @@ useEffect(() => {
                     </tbody>
                   </table>
                 )}
-              </article>
+              </ContentSection>
 
               {manifestPreview && (
-                <article className="panel">
+                <ContentSection as="article">
                   <header>
                     <h3>Manifest: {manifestPreview.buildId}</h3>
                     <Button variant="ghost" onClick={() => setManifestPreview(null)}>
@@ -1030,12 +1031,12 @@ useEffect(() => {
                   <pre className="log-box">
                     {JSON.stringify(manifestPreview.content, null, 2)}
                   </pre>
-                </article>
+                </ContentSection>
               )}
             </TabPanel>
 
             <TabPanel value="runs">
-              <article className="panel">
+              <ContentSection as="article">
                 <header>
                   <h3>Local Runs</h3>
                 </header>
@@ -1098,12 +1099,12 @@ useEffect(() => {
                     ))}
                   </ul>
                 )}
-              </article>
+              </ContentSection>
             </TabPanel>
 
             <TabPanel value="plugins">
               <div className="assets-grid">
-                <article className="panel">
+                <ContentSection as="article">
                   <header>
                     <h3>Saved Plugins</h3>
                   </header>
@@ -1200,9 +1201,9 @@ useEffect(() => {
                       })}
                     </ul>
                   )}
-                </article>
+                </ContentSection>
 
-                <article className="panel">
+                <ContentSection as="article">
                   <header>
                     <h3>Add Plugins</h3>
                   </header>
@@ -1213,13 +1214,13 @@ useEffect(() => {
                     </Link>{' '}
                     page. Once added to the library, plugins can be added to this project from the list above.
                   </p>
-                </article>
+                </ContentSection>
               </div>
             </TabPanel>
 
             <TabPanel value="configs">
               <div className="assets-grid">
-                <article className="panel">
+                <ContentSection as="article">
                   <header>
                     <h3>Plugin Config Files</h3>
                   </header>
@@ -1293,10 +1294,10 @@ useEffect(() => {
                       ))}
                     </ul>
                   )}
-                </article>
+                </ContentSection>
 
                 {configEditor && (
-                  <article className="panel">
+                  <ContentSection as="article">
                     <header>
                       <h3>Edit Config: {configEditor.path}</h3>
                       <Button
@@ -1340,13 +1341,13 @@ useEffect(() => {
                         Cancel
                       </Button>
                     </div>
-                  </article>
+                  </ContentSection>
                 )}
               </div>
             </TabPanel>
 
             <TabPanel value="settings">
-              <article className="panel">
+              <ContentSection as="article">
                 <header>
                   <h3>Danger Zone</h3>
                 </header>
@@ -1377,11 +1378,11 @@ useEffect(() => {
                     {deleteBusy ? 'Deleting…' : 'Delete project'}
                   </Button>
                 </div>
-              </article>
+              </ContentSection>
             </TabPanel>
           </TabPanels>
         </Tabs>
-      </section>
+      </ContentSection>
   </>
   )
 }

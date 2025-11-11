@@ -6,6 +6,7 @@ import {
   importProjectRepo,
   type GitHubRepo,
 } from '../lib/api'
+import { ContentSection } from '../components/layout'
 
 function ImportProject() {
   const [status, setStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle')
@@ -113,7 +114,7 @@ function ImportProject() {
   }
 
   return (
-    <section className="panel">
+    <ContentSection as="section">
       <header>
         <h2>Import Existing Repo</h2>
         <p className="muted">
@@ -303,7 +304,7 @@ function ImportProject() {
         {status === 'success' && <p className="success-text">Repository linked successfully.</p>}
         {status === 'error' && error && <p className="error-text">{error}</p>}
       </form>
-    </section>
+    </ContentSection>
   )
 }
 

@@ -14,6 +14,7 @@ import {
   type RunJob,
 } from '../lib/api'
 import { subscribeProjectsUpdated } from '../lib/events'
+import { ContentSection } from '../components/layout'
 import { useAsyncAction } from '../lib/useAsyncAction'
 
 type ProjectMessage = { type: 'success' | 'error'; text: string }
@@ -407,7 +408,7 @@ function Projects() {
   }, [])
 
   return (
-    <section className="panel">
+    <ContentSection as="section">
       <header>
         <h2>
           <span className="title-icon" aria-hidden="true">
@@ -537,9 +538,8 @@ function Projects() {
           })}
         </ul>
       )}
-    </section>
+    </ContentSection>
   )
 }
 
 export default Projects
-

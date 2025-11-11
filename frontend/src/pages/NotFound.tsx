@@ -1,8 +1,9 @@
 import { Link } from 'react-router-dom'
+import { ContentSection } from '../components/layout'
 
 function NotFound() {
   return (
-    <section className="panel">
+    <ContentSection as="section">
       <header>
         <h2>Page not found</h2>
       </header>
@@ -13,7 +14,7 @@ function NotFound() {
         </Link>{' '}
         to keep building.
       </p>
-    </section>
+    </ContentSection>
   )
 }
 

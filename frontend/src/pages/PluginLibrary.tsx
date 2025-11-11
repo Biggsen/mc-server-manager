@@ -9,6 +9,7 @@ import {
   type ProjectSummary,
 } from '../lib/api'
 import { Button } from '../components/ui'
+import { ContentSection } from '../components/layout'
 
 type SourceFilter = 'all' | 'download' | 'upload'
 
@@ -125,7 +126,7 @@ function PluginLibrary() {
   }, [plugins, sourceFilter, query, projectFilter, usageMap])
 
   return (
-    <section className="panel">
+    <ContentSection as="section">
       <header>
         <h2>
           <span className="title-icon" aria-hidden="true">
@@ -304,10 +305,9 @@ function PluginLibrary() {
           </tbody>
         </table>
       )}
-    </section>
+    </ContentSection>
   )
 }
 
 export default PluginLibrary
-
 

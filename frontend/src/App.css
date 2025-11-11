@@ -9,14 +9,16 @@
   transform: translateY(2px);
 }
 
-.app-frame {
+.app-frame,
+.app-shell {
   min-height: 100vh;
   display: flex;
   background: var(--mc-bg);
   color: var(--mc-text-primary);
 }
 
-.app-sidebar {
+.app-sidebar,
+.app-shell__sidebar {
   width: 250px;
   background: var(--mc-surface);
   backdrop-filter: blur(18px);
@@ -28,6 +30,10 @@
   position: sticky;
   top: 0;
   height: 100vh;
+}
+
+.app-shell__sidebar {
+  width: 240px;
 }
 
 .brand {
@@ -169,7 +175,8 @@
   font-weight: 500;
 }
 
-.app-main {
+.app-main,
+.app-shell__main {
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -177,7 +184,8 @@
   background: radial-gradient(circle at top right, rgba(14, 165, 233, 0.12) 0%, transparent 42%), var(--mc-canvas);
 }
 
-.app-topbar {
+.app-topbar,
+.app-shell__topbar {
   height: 72px;
   padding: 0 32px;
   display: flex;
@@ -413,13 +421,21 @@
   justify-content: center;
 }
 
-.app-content {
+.app-content,
+.main-canvas {
   flex: 1;
-  padding: 32px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 32px;
+}
+
+.main-canvas--padded {
+  padding: 32px;
+}
+
+.main-canvas--bleed {
+  padding: 0;
 }
 
 .muted {
@@ -437,7 +453,8 @@
   color: #4ade80;
 }
 
-.panel {
+.panel,
+.content-section {
   background: var(--mc-elevated);
   border: 1px solid var(--mc-border-soft);
   border-radius: var(--mc-radius-lg);
@@ -445,12 +462,21 @@
   box-shadow: var(--mc-shadow-lg);
 }
 
+.content-section--subtle {
+  background: rgba(15, 23, 42, 0.6);
+}
+
 .panel > .panel:not(:first-child),
-.panel > details.panel:not(:first-child) {
+.panel > details.panel:not(:first-child),
+.content-section > .panel:not(:first-child),
+.content-section > .content-section:not(:first-child),
+.content-section > details.content-section:not(:first-child),
+.content-section > details.panel:not(:first-child) {
   margin-top: 24px;
 }
 
-.panel header {
+.panel header,
+.content-section header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -459,7 +485,9 @@
 }
 
 .panel h2,
-.panel h3 {
+.panel h3,
+.content-section h2,
+.content-section h3 {
   margin: 0;
 }
 
@@ -855,7 +883,8 @@ ul {
     flex-direction: column;
   }
 
-  .app-sidebar {
+  .app-sidebar,
+  .app-shell__sidebar {
     position: static;
     height: auto;
     width: 100%;
@@ -871,13 +900,15 @@ ul {
     width: auto;
   }
 
-  .app-main {
+  .app-main,
+  .app-shell__main {
     width: 100%;
   }
 }
 
 @media (max-width: 720px) {
-  .app-topbar {
+  .app-topbar,
+  .app-shell__topbar {
     flex-direction: column;
     align-items: stretch;
     height: auto;
@@ -889,7 +920,8 @@ ul {
     justify-content: space-between;
   }
 
-  .app-content {
+  .app-content,
+  .main-canvas {
     padding: 24px;
   }
 

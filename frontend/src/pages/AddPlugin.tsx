@@ -8,6 +8,7 @@ import {
   type PluginSearchResult,
 } from '../lib/api'
 import { Button } from '../components/ui'
+import { ContentSection } from '../components/layout'
 import { useToast } from '../components/ui/toast'
 
 const catalogProviderLabel: Record<'hangar' | 'modrinth' | 'spiget', string> = {
@@ -40,7 +41,7 @@ function AddPlugin() {
 
   return (
     <>
-      <section className="panel">
+      <ContentSection as="section">
         <header>
           <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
             <Link to="/plugins" className="link" style={{ display: 'flex', alignItems: 'center' }}>
@@ -56,10 +57,10 @@ function AddPlugin() {
             </div>
           </div>
         </header>
-      </section>
+      </ContentSection>
 
       <div className="assets-grid">
-        <article className="panel">
+        <ContentSection as="article">
           <header>
             <h3>Add via Download URL</h3>
           </header>
@@ -162,9 +163,9 @@ function AddPlugin() {
               </Button>
             </div>
           </form>
-        </article>
+        </ContentSection>
 
-        <article className="panel">
+        <ContentSection as="article">
           <header>
             <h3>Upload Plugin Jar</h3>
           </header>
@@ -266,9 +267,9 @@ function AddPlugin() {
               </Button>
             </div>
           </form>
-        </article>
+        </ContentSection>
 
-        <article className="panel">
+        <ContentSection as="article">
           <header>
             <h3>Search External Catalogs</h3>
           </header>
@@ -336,7 +337,7 @@ function AddPlugin() {
 
             {pluginResults.length > 0 && (
               <div className="layout-grid" style={{ marginTop: '1.5rem' }}>
-                <section className="panel">
+                <ContentSection as="section">
                   <header>
                     <h4>Search Results</h4>
                   </header>
@@ -368,11 +369,11 @@ function AddPlugin() {
                       </li>
                     ))}
                   </ul>
-                </section>
+                </ContentSection>
               </div>
             )}
           </section>
-        </article>
+        </ContentSection>
       </div>
     </>
   )

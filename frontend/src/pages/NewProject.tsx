@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { CloudArrowDown } from '@phosphor-icons/react'
 import { Button } from '../components/ui'
+import { ContentSection } from '../components/layout'
 import {
   createGitHubRepo,
   createProject,
@@ -109,7 +110,7 @@ function NewProject() {
   }
 
   return (
-    <section className="panel">
+    <ContentSection as="section">
       <header>
         <h2>Create Paper Project</h2>
         <p className="muted">Define the core details for your new server build.</p>
@@ -323,7 +324,7 @@ function NewProject() {
         {status === 'success' && <p className="success-text">Project queued successfully.</p>}
         {status === 'error' && error && <p className="error-text">{error}</p>}
       </form>
-    </section>
+    </ContentSection>
   )
 }
 

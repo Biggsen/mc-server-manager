@@ -15,6 +15,7 @@ import {
   type GitHubRepo,
 } from '../lib/api'
 import { subscribeProjectsUpdated } from '../lib/events'
+import { ContentSection } from '../components/layout'
 
 function TestTools() {
   const [projects, setProjects] = useState<ProjectSummary[]>([])
@@ -169,7 +170,7 @@ function TestTools() {
   }
 
   return (
-    <section className="panel">
+    <ContentSection as="section">
       <header>
         <h2>Developer Test Tools</h2>
         <p className="muted">
@@ -378,7 +379,7 @@ function TestTools() {
           </div>
         </div>
       </div>
-    </section>
+    </ContentSection>
   )
 }
 
