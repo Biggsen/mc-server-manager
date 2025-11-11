@@ -98,5 +98,3 @@
 - ✅ Status surfaces at a glance via dashboard metrics, topbar indicator, project summary cards.
 - ✅ Consistent branding/styling achieved through shared tokens and `ContentSection`.
 - 🔄 Continue gathering internal feedback; initial usability passes reported improved clarity.
-
-
