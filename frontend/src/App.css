@@ -408,6 +408,14 @@
   gap: 24px;
 }
 
+.assets-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  column-gap: 1.5rem;
+  row-gap: 1.5rem;
+  align-items: start;
+}
+
 .empty-state {
   margin: 0;
   color: var(--mc-text-muted);
@@ -630,9 +638,10 @@ ul {
 
 .form-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 20px;
   margin-top: 16px;
+  width: 100%;
 }
 
 .field {
@@ -655,6 +664,8 @@ ul {
   color: inherit;
   font: inherit;
   transition: border 160ms ease, box-shadow 160ms ease;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .field input:focus,

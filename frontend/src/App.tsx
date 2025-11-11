@@ -21,6 +21,7 @@ import ProjectDetail from './pages/ProjectDetail'
 import Deployments from './pages/Deployments'
 import TestTools from './pages/TestTools'
 import PluginLibrary from './pages/PluginLibrary'
+import AddPlugin from './pages/AddPlugin'
 import GenerateProfile from './pages/GenerateProfile'
 import './App.css'
 import './components/ui/styles.css'
@@ -110,6 +111,9 @@ function App() {
     }
     if (location.pathname.startsWith('/projects/')) {
       return 'Project Detail'
+    }
+    if (location.pathname.startsWith('/plugins/add')) {
+      return 'Add Plugin'
     }
     if (location.pathname.startsWith('/plugins')) {
       return 'Plugin Library'
@@ -254,6 +258,7 @@ function App() {
               <Route path="/projects/:id" element={<ProjectDetail />} />
               <Route path="/projects/:id/profile" element={<GenerateProfile />} />
               <Route path="/plugins" element={<PluginLibrary />} />
+              <Route path="/plugins/add" element={<AddPlugin />} />
               <Route path="/dev/tools" element={<TestTools />} />
               <Route path="/deployments" element={<Deployments />} />
               <Route path="*" element={<NotFound />} />

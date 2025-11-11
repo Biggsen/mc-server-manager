@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { Plug } from '@phosphor-icons/react'
+import { Link, useNavigate } from 'react-router-dom'
+import { Plug, Plus } from '@phosphor-icons/react'
 import {
   fetchPluginLibrary,
   deleteLibraryPlugin,
@@ -8,6 +8,7 @@ import {
   type StoredPluginRecord,
   type ProjectSummary,
 } from '../lib/api'
+import { Button } from '../components/ui'
 
 type SourceFilter = 'all' | 'download' | 'upload'
 
@@ -24,6 +25,7 @@ const sourceLabel: Record<'download' | 'upload', string> = {
 }
 
 function PluginLibrary() {
+  const navigate = useNavigate()
   const [plugins, setPlugins] = useState<StoredPluginRecord[]>([])
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [loading, setLoading] = useState(true)
@@ -131,6 +133,13 @@ function PluginLibrary() {
           </span>
           Plugin Library
         </h2>
+        <Button
+          variant="primary"
+          icon={<Plus size={18} weight="fill" aria-hidden="true" />}
+          onClick={() => navigate('/plugins/add')}
+        >
+          Add Plugin
+        </Button>
       </header>
 
       <div className="form-grid">
@@ -182,7 +191,7 @@ function PluginLibrary() {
         <p className="empty-state">
           {query || projectFilter !== 'all' || sourceFilter !== 'all'
             ? 'No plugins match your filters.'
-            : 'No saved plugins yet. Add plugins from project pages to populate the library.'}
+            : 'No saved plugins yet. Click "Add Plugin" to add plugins to the library.'}
         </p>
       )}
 
