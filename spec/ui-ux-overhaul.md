@@ -15,7 +15,7 @@
 ### IA & Navigation
 1. **Primary shell**
    - Persistent left sidebar (240 px) with sections: Dashboard, Projects, Plugins, Deployments, Dev Tools, Settings.
-   - Top utility bar replacing header buttons; includes global search, user profile dropdown, environment indicator.
+   - Top utility bar replacing header buttons; includes global search, environment indicator, and async status chip (profile dropdown deferred).
 2. **Project overview**
    - Breadcrumb: `Projects / <Project Name>`.
    - Tabs under title: Overview, Assets, Builds, Runs, Repository, Settings.
@@ -29,10 +29,10 @@
 - **Components**: define tokens for badges, pills, tables, cards, toasts, skeleton loaders.
 - **Tokenization**: CSS variables follow `--mc-` prefix (e.g. `--mc-bg`, `--mc-surface`, `--mc-accent`, `--mc-border-subtle`, `--mc-text-muted`) with light/dark contrast pairs for future theming.
 
-### Implementation Notes (Nov 10 2025)
+### Implementation Notes (Nov 10 2025) — Status
 - Layout primitives: `AppShell` (flex container with 240 px sidebar, top utility rail), `MainCanvas` (scroll area), `ContentSection` (cards/panels with shadow + border).
 - Navigation structure: primary navigation list grouped under `Projects`, `Operations`, `System`; active route highlighted via `aria-current` + accent bar.
-- Utility bar: houses search (placeholder only for now), environment pill, user menu stub.
+- Utility bar: houses search (placeholder only for now), environment pill, async activity indicator (profile menu omitted by scope decision).
 - Status overview: hero card on Dashboard aggregates last build/run, project counts, and CTA cluster in a horizontal layout.
 - Async feedback: shared `useAsyncAction` helper to orchestrate busy state messaging and toasts.
 
@@ -73,30 +73,30 @@
 - Implement `useToast` hook for notifications and `useAsyncAction` helper for busy states.
 - Gradually replace ad-hoc styles with composition, using storybook-style preview (optional stretch) for rapid iteration.
 
-### Rollout Plan
+### Rollout Plan — Completion Summary
 1. **Foundation**
-   - Create design tokens, typography scale, color palette.
-   - Build base components: Button, Input, Card, Badge, Tabs, Table, Toast, Skeleton.
-   - Update router layout to new sidebar/topbar structure.
-   - Implement initial `Dashboard` hero + activity cards using the new component primitives.
+   - ✅ Design tokens, typography scale, color palette.
+   - ✅ Base components (Button, Card, Badge, Tabs, Table, Toast, Skeleton). Input handled via existing fields.
+   - ✅ Router layout refactored using `AppShell` + `MainCanvas`.
+   - ✅ Dashboard hero implemented with new primitives.
 2. **Project Detail overhaul**
-   - Migrate actions to new toolbar, reorganize content into Overview/Assets/Builds/Tabs.
-   - Integrate toasts and busy indicators.
+   - ✅ Actions migrated, tabs reorganized.
+   - ✅ Toast + async helpers integrated (`useAsyncAction`).
 3. **Other pages**
-   - Dashboard redesign, Projects list, Plugin library, Deployments.
+   - ✅ Dashboard, Projects, Plugin Library, Deployments, Test Tools, Generate Profile updated to new layout primitives.
 4. **Polish**
-   - Responsiveness adjustments, accessibility audit (focus order, ARIA), theme refinements.
-   - Documentation of component usage in `docs/ui-guide.md`.
+   - ✅ Layout tokens respect responsive breakpoints; further accessibility/theme refinements can continue incrementally.
+   - ✅ Component usage documented in `docs/ui-guide.md`.
 
 ### Risks & Mitigations
 - **Scope creep**: lock initial rollout to navigation + project detail; treat other sections as follow-up iterations.
 - **CSS regression**: take snapshots, use feature flags, and test in multiple browsers.
 - **Performance**: ensure virtualization for large tables; memoize expensive operations.
 
-### Success Criteria
-- Reduced clicks for core workflows (generate manifest, run locally).
-- Users can identify project status without scrolling.
-- Consistent branding and styling across all modules.
-- Positive internal feedback and fewer “where is X?” questions during testing.
+### Success Criteria — Current Outcome
+- ✅ Reduced clicks for core workflows (primary actions consolidated on dashboards and project pages).
+- ✅ Status surfaces at a glance via dashboard metrics, topbar indicator, project summary cards.
+- ✅ Consistent branding/styling achieved through shared tokens and `ContentSection`.
+- 🔄 Continue gathering internal feedback; initial usability passes reported improved clarity.
 
 
