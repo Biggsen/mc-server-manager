@@ -14,6 +14,7 @@ import {
   type RunJob,
 } from '../lib/api'
 import { subscribeProjectsUpdated } from '../lib/events'
+import { useAsyncAction } from '../lib/useAsyncAction'
 
 type ProjectMessage = { type: 'success' | 'error'; text: string }
 
@@ -151,6 +152,152 @@ function Projects() {
   const setProjectBusy = (projectId: string, value: boolean) => {
     setBusy((prev) => ({ ...prev, [projectId]: value }))
   }
+
+  const { run: queueProjectBuild } = useAsyncAction(
+    async (project: ProjectSummary) => triggerBuild(project.id),
+    {
+      label: (project) => `Triggering build • ${project.name}`,
+      onStart: (project) => {
+        setProjectBusy(project.id, true)
+        setBuilding((prev) => ({ ...prev, [project.id]: 'running' }))
+      },
+      onSuccess: (build, [project]) => {
+        setBuilding((prev) => ({ ...prev, [project.id]: build.status }))
+        setProjectMessage(project.id, {
+          type: 'success',
+          text: `Triggered build ${build.id}`,
+        })
+      },
+      onError: (error, [project]) => {
+        console.error('Failed to queue build', error)
+        setBuilding((prev) => ({ ...prev, [project.id]: 'failed' }))
+        setProjectMessage(project.id, {
+          type: 'error',
+          text: error instanceof Error ? error.message : 'Failed to queue build',
+        })
+      },
+      onFinally: (project) => {
+        setProjectBusy(project.id, false)
+      },
+      successToast: (build, [project]) => ({
+        title: 'Build queued',
+        description: `Build ${build.id} queued for ${project.name}`,
+        variant: 'success',
+      }),
+      errorToast: (error, [project]) => ({
+        title: 'Build failed',
+        description: error instanceof Error ? error.message : `Build failed for ${project.name}`,
+        variant: 'danger',
+      }),
+    },
+  )
+
+  const { run: generateProjectManifest } = useAsyncAction(
+    async (project: ProjectSummary) => triggerManifest(project.id),
+    {
+      label: (project) => `Generating manifest • ${project.name}`,
+      onStart: (project) => {
+        setProjectBusy(project.id, true)
+      },
+      onSuccess: (manifest, [project]) => {
+        setProjectMessage(project.id, {
+          type: 'success',
+          text: `Manifest ${manifest.manifest?.lastBuildId ?? 'generated'}`,
+        })
+      },
+      onError: (error, [project]) => {
+        console.error('Failed to generate manifest', error)
+        setProjectMessage(project.id, {
+          type: 'error',
+          text: error instanceof Error ? error.message : 'Manifest generation failed',
+        })
+      },
+      onFinally: (project) => {
+        setProjectBusy(project.id, false)
+      },
+      successToast: (_manifest, [project]) => ({
+        title: 'Manifest generated',
+        description: `Latest manifest ready for ${project.name}`,
+        variant: 'success',
+      }),
+      errorToast: (error, [project]) => ({
+        title: 'Manifest generation failed',
+        description:
+          error instanceof Error ? error.message : `Could not generate manifest for ${project.name}`,
+        variant: 'danger',
+      }),
+    },
+  )
+
+  const { run: scanProjectAssetsAction } = useAsyncAction(
+    async (project: ProjectSummary) => scanProjectAssets(project.id),
+    {
+      label: (project) => `Scanning assets • ${project.name}`,
+      onStart: (project) => {
+        setProjectBusy(project.id, true)
+      },
+      onSuccess: (assets, [project]) => {
+        setProjectMessage(project.id, {
+          type: 'success',
+          text: `Scanned ${assets.plugins.length} plugins, ${assets.configs.length} configs`,
+        })
+      },
+      onError: (error, [project]) => {
+        console.error('Failed to scan assets', error)
+        setProjectMessage(project.id, {
+          type: 'error',
+          text: error instanceof Error ? error.message : 'Asset scan failed',
+        })
+      },
+      onFinally: (project) => {
+        setProjectBusy(project.id, false)
+      },
+      successToast: (assets, [project]) => ({
+        title: 'Assets scanned',
+        description: `${project.name}: ${assets.plugins.length} plugins, ${assets.configs.length} configs`,
+        variant: 'success',
+      }),
+      errorToast: (error, [project]) => ({
+        title: 'Asset scan failed',
+        description:
+          error instanceof Error ? error.message : `Failed to scan assets for ${project.name}`,
+        variant: 'danger',
+      }),
+    },
+  )
+
+  const { run: runProjectLocallyAction } = useAsyncAction(
+    async (project: ProjectSummary) => runProjectLocally(project.id),
+    {
+      label: (project) => `Starting local run • ${project.name}`,
+      onStart: (project) => {
+        setProjectBusy(project.id, true)
+      },
+      onSuccess: (run, [project]) => {
+        setProjectMessage(project.id, projectMessageForRun(run))
+      },
+      onError: (error, [project]) => {
+        console.error('Failed to queue local run', error)
+        setProjectMessage(project.id, {
+          type: 'error',
+          text: error instanceof Error ? error.message : 'Run locally failed',
+        })
+      },
+      onFinally: (project) => {
+        setProjectBusy(project.id, false)
+      },
+      successToast: (run, [project]) => ({
+        title: 'Run queued',
+        description: `${project.name}: ${describeRunStatus(run)}`,
+        variant: 'success',
+      }),
+      errorToast: (error, [project]) => ({
+        title: 'Run failed',
+        description: error instanceof Error ? error.message : `Failed to run ${project.name} locally`,
+        variant: 'danger',
+      }),
+    },
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -339,26 +486,8 @@ function Projects() {
                     type="button"
                     className="primary"
                     disabled={busy[project.id] || buildStatus === 'running'}
-                    onClick={async () => {
-                      try {
-                        setProjectBusy(project.id, true)
-                        setBuilding((prev) => ({ ...prev, [project.id]: 'running' }))
-                        const build = await triggerBuild(project.id)
-                        setBuilding((prev) => ({ ...prev, [project.id]: build.status }))
-                        setProjectMessage(project.id, {
-                          type: 'success',
-                          text: `Triggered build ${build.id}`,
-                        })
-                      } catch (err) {
-                        console.error('Failed to queue build', err)
-                        setBuilding((prev) => ({ ...prev, [project.id]: 'failed' }))
-                        setProjectMessage(project.id, {
-                          type: 'error',
-                          text: err instanceof Error ? err.message : 'Failed to queue build',
-                        })
-                      } finally {
-                        setProjectBusy(project.id, false)
-                      }
+                    onClick={() => {
+                      void queueProjectBuild(project).catch(() => null)
                     }}
                   >
                     {buildStatus === 'running' ? 'Building…' : 'Build'}
@@ -367,23 +496,8 @@ function Projects() {
                     type="button"
                     className="ghost"
                     disabled={busy[project.id]}
-                    onClick={async () => {
-                      try {
-                        setProjectBusy(project.id, true)
-                        const manifest = await triggerManifest(project.id)
-                        setProjectMessage(project.id, {
-                          type: 'success',
-                          text: `Manifest ${manifest.manifest?.lastBuildId ?? 'generated'}`,
-                        })
-                      } catch (err) {
-                        console.error('Failed to generate manifest', err)
-                        setProjectMessage(project.id, {
-                          type: 'error',
-                          text: err instanceof Error ? err.message : 'Manifest generation failed',
-                        })
-                      } finally {
-                        setProjectBusy(project.id, false)
-                      }
+                    onClick={() => {
+                      void generateProjectManifest(project).catch(() => null)
                     }}
                   >
                     Generate Manifest
@@ -392,23 +506,8 @@ function Projects() {
                     type="button"
                     className="ghost"
                     disabled={busy[project.id]}
-                    onClick={async () => {
-                      try {
-                        setProjectBusy(project.id, true)
-                        const assets = await scanProjectAssets(project.id)
-                        setProjectMessage(project.id, {
-                          type: 'success',
-                          text: `Scanned ${assets.plugins.length} plugins, ${assets.configs.length} configs`,
-                        })
-                      } catch (err) {
-                        console.error('Failed to scan assets', err)
-                        setProjectMessage(project.id, {
-                          type: 'error',
-                          text: err instanceof Error ? err.message : 'Asset scan failed',
-                        })
-                      } finally {
-                        setProjectBusy(project.id, false)
-                      }
+                    onClick={() => {
+                      void scanProjectAssetsAction(project).catch(() => null)
                     }}
                   >
                     Scan Assets
@@ -417,22 +516,8 @@ function Projects() {
                     type="button"
                     className="ghost"
                     disabled={busy[project.id]}
-                    onClick={async () => {
-                      try {
-                        setProjectBusy(project.id, true)
-                        const run = await runProjectLocally(project.id)
-                        setProjectMessage(project.id, {
-                        ...projectMessageForRun(run),
-                        })
-                      } catch (err) {
-                        console.error('Failed to queue local run', err)
-                        setProjectMessage(project.id, {
-                          type: 'error',
-                          text: err instanceof Error ? err.message : 'Run locally failed',
-                        })
-                      } finally {
-                        setProjectBusy(project.id, false)
-                      }
+                    onClick={() => {
+                      void runProjectLocallyAction(project).catch(() => null)
                     }}
                   >
                     Run Locally

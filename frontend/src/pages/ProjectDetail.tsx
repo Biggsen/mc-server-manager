@@ -41,6 +41,7 @@ import {
   Skeleton,
 } from '../components/ui'
 import { useToast } from '../components/ui/toast'
+import { useAsyncAction } from '../lib/useAsyncAction'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? '/api'
 const catalogProviderLabel: Record<'hangar' | 'modrinth' | 'spiget', string> = {
@@ -120,7 +121,6 @@ function ProjectDetail() {
   const [builds, setBuilds] = useState<BuildJob[]>([])
   const [runs, setRuns] = useState<RunJob[]>([])
   const [runBusy, setRunBusy] = useState<Record<string, boolean>>({})
-  const [busy, setBusy] = useState(false)
   const [manifestPreview, setManifestPreview] = useState<ManifestPreview | null>(null)
   const [libraryPlugins, setLibraryPlugins] = useState<StoredPluginRecord[]>([])
   const [libraryLoading, setLibraryLoading] = useState(false)
@@ -139,6 +139,113 @@ function ProjectDetail() {
   const [deleteRepo, setDeleteRepo] = useState(false)
   const [deleteBusy, setDeleteBusy] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+
+  const {
+    run: queueBuild,
+    busy: queueBuildBusy,
+  } = useAsyncAction(
+    async () => {
+      if (!id) {
+        throw new Error('Project identifier missing.')
+      }
+      return triggerBuild(id)
+    },
+    {
+      label: 'Triggering build',
+      successToast: (build) => ({
+        title: 'Build queued',
+        description: `Build ${build.id} is running.`,
+        variant: 'success',
+      }),
+      errorToast: (error) => ({
+        title: 'Build failed to queue',
+        description: error instanceof Error ? error.message : 'Failed to queue build',
+        variant: 'danger',
+      }),
+    },
+  )
+
+  const {
+    run: generateManifest,
+    busy: generateManifestBusy,
+  } = useAsyncAction(
+    async () => {
+      if (!id) {
+        throw new Error('Project identifier missing.')
+      }
+      return triggerManifest(id)
+    },
+    {
+      label: 'Generating manifest',
+      successToast: (manifest) => ({
+        title: 'Manifest generated',
+        description: manifest.manifest?.lastBuildId
+          ? `Build ${manifest.manifest.lastBuildId}`
+          : 'Latest manifest is ready.',
+        variant: 'success',
+      }),
+      errorToast: (error) => ({
+        title: 'Manifest generation failed',
+        description: error instanceof Error ? error.message : 'Manifest generation failed',
+        variant: 'danger',
+      }),
+    },
+  )
+
+  const {
+    run: scanAssets,
+    busy: scanAssetsBusy,
+  } = useAsyncAction(
+    async () => {
+      if (!id) {
+        throw new Error('Project identifier missing.')
+      }
+      return scanProjectAssets(id)
+    },
+    {
+      label: 'Scanning assets',
+      successToast: (assets) => ({
+        title: 'Assets scanned',
+        description: `Found ${assets.plugins.length} plugins and ${assets.configs.length} configs.`,
+        variant: 'success',
+      }),
+      errorToast: (error) => ({
+        title: 'Asset scan failed',
+        description: error instanceof Error ? error.message : 'Asset scan failed',
+        variant: 'danger',
+      }),
+    },
+  )
+
+  const {
+    run: queueRunLocally,
+    busy: runLocallyBusy,
+  } = useAsyncAction(
+    async () => {
+      if (!id) {
+        throw new Error('Project identifier missing.')
+      }
+      return runProjectLocally(id)
+    },
+    {
+      label: 'Starting local run',
+      successToast: (run) => ({
+        title: 'Run queued',
+        description: `Run ${run.id} status: ${run.status.toUpperCase()}`,
+        variant: 'success',
+      }),
+      errorToast: (error) => ({
+        title: 'Run failed',
+        description: error instanceof Error ? error.message : 'Run failed to queue',
+        variant: 'danger',
+      }),
+      onSuccess: (run) => {
+        setRuns((prev) => [run, ...prev.filter((item) => item.id !== run.id)])
+      },
+    },
+  )
+
+  const busy = queueBuildBusy || generateManifestBusy || scanAssetsBusy || runLocallyBusy
 
   const loadLibrary = useCallback(async () => {
     try {
@@ -167,34 +274,40 @@ function ProjectDetail() {
     }
   }, [id])
 
-  const handleStopRun = useCallback(
-    async (target: RunJob) => {
-      try {
+  const { run: requestStopRun } = useAsyncAction(
+    async (target: RunJob) => stopRunJob(target.id),
+    {
+      label: (target) => `Stopping ${target.id}`,
+      onStart: (target) => {
         setRunBusy((prev) => ({ ...prev, [target.id]: true }))
-        const updated = await stopRunJob(target.id)
+      },
+      onSuccess: (updated) => {
         setRuns((prev) =>
           prev.map((run) => (run.id === updated.id ? { ...run, ...updated } : run)),
         )
-        toast({
-          title: 'Stopping run',
-          description: `Stop requested for ${target.id}.`,
-          variant: 'warning',
-        })
-      } catch (err) {
-        toast({
-          title: 'Failed to stop run',
-          description: err instanceof Error ? err.message : 'Failed to stop run',
-          variant: 'danger',
-        })
-      } finally {
+        setRunsError(null)
+      },
+      onError: (error) => {
+        setRunsError(error instanceof Error ? error.message : 'Failed to stop run')
+      },
+      onFinally: (target) => {
         setRunBusy((prev) => {
           const next = { ...prev }
           delete next[target.id]
           return next
         })
-      }
+      },
+      successToast: (_updated, [target]) => ({
+        title: 'Stopping run',
+        description: `Stop requested for ${target.id}.`,
+        variant: 'warning',
+      }),
+      errorToast: (error, [target]) => ({
+        title: 'Failed to stop run',
+        description: error instanceof Error ? error.message : 'Failed to stop run',
+        variant: 'danger',
+      }),
     },
-    [toast],
   )
 
   useEffect(() => {
@@ -638,89 +751,6 @@ useEffect(() => {
   const lastManifestGenerated =
     project.manifest?.generatedAt ? new Date(project.manifest.generatedAt).toLocaleString() : '—'
 
-  const handleTriggerBuild = async () => {
-    try {
-      setBusy(true)
-      const build = await triggerBuild(project.id)
-      toast({
-        title: 'Build queued',
-        description: `Build ${build.id} is running.`,
-        variant: 'success',
-      })
-    } catch (err) {
-      toast({
-        title: 'Build failed to queue',
-        description: err instanceof Error ? err.message : 'Failed to queue build',
-        variant: 'danger',
-      })
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const handleGenerateManifest = async () => {
-    try {
-      setBusy(true)
-      const manifest = await triggerManifest(project.id)
-      toast({
-        title: 'Manifest generated',
-        description: manifest.manifest?.lastBuildId
-          ? `Build ${manifest.manifest.lastBuildId}`
-          : 'Latest manifest is ready.',
-        variant: 'success',
-      })
-    } catch (err) {
-      toast({
-        title: 'Manifest generation failed',
-        description: err instanceof Error ? err.message : 'Manifest generation failed',
-        variant: 'danger',
-      })
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const handleScanAssets = async () => {
-    try {
-      setBusy(true)
-      const assets = await scanProjectAssets(project.id)
-      toast({
-        title: 'Assets scanned',
-        description: `Found ${assets.plugins.length} plugins and ${assets.configs.length} configs.`,
-        variant: 'success',
-      })
-    } catch (err) {
-      toast({
-        title: 'Asset scan failed',
-        description: err instanceof Error ? err.message : 'Asset scan failed',
-        variant: 'danger',
-      })
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const handleRunLocally = async () => {
-    try {
-      setBusy(true)
-      const run = await runProjectLocally(project.id)
-      toast({
-        title: 'Run queued',
-        description: `Run ${run.id} status: ${run.status.toUpperCase()}`,
-        variant: 'success',
-      })
-      setRuns((prev) => [run, ...prev.filter((item) => item.id !== run.id)])
-    } catch (err) {
-      toast({
-        title: 'Run failed',
-        description: err instanceof Error ? err.message : 'Run failed to queue',
-        variant: 'danger',
-      })
-    } finally {
-      setBusy(false)
-    }
-  }
-
   return (
     <>
       <Card className="project-summary-card">
@@ -762,7 +792,7 @@ useEffect(() => {
             <Button
               variant="primary"
               icon={<PackageIcon size={18} weight="fill" aria-hidden="true" />}
-              onClick={handleTriggerBuild}
+              onClick={() => void queueBuild()}
               disabled={busy}
             >
               Trigger build
@@ -770,7 +800,7 @@ useEffect(() => {
             <Button
               variant="ghost"
               icon={<FileText size={18} weight="fill" aria-hidden="true" />}
-              onClick={handleGenerateManifest}
+              onClick={() => void generateManifest()}
               disabled={busy}
             >
               Generate manifest
@@ -778,7 +808,7 @@ useEffect(() => {
             <Button
               variant="ghost"
               icon={<MagnifyingGlass size={18} weight="bold" aria-hidden="true" />}
-              onClick={handleScanAssets}
+              onClick={() => void scanAssets()}
               disabled={busy}
             >
               Scan assets
@@ -786,7 +816,7 @@ useEffect(() => {
             <Button
               variant="pill"
               icon={<Play size={18} weight="fill" aria-hidden="true" />}
-              onClick={handleRunLocally}
+              onClick={() => void queueRunLocally()}
               disabled={busy}
             >
               Run locally
@@ -1058,7 +1088,7 @@ useEffect(() => {
                               type="button"
                               variant="ghost"
                               disabled={run.status === 'stopping' || runBusy[run.id]}
-                              onClick={() => handleStopRun(run)}
+                              onClick={() => void requestStopRun(run)}
                             >
                               {run.status === 'stopping' || runBusy[run.id] ? 'Stopping…' : 'Stop'}
                             </Button>

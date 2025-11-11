@@ -37,6 +37,7 @@ function getPluginSourceKind(plugin: StoredPluginRecord): 'download' | 'upload' 
   return plugin.source?.uploadPath ? 'upload' : 'download'
 }
 import { subscribeProjectsUpdated } from '../lib/events'
+import { useAsyncAction } from '../lib/useAsyncAction'
 
 function Dashboard() {
   const navigate = useNavigate()
@@ -51,6 +52,70 @@ function Dashboard() {
   const [runsLoading, setRunsLoading] = useState(true)
   const [runsError, setRunsError] = useState<string | null>(null)
   const [runBusy, setRunBusy] = useState<Record<string, boolean>>({})
+
+  const { run: queueProjectBuild } = useAsyncAction(
+    async (project: ProjectSummary) => triggerBuild(project.id),
+    {
+      label: (project) => `Triggering build • ${project.name}`,
+      onStart: (project) => {
+        setBuilding((prev) => ({ ...prev, [project.id]: 'running' }))
+      },
+      onSuccess: (build, [project]) => {
+        setBuilding((prev) => ({ ...prev, [project.id]: build.status }))
+      },
+      onError: (error, [project]) => {
+        console.error('Failed to queue build', error)
+        setBuilding((prev) => ({ ...prev, [project.id]: 'failed' }))
+      },
+      successToast: (build, [project]) => ({
+        title: 'Build queued',
+        description: `Build ${build.id} queued for ${project.name}`,
+        variant: 'success',
+      }),
+      errorToast: (error, [project]) => ({
+        title: 'Build failed',
+        description: error instanceof Error ? error.message : `Build failed for ${project.name}`,
+        variant: 'danger',
+      }),
+    },
+  )
+
+  const { run: requestStopRun } = useAsyncAction(
+    async (run: RunJob) => stopRunJob(run.id),
+    {
+      label: (run) => `Stopping run • ${run.id}`,
+      onStart: (run) => {
+        setRunBusy((prev) => ({ ...prev, [run.id]: true }))
+      },
+      onSuccess: (updated) => {
+        setRuns((prev) =>
+          prev.map((run) => (run.id === updated.id ? { ...run, ...updated } : run)),
+        )
+        setRunsError(null)
+      },
+      onError: (error, [run]) => {
+        console.error('Failed to stop run', error)
+        setRunsError(error instanceof Error ? error.message : 'Failed to stop run')
+      },
+      onFinally: (run) => {
+        setRunBusy((prev) => {
+          const next = { ...prev }
+          delete next[run.id]
+          return next
+        })
+      },
+      successToast: (_result, [run]) => ({
+        title: 'Stopping run',
+        description: `Stop requested for ${run.id}.`,
+        variant: 'warning',
+      }),
+      errorToast: (error, [run]) => ({
+        title: 'Failed to stop run',
+        description: error instanceof Error ? error.message : `Failed to stop ${run.id}`,
+        variant: 'danger',
+      }),
+    },
+  )
 
   useEffect(() => {
     let active = true
@@ -255,23 +320,6 @@ function Dashboard() {
     return `Updated ${latestManifest.toLocaleString()}`
   }, [latestManifest])
 
-  const handleStopRun = async (run: RunJob) => {
-    try {
-      setRunBusy((prev) => ({ ...prev, [run.id]: true }))
-      const updated = await stopRunJob(run.id)
-      setRuns((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
-    } catch (err) {
-      console.error('Failed to stop run', err)
-      setRunsError(err instanceof Error ? err.message : 'Failed to stop run')
-    } finally {
-      setRunBusy((prev) => {
-        const next = { ...prev }
-        delete next[run.id]
-        return next
-      })
-    }
-  }
-
   return (
     <>
       <section className="dashboard-hero">
@@ -358,15 +406,8 @@ function Dashboard() {
                     type="button"
                     className="ghost"
                     disabled={building[project.id] === 'running'}
-                    onClick={async () => {
-                      try {
-                        setBuilding((prev) => ({ ...prev, [project.id]: 'running' }))
-                        const build = await triggerBuild(project.id)
-                        setBuilding((prev) => ({ ...prev, [project.id]: build.status }))
-                      } catch (err) {
-                        setBuilding((prev) => ({ ...prev, [project.id]: 'failed' }))
-                        console.error('Failed to trigger build', err)
-                      }
+                    onClick={() => {
+                      void queueProjectBuild(project).catch(() => null)
                     }}
                   >
                     {building[project.id] === 'running' ? 'Building…' : 'Build'}
@@ -419,7 +460,9 @@ function Dashboard() {
                       type="button"
                       className="ghost"
                       disabled={run.status === 'stopping' || runBusy[run.id]}
-                      onClick={() => handleStopRun(run)}
+                      onClick={() => {
+                        void requestStopRun(run).catch(() => null)
+                      }}
                     >
                       {run.status === 'stopping' || runBusy[run.id] ? 'Stopping…' : 'Stop'}
                     </button>

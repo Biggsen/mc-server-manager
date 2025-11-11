@@ -221,6 +221,67 @@
   gap: 16px;
 }
 
+.activity-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: var(--mc-radius-lg);
+  border: 1px solid var(--mc-border-soft);
+  background: rgba(148, 163, 184, 0.1);
+  color: var(--mc-text-muted);
+  font-size: 0.9rem;
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+.activity-indicator.is-active {
+  background: rgba(14, 165, 233, 0.14);
+  border-color: rgba(14, 165, 233, 0.35);
+  color: var(--mc-text-primary);
+}
+
+.activity-indicator__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--mc-text-subtle);
+}
+
+.activity-indicator.is-active .activity-indicator__icon {
+  color: var(--mc-accent);
+}
+
+.activity-indicator__text {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.activity-indicator__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.45);
+  color: var(--mc-text-muted);
+  font-size: 0.75rem;
+}
+
+.is-spinning {
+  animation: activity-indicator-spin 1s linear infinite;
+}
+
+@keyframes activity-indicator-spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
 .topbar-context {
   display: flex;
   flex-direction: column;
