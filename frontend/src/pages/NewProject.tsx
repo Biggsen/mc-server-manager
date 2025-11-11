@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { CloudArrowDown } from '@phosphor-icons/react'
 import {
   createGitHubRepo,
   createProject,
@@ -112,6 +113,17 @@ function NewProject() {
         <h2>Create Paper Project</h2>
         <p className="muted">Define the core details for your new server build.</p>
       </header>
+
+      <div className="inline-actions">
+        <button
+          type="button"
+          className="ghost ghost-with-icon"
+          onClick={() => navigate('/projects/import')}
+        >
+          <CloudArrowDown size={18} weight="fill" aria-hidden="true" />
+          Import existing project
+        </button>
+      </div>
 
       <form
         className="page-form"

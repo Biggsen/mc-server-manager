@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
+import { Building, Plug } from '@phosphor-icons/react'
 import {
   fetchProjects,
   triggerBuild,
@@ -37,6 +38,7 @@ function getPluginSourceKind(plugin: StoredPluginRecord): 'download' | 'upload' 
 import { subscribeProjectsUpdated } from '../lib/events'
 
 function Dashboard() {
+  const navigate = useNavigate()
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -211,6 +213,39 @@ function Dashboard() {
     ['pending', 'running', 'stopping'].includes(run.status),
   )
 
+  const quickActions = useMemo(
+    () => [
+      {
+        label: 'New Project',
+        action: () => navigate('/projects/new'),
+        variant: 'primary' as const,
+        icon: <Building size={18} weight="fill" aria-hidden="true" />,
+      },
+      {
+        label: 'Open Plugin Library',
+        action: () => navigate('/plugins'),
+        icon: <Plug size={18} weight="fill" aria-hidden="true" />,
+      },
+    ],
+    [navigate],
+  )
+
+  const latestManifest = useMemo(() => {
+    const timestamps = projects
+      .map((project) => project.manifest?.generatedAt)
+      .filter((value): value is string => Boolean(value))
+      .map((value) => new Date(value).getTime())
+      .filter((value) => !Number.isNaN(value))
+    if (timestamps.length === 0) return null
+    const latest = Math.max(...timestamps)
+    return new Date(latest)
+  }, [projects])
+
+  const latestManifestLabel = useMemo(() => {
+    if (!latestManifest) return 'No manifests generated yet'
+    return `Updated ${latestManifest.toLocaleString()}`
+  }, [latestManifest])
+
   const handleStopRun = async (run: RunJob) => {
     try {
       setRunBusy((prev) => ({ ...prev, [run.id]: true }))
@@ -230,10 +265,56 @@ function Dashboard() {
 
   return (
     <>
-      <section className="panel">
+      <section className="dashboard-hero">
+        <div className="hero-headline">
+          <h2>Mission control</h2>
+          <p className="hero-subtitle">
+            Track your Paper servers, watch active runs, and keep plugins aligned across every
+            environment.
+          </p>
+        </div>
+
+        <div className="hero-metrics">
+          <div className="metric-card">
+            <span className="metric-value">{projects.length}</span>
+            <span className="metric-label">Projects</span>
+          </div>
+          <div className="metric-card">
+            <span className="metric-value">{activeRuns.length}</span>
+            <span className="metric-label">Active runs</span>
+          </div>
+          <div className="metric-card">
+            <span className="metric-value">{library.length}</span>
+            <span className="metric-label">Saved plugins</span>
+          </div>
+          <div className="metric-card">
+            <span className="metric-value">
+              {latestManifest ? latestManifest.toLocaleTimeString() : '—'}
+            </span>
+            <span className="metric-label">{latestManifestLabel}</span>
+          </div>
+        </div>
+
+        <div className="quick-actions">
+          {quickActions.map((action) => (
+            <button
+              key={action.label}
+              type="button"
+              className={action.variant === 'primary' ? 'primary' : 'pill-button'}
+              onClick={action.action}
+            >
+              <span className="button-icon">{action.icon}</span>
+              {action.label}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="dashboard-stack">
+        <article className="panel">
         <header>
           <h2>Recent Projects</h2>
-          <Link to="/projects" className="link">
+            <Link to="/projects" className="link">
             View all
           </Link>
         </header>
@@ -287,14 +368,11 @@ function Dashboard() {
             ))}
           </ul>
         )}
-      </section>
+        </article>
 
-      <section className="panel">
+        <article className="panel">
         <header>
           <h2>Active Local Servers</h2>
-          <Link to="/projects" className="link">
-            Manage projects
-          </Link>
         </header>
         {runsLoading && <p className="muted">Checking active runs…</p>}
         {runsError && <p className="error-text">{runsError}</p>}
@@ -343,9 +421,11 @@ function Dashboard() {
             })}
           </ul>
         )}
+        </article>
       </section>
 
-      <section className="panel">
+      <section className="dashboard-stack">
+        <article className="panel">
         <header>
           <h2>Saved Plugins</h2>
           <Link to="/plugins" className="link">
@@ -375,18 +455,6 @@ function Dashboard() {
             ))}
           </ul>
         )}
-      </section>
-
-      <section className="layout-grid">
-        <article className="panel">
-          <header>
-            <h3>Next Steps</h3>
-          </header>
-          <ol>
-            <li>Connect your GitHub account</li>
-            <li>Create a project definition</li>
-            <li>Build and run locally</li>
-          </ol>
         </article>
 
         <article className="panel">

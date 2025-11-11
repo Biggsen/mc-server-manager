@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { Plug } from '@phosphor-icons/react'
 import {
   fetchPluginLibrary,
   deleteLibraryPlugin,
@@ -124,10 +125,12 @@ function PluginLibrary() {
   return (
     <section className="panel">
       <header>
-        <h2>Plugin Library</h2>
-        <Link to="/projects" className="link">
-          Manage projects
-        </Link>
+        <h2>
+          <span className="title-icon" aria-hidden="true">
+            <Plug size={22} weight="fill" />
+          </span>
+          Plugin Library
+        </h2>
       </header>
 
       <div className="form-grid">

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { Buildings } from '@phosphor-icons/react'
 import {
   fetchProjects,
   triggerBuild,
@@ -261,7 +262,12 @@ function Projects() {
   return (
     <section className="panel">
       <header>
-        <h2>All Projects</h2>
+        <h2>
+          <span className="title-icon" aria-hidden="true">
+            <Buildings size={22} weight="fill" />
+          </span>
+          All Projects
+        </h2>
         <p className="muted">Projects synced with your GitHub account will appear here.</p>
       </header>
       {loading && <p className="muted">Loading projects…</p>}

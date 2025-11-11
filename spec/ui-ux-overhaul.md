@@ -22,17 +22,25 @@
    - Each tab owns its content to reduce vertical scrolling.
 
 ### Visual System
-- **Colors**: adopt neutral slate background (`#0f172a`), secondary panels `#1e293b`, primary accent teal (`#0ea5e9`), warning amber, danger rose.
+- **Colors**: adopt neutral slate background (`#0f172a`), secondary panels `#1e293b`, primary accent teal (`#0ea5e9`), warning amber (`#facc15`), danger rose (`#fb7185`).
 - **Typography**: Inter 400/500/600; base 14 px, heading scale (32/24/18/16).
 - **Spacing**: 8 px unit grid; panels 24 px padding, sections separated by 16 px.
 - **Elevation**: Use subtle shadows (0 px 12 px 48 px rgba(15, 23, 42, 0.3)) and borders (1 px solid rgba(255,255,255,0.05)).
 - **Components**: define tokens for badges, pills, tables, cards, toasts, skeleton loaders.
+- **Tokenization**: CSS variables follow `--mc-` prefix (e.g. `--mc-bg`, `--mc-surface`, `--mc-accent`, `--mc-border-subtle`, `--mc-text-muted`) with light/dark contrast pairs for future theming.
+
+### Implementation Notes (Nov 10 2025)
+- Layout primitives: `AppShell` (flex container with 240 px sidebar, top utility rail), `MainCanvas` (scroll area), `ContentSection` (cards/panels with shadow + border).
+- Navigation structure: primary navigation list grouped under `Projects`, `Operations`, `System`; active route highlighted via `aria-current` + accent bar.
+- Utility bar: houses search (placeholder only for now), environment pill, user menu stub.
+- Status overview: hero card on Dashboard aggregates last build/run, project counts, and CTA cluster in a horizontal layout.
+- Async feedback: shared `useAsyncAction` helper to orchestrate busy state messaging and toasts.
 
 ### Key Screens
 1. **Dashboard**
-   - Hero banner with usage summary (projects, latest build success, pending runs).
-   - Recent activity feed (builds/runs) with status chips.
-   - Quick actions (New Project, Import, Open Plugin Library).
+   - Hero banner with usage summary (projects, latest build success, pending runs) and contextual actions.
+   - Recent activity feed (builds/runs) with status chips + filtering shortcut.
+   - Quick actions (New Project, Import, Open Plugin Library) rendered as elevated icon buttons beneath hero.
 2. **Project Overview Tab**
    - Top summary card: status badges, last build time, repo info.
    - Action bar with primary `Run Build`, secondary `Generate Manifest`, tertiary `Run Locally`, `Scan Assets`, `Generate Profile`.
@@ -61,6 +69,7 @@
 - Adopt a component system (e.g. shadcn-based or custom) with shared UI primitives in `frontend/src/components`.
 - Introduce global design tokens via CSS variables (e.g., `:root { --color-bg: ... }`) and update Tailwind/CSS modules accordingly.
 - Refactor pages to use layout wrappers (`AppLayout`, `DetailLayout`, `SplitPane`).
+- Create `frontend/src/components/ui` for primitive building blocks (Button, Card, Badge, Tabs, Table, Toast, Skeleton).
 - Implement `useToast` hook for notifications and `useAsyncAction` helper for busy states.
 - Gradually replace ad-hoc styles with composition, using storybook-style preview (optional stretch) for rapid iteration.
 
@@ -69,6 +78,7 @@
    - Create design tokens, typography scale, color palette.
    - Build base components: Button, Input, Card, Badge, Tabs, Table, Toast, Skeleton.
    - Update router layout to new sidebar/topbar structure.
+   - Implement initial `Dashboard` hero + activity cards using the new component primitives.
 2. **Project Detail overhaul**
    - Migrate actions to new toolbar, reorganize content into Overview/Assets/Builds/Tabs.
    - Integrate toasts and busy indicators.
