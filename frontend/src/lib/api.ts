@@ -303,6 +303,29 @@ export async function scanProjectAssets(projectId: string): Promise<{
   return data.project
 }
 
+export async function fetchProjectProfile(
+  projectId: string,
+): Promise<{ path: string; yaml: string } | null> {
+  const response = await fetch(`${API_BASE}/projects/${projectId}/profile`, {
+    credentials: 'include',
+  })
+
+  if (response.status === 404) {
+    return null
+  }
+
+  if (!response.ok) {
+    const message = await response.text()
+    throw new Error(message || `Request failed with status ${response.status}`)
+  }
+
+  const data = (await response.json()) as {
+    profile: { path: string; yaml: string }
+  }
+
+  return data.profile
+}
+
 export async function saveProjectProfile(
   projectId: string,
   payload: { yaml: string },
@@ -357,6 +380,14 @@ export interface RunJob {
   containerName?: string
   port?: number
   workspacePath?: string
+  consoleAvailable?: boolean
+  workspaceStatus?: RunWorkspaceStatus
+}
+
+export interface RunWorkspaceStatus {
+  lastBuildId?: string
+  lastSyncedAt?: string
+  dirtyPaths: string[]
 }
 
 export async function runProjectLocally(projectId: string): Promise<RunJob> {
@@ -387,6 +418,25 @@ export async function stopRunJob(runId: string): Promise<RunJob> {
     method: 'POST',
   })
   return data.run
+}
+
+export async function sendRunCommand(runId: string, command: string): Promise<void> {
+  await request<{ ok: boolean }>(`/runs/${runId}/command`, {
+    method: 'POST',
+    body: JSON.stringify({ command }),
+  })
+}
+
+export async function resetProjectWorkspace(
+  projectId: string,
+): Promise<{ workspacePath: string }> {
+  const data = await request<{ workspace: { workspacePath: string } }>(
+    `/projects/${projectId}/run/reset-workspace`,
+    {
+      method: 'POST',
+    },
+  )
+  return data.workspace
 }
 
 export async function fetchProject(projectId: string): Promise<ProjectSummary> {

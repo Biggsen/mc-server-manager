@@ -24,11 +24,12 @@ import { scanProjectAssets } from "../services/projectScanner";
 import { commitFiles, getOctokitForRequest } from "../services/githubClient";
 import {
   collectProjectDefinitionFiles,
+  readProjectFile,
   renderConfigFiles,
   writeProjectFile,
   writeProjectFileBuffer,
 } from "../services/projectFiles";
-import { enqueueRun, listRuns } from "../services/runQueue";
+import { enqueueRun, listRuns, resetProjectWorkspace } from "../services/runQueue";
 import { upsertStoredPlugin } from "../storage/pluginsStore";
 import { deleteProjectResources } from "../services/projectDeletion";
 import {
@@ -377,6 +378,35 @@ router.post("/:id/profile", async (req: Request, res: Response) => {
   }
 });
 
+router.get("/:id/profile", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const project = await findProject(id);
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+
+    const profilePath = project.profilePath?.trim() ? project.profilePath : "profiles/base.yml";
+    const yaml = await readProjectFile(project, profilePath);
+
+    if (!yaml) {
+      res.status(404).json({ error: "Profile not found" });
+      return;
+    }
+
+    res.status(200).json({
+      profile: {
+        path: profilePath,
+        yaml,
+      },
+    });
+  } catch (error) {
+    console.error("Failed to read project profile", error);
+    res.status(500).json({ error: "Failed to read project profile" });
+  }
+});
+
 router.post("/:id/scan", async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
@@ -715,7 +745,37 @@ router.post("/:id/run", async (req: Request, res: Response) => {
     res.status(202).json({ run });
   } catch (error) {
     console.error("Failed to trigger local run", error);
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("already active")) {
+      res.status(409).json({ error: message });
+      return;
+    }
+    if (message.includes("No successful build")) {
+      res.status(400).json({ error: message });
+      return;
+    }
     res.status(500).json({ error: "Failed to trigger local run" });
+  }
+});
+
+router.post("/:id/run/reset-workspace", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const project = await findProject(id);
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    const result = await resetProjectWorkspace(project.id);
+    res.status(200).json({ workspace: result });
+  } catch (error) {
+    console.error("Failed to reset workspace", error);
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("active")) {
+      res.status(409).json({ error: message });
+      return;
+    }
+    res.status(500).json({ error: "Failed to reset workspace" });
   }
 });
 

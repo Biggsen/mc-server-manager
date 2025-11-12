@@ -28,6 +28,14 @@ export interface RunJob {
   containerName?: string;
   port?: number;
   workspacePath?: string;
+  consoleAvailable?: boolean;
+  workspaceStatus?: RunWorkspaceStatus;
+}
+
+export interface RunWorkspaceStatus {
+  lastBuildId?: string;
+  lastSyncedAt?: string;
+  dirtyPaths: string[];
 }
 
 

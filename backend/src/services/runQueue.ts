@@ -1,22 +1,33 @@
-import { mkdir, readFile, writeFile, rm } from "fs/promises";
-import { join } from "path";
+import { mkdir, readFile, writeFile, rm, stat } from "fs/promises";
+import { join, dirname } from "path";
 import { spawn, type ChildProcess } from "child_process";
 import { EventEmitter } from "events";
 import { v4 as uuid } from "uuid";
 import { createServer } from "net";
+import { createHash } from "crypto";
 import AdmZip from "adm-zip";
+import type { Writable } from "stream";
 import type { StoredProject } from "../types/storage";
-import type { RunJob, RunLogEntry, RunLogStream } from "../types/run";
+import type { RunJob, RunLogEntry, RunLogStream, RunWorkspaceStatus } from "../types/run";
 import { listBuilds } from "./buildQueue";
 
 const DATA_DIR = join(process.cwd(), "data", "runs");
 const LOG_PATH = join(DATA_DIR, "runs.json");
 const WORKSPACE_ROOT = join(DATA_DIR, "workspaces");
+const WORKSPACE_STATE_FILENAME = ".workspace-state.json";
 
 const jobs = new Map<string, RunJob>();
 const processes = new Map<string, ChildProcess>();
+const stdinStreams = new Map<string, Writable>();
 const runEvents = new EventEmitter();
 runEvents.setMaxListeners(0);
+
+interface WorkspaceState {
+  lastBuildId?: string;
+  lastSyncedAt?: string;
+  baselineHashes: Record<string, string>;
+  dirtyPaths: string[];
+}
 
 void loadRunsFromDisk();
 
@@ -38,13 +49,14 @@ export async function deleteRunsForProject(projectId: string): Promise<void> {
     }
     jobs.delete(job.id);
     changed = true;
-    const workspacePath = job.workspacePath ?? join(WORKSPACE_ROOT, job.id);
-    await rm(workspacePath, { recursive: true, force: true }).catch(() => {});
   }
 
   if (changed) {
     await persistRuns();
   }
+
+  const projectWorkspace = getProjectWorkspacePath(projectId);
+  await rm(projectWorkspace, { recursive: true, force: true }).catch(() => {});
 }
 
 export type RunStreamEvent =
@@ -81,6 +93,16 @@ function cloneRun(run: RunJob): RunJob {
 }
 
 export async function enqueueRun(project: StoredProject): Promise<RunJob> {
+  const existingActive = Array.from(jobs.values()).find(
+    (run) =>
+      run.projectId === project.id &&
+      (run.status === "pending" || run.status === "running" || run.status === "stopping"),
+  );
+
+  if (existingActive) {
+    throw new Error("A local run is already active for this project.");
+  }
+
   const latestBuild = listBuilds(project.id).find(
     (build) => build.status === "succeeded" && build.artifactPath,
   );
@@ -144,9 +166,11 @@ export async function stopRun(jobId: string): Promise<RunJob> {
     child.kill();
   }
   processes.delete(jobId);
+  stdinStreams.delete(jobId);
 
   job.status = "stopped";
   job.finishedAt = new Date().toISOString();
+  job.consoleAvailable = false;
   jobs.set(jobId, job);
   await persistRuns();
   emitRunUpdate(job);
@@ -192,7 +216,7 @@ async function runJob(project: StoredProject, jobId: string): Promise<void> {
 }
 
 async function ensureDockerJob(job: RunJob, project: StoredProject): Promise<void> {
-  const workspacePath = await prepareWorkspace(job);
+  const workspacePath = await prepareWorkspace(job, project);
   job.workspacePath = workspacePath;
   appendLog(job, "system", `Prepared workspace at ${workspacePath}`);
 
@@ -216,6 +240,7 @@ async function ensureDockerJob(job: RunJob, project: StoredProject): Promise<voi
   const dockerArgs = [
     "run",
     "--rm",
+    "-i",
     "--name",
     containerName,
     "-p",
@@ -255,8 +280,20 @@ async function ensureDockerJob(job: RunJob, project: StoredProject): Promise<voi
 
 async function executeCommand(job: RunJob, command: string, args: string[]): Promise<void> {
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(command, args, { stdio: ["pipe", "pipe", "pipe"] });
     processes.set(job.id, child);
+
+    if (child.stdin) {
+      child.stdin.setDefaultEncoding("utf-8");
+      stdinStreams.set(job.id, child.stdin);
+      const currentJob = jobs.get(job.id);
+      if (currentJob) {
+        currentJob.consoleAvailable = true;
+        jobs.set(currentJob.id, currentJob);
+        emitRunUpdate(currentJob);
+        void persistRuns();
+      }
+    }
 
     child.stdout?.on("data", (chunk: Buffer) => {
       appendLog(job, "stdout", chunk.toString("utf-8"));
@@ -272,10 +309,15 @@ async function executeCommand(job: RunJob, command: string, args: string[]): Pro
 
     child.on("close", (code) => {
       processes.delete(job.id);
+      stdinStreams.delete(job.id);
       const currentJob = jobs.get(job.id);
       if (!currentJob) {
         resolve();
         return;
+      }
+
+      if (currentJob.consoleAvailable) {
+        currentJob.consoleAvailable = false;
       }
 
       if (currentJob.status === "stopping" || currentJob.status === "stopped") {
@@ -305,6 +347,7 @@ async function executeCommand(job: RunJob, command: string, args: string[]): Pro
 
 async function simulateLocalRun(job: RunJob, project: StoredProject): Promise<void> {
   appendLog(job, "stdout", `Simulating server startup for ${project.id}`);
+  job.consoleAvailable = false;
   job.port = job.port ?? 25565;
   for (let step = 0; step < 2; step += 1) {
     if (job.status === "stopping" || job.status === "stopped") {
@@ -410,19 +453,6 @@ function createContainerName(projectId: string, jobId: string): string {
   return `${safeProject}-run-${jobId.slice(0, 6)}`;
 }
 
-async function prepareWorkspace(job: RunJob): Promise<string> {
-  const workspaceDir = join(WORKSPACE_ROOT, job.id);
-  await mkdir(WORKSPACE_ROOT, { recursive: true });
-  await rm(workspaceDir, { recursive: true, force: true });
-  await mkdir(workspaceDir, { recursive: true });
-
-  const zip = new AdmZip(job.artifactPath);
-  zip.extractAllTo(workspaceDir, true);
-
-  await mkdir(join(workspaceDir, "plugins"), { recursive: true });
-  return workspaceDir;
-}
-
 async function findAvailablePort(preferred: number): Promise<number> {
   let candidate = preferred;
   for (let attempts = 0; attempts < 20; attempts += 1, candidate += 1) {
@@ -452,6 +482,223 @@ function determineServerType(loader?: string): string {
     return "PURPUR";
   }
   return "PAPER";
+}
+
+export async function sendRunCommand(runId: string, command: string): Promise<void> {
+  const trimmed = command.trim();
+  if (!trimmed) {
+    throw new Error("Command cannot be empty.");
+  }
+
+  const job = jobs.get(runId);
+  if (!job) {
+    throw new Error("Run not found.");
+  }
+
+  if (job.status !== "running") {
+    throw new Error("Run is not accepting commands.");
+  }
+
+  const stdin = stdinStreams.get(runId);
+  if (!stdin) {
+    throw new Error("Command channel is not available.");
+  }
+
+  try {
+    stdin.write(`${trimmed}\n`);
+  } catch (error) {
+    throw new Error("Command channel is not available.");
+  }
+  appendLog(job, "system", `> ${trimmed}`);
+}
+
+export async function resetProjectWorkspace(projectId: string): Promise<{ workspacePath: string }> {
+  const active = Array.from(jobs.values()).find(
+    (run) =>
+      run.projectId === projectId &&
+      (run.status === "pending" || run.status === "running" || run.status === "stopping"),
+  );
+
+  if (active) {
+    throw new Error("Cannot reset workspace while a run is active.");
+  }
+
+  const workspaceDir = getProjectWorkspacePath(projectId);
+  await rm(workspaceDir, { recursive: true, force: true }).catch(() => {});
+  return { workspacePath: workspaceDir };
+}
+
+function getProjectWorkspacePath(projectId: string): string {
+  const safeProject = projectId.replace(/[^a-zA-Z0-9-_]/g, "-");
+  return join(WORKSPACE_ROOT, safeProject);
+}
+
+async function prepareWorkspace(job: RunJob, project: StoredProject): Promise<string> {
+  await mkdir(WORKSPACE_ROOT, { recursive: true });
+  const workspaceDir = getProjectWorkspacePath(project.id);
+  await mkdir(workspaceDir, { recursive: true });
+
+  const state = await loadWorkspaceState(project.id);
+  const updatedState = await syncWorkspaceWithArtifact(workspaceDir, job, state);
+  await saveWorkspaceState(project.id, updatedState);
+
+  job.workspaceStatus = toWorkspaceStatus(updatedState);
+
+  return workspaceDir;
+}
+
+async function loadWorkspaceState(projectId: string): Promise<WorkspaceState | undefined> {
+  const workspaceDir = getProjectWorkspacePath(projectId);
+  const statePath = join(workspaceDir, WORKSPACE_STATE_FILENAME);
+  try {
+    const raw = await readFile(statePath, "utf-8");
+    const parsed = JSON.parse(raw) as WorkspaceState;
+    return {
+      lastBuildId: parsed.lastBuildId,
+      lastSyncedAt: parsed.lastSyncedAt,
+      baselineHashes: parsed.baselineHashes ?? {},
+      dirtyPaths: parsed.dirtyPaths ?? [],
+    };
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT") {
+      console.warn(`Failed to read workspace state for ${projectId}`, error);
+    }
+    return undefined;
+  }
+}
+
+async function saveWorkspaceState(projectId: string, state: WorkspaceState): Promise<void> {
+  const workspaceDir = getProjectWorkspacePath(projectId);
+  await mkdir(workspaceDir, { recursive: true });
+  const statePath = join(workspaceDir, WORKSPACE_STATE_FILENAME);
+  const payload = JSON.stringify(state, null, 2);
+  await writeFile(statePath, payload, "utf-8");
+}
+
+async function syncWorkspaceWithArtifact(
+  workspaceDir: string,
+  job: RunJob,
+  state: WorkspaceState | undefined,
+): Promise<WorkspaceState> {
+  const zip = new AdmZip(job.artifactPath);
+  const entries = zip.getEntries();
+  const baseline = { ...(state?.baselineHashes ?? {}) };
+  const dirty = new Set(state?.dirtyPaths ?? []);
+  const seenPaths = new Set<string>();
+  const firstRun = !state;
+
+  for (const entry of entries) {
+    const relativePath = normalizeEntryPath(entry.entryName);
+    if (!relativePath) {
+      continue;
+    }
+    seenPaths.add(relativePath);
+
+    if (entry.isDirectory) {
+      const dirPath = join(workspaceDir, relativePath);
+      await mkdir(dirPath, { recursive: true });
+      continue;
+    }
+
+    const targetPath = join(workspaceDir, relativePath);
+    await mkdir(dirname(targetPath), { recursive: true });
+
+    const data = entry.getData();
+    const artifactHash = hashBuffer(data);
+
+    const currentHash = await hashFileIfExists(targetPath);
+    const previousBaseline = baseline[relativePath];
+    const matchesArtifact = currentHash === artifactHash;
+    let wroteFile = false;
+
+    if (firstRun) {
+      await writeFile(targetPath, data);
+      wroteFile = true;
+    } else if (!currentHash) {
+      await writeFile(targetPath, data);
+      wroteFile = true;
+    } else if (!previousBaseline) {
+      if (!matchesArtifact) {
+        dirty.add(relativePath);
+        appendLog(job, "system", `Workspace file ${relativePath} differs from artifact; leaving existing copy untouched.`);
+      } else {
+        baseline[relativePath] = artifactHash;
+        dirty.delete(relativePath);
+      }
+    } else if (currentHash === previousBaseline) {
+      await writeFile(targetPath, data);
+      wroteFile = true;
+    } else if (matchesArtifact) {
+      baseline[relativePath] = artifactHash;
+      dirty.delete(relativePath);
+    } else {
+      dirty.add(relativePath);
+      appendLog(job, "system", `Preserving local changes to ${relativePath}; artifact update skipped.`);
+    }
+
+    if (wroteFile) {
+      baseline[relativePath] = artifactHash;
+      dirty.delete(relativePath);
+    }
+  }
+
+  for (const key of Object.keys(baseline)) {
+    if (!seenPaths.has(key)) {
+      delete baseline[key];
+    }
+  }
+
+  return {
+    lastBuildId: job.buildId,
+    lastSyncedAt: new Date().toISOString(),
+    baselineHashes: baseline,
+    dirtyPaths: Array.from(dirty).sort(),
+  };
+}
+
+function toWorkspaceStatus(state: WorkspaceState): RunWorkspaceStatus {
+  return {
+    lastBuildId: state.lastBuildId,
+    lastSyncedAt: state.lastSyncedAt,
+    dirtyPaths: state.dirtyPaths,
+  };
+}
+
+function normalizeEntryPath(entryName: string): string | undefined {
+  let normalized = entryName.replace(/\\/g, "/");
+  normalized = normalized.replace(/^\/+/, "");
+  if (!normalized || normalized === ".") {
+    return undefined;
+  }
+  if (normalized.includes("../")) {
+    return undefined;
+  }
+  if (normalized.endsWith("/")) {
+    normalized = normalized.slice(0, -1);
+  }
+  return normalized;
+}
+
+function hashBuffer(buffer: Buffer): string {
+  return createHash("sha256").update(buffer).digest("hex");
+}
+
+async function hashFileIfExists(path: string): Promise<string | undefined> {
+  try {
+    const fileStats = await stat(path);
+    if (!fileStats.isFile()) {
+      return undefined;
+    }
+    const data = await readFile(path);
+    return hashBuffer(data);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") {
+      return undefined;
+    }
+    throw error;
+  }
 }
 
 

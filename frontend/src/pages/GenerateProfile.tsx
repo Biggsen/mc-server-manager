@@ -4,6 +4,7 @@ import YAML from 'yaml'
 import {
   fetchProject,
   fetchProjectConfigs,
+  fetchProjectProfile,
   saveProjectProfile,
   type ProjectConfigSummary,
   type ProjectSummary,
@@ -58,21 +59,21 @@ function defaultPaperConfig(): PaperGlobalFields {
 }
 
 interface ProfileDocument {
-  name: string
-  minecraft: {
-    loader: string
-    version: string
+  name?: string
+  minecraft?: {
+    loader?: string
+    version?: string
   }
-  world: {
-    mode: string
+  world?: {
+    mode?: string
     seed?: string
-    name: string
+    name?: string
   }
-  plugins: Array<{ id: string; version: string }>
-  configs: {
-    files: Array<{
-      template: string
-      output: string
+  plugins?: Array<{ id: string; version?: string }>
+  configs?: {
+    files?: Array<{
+      template?: string
+      output?: string
       data?: unknown
     }>
   }
@@ -80,6 +81,130 @@ interface ProfileDocument {
   mergePolicy?: {
     arrays?: 'replace' | 'merge'
   }
+}
+
+interface ExtractedServerProperties {
+  fields: ServerPropertiesFields
+  seed?: string
+}
+
+function coerceString(value: unknown, fallback: string): string {
+  if (typeof value === 'string') {
+    return value
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(value)
+  }
+  return fallback
+}
+
+function coerceNumberString(value: unknown, fallback: string): string {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(value)
+  }
+  if (typeof value === 'string' && value.trim().length > 0) {
+    return value.trim()
+  }
+  return fallback
+}
+
+function coerceBoolean(value: unknown, fallback: boolean): boolean {
+  if (typeof value === 'boolean') {
+    return value
+  }
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase()
+    if (normalized === 'true') {
+      return true
+    }
+    if (normalized === 'false') {
+      return false
+    }
+  }
+  return fallback
+}
+
+function extractServerPropertiesFromProfile(
+  profile: ProfileDocument | null,
+  project: ProjectSummary | null,
+): ExtractedServerProperties {
+  const defaults = defaultServerProperties(project)
+  const result: ServerPropertiesFields = { ...defaults }
+  let seedFromConfig: string | undefined
+
+  const entry = profile?.configs?.files?.find(
+    (file) =>
+      file?.output === 'server.properties' || file?.template === 'server.properties.hbs',
+  )
+
+  if (!entry) {
+    result.include = false
+    return { fields: result }
+  }
+
+  result.include = true
+  const data = (entry.data ?? {}) as Record<string, unknown>
+  result.motd = coerceString(data.motd, defaults.motd)
+  result.maxPlayers = coerceNumberString(data.maxPlayers, defaults.maxPlayers)
+  result.enforceSecureProfile = coerceBoolean(
+    data.enforceSecureProfile ?? data['enforce-secure-profile'],
+    defaults.enforceSecureProfile,
+  )
+  result.viewDistance = coerceNumberString(
+    data.viewDistance ?? data['view-distance'],
+    defaults.viewDistance,
+  )
+  result.onlineMode = coerceBoolean(
+    data.onlineMode ?? data['online-mode'],
+    defaults.onlineMode,
+  )
+  seedFromConfig = coerceString(
+    data.levelSeed ?? data.seed ?? data['level-seed'] ?? data['world-seed'],
+    '',
+  )
+
+  return {
+    fields: result,
+    seed: seedFromConfig?.trim() ? seedFromConfig : undefined,
+  }
+}
+
+function extractPaperGlobalFromProfile(profile: ProfileDocument | null): PaperGlobalFields {
+  const defaults = defaultPaperConfig()
+  const result: PaperGlobalFields = { ...defaults }
+
+  const entry = profile?.configs?.files?.find(
+    (file) =>
+      file?.output === 'config/paper-global.yml' ||
+      file?.template === 'paper-global.yml.hbs',
+  )
+
+  if (!entry) {
+    result.include = false
+    return result
+  }
+
+  result.include = true
+  const data = (entry.data ?? {}) as Record<string, unknown>
+  const chunkSystem = (data?.chunkSystem ?? {}) as Record<string, unknown>
+  result.targetTickDistance = coerceNumberString(
+    chunkSystem.targetTickDistance ?? chunkSystem['target-tick-distance'],
+    defaults.targetTickDistance,
+  )
+
+  return result
+}
+
+function normalizePluginsFromProfile(profile: ProfileDocument | null): PluginFormEntry[] {
+  if (!profile?.plugins?.length) {
+    return []
+  }
+  return profile.plugins
+    .map((plugin) => ({
+      id: plugin.id?.trim() ?? '',
+      version: plugin.version?.trim() ?? '',
+    }))
+    .filter((entry) => entry.id.length > 0)
 }
 
 function buildProfileDocument(options: {
@@ -183,6 +308,7 @@ function GenerateProfile() {
     defaultServerProperties(null),
   )
   const [paperGlobal, setPaperGlobal] = useState<PaperGlobalFields>(defaultPaperConfig())
+  const [profileSource, setProfileSource] = useState<'new' | 'existing'>('new')
   const [clipboardStatus, setClipboardStatus] = useState<string | null>(null)
   const [saveBusy, setSaveBusy] = useState(false)
   const [saveMessage, setSaveMessage] = useState<string | null>(null)
@@ -199,24 +325,61 @@ function GenerateProfile() {
     async function load() {
       try {
         setLoading(true)
-        const [projectData, configData] = await Promise.all([
+        const [projectData, configData, profileData] = await Promise.all([
           fetchProject(id!),
           fetchProjectConfigs(id!).catch(() => []),
+          fetchProjectProfile(id!),
         ])
         if (cancelled) {
           return
         }
         setProject(projectData)
         setConfigs(configData)
-        setPlugins(normalizeProjectPlugins(projectData))
-        setServerProperties(defaultServerProperties(projectData))
-        setWorldName('world')
-        setWorldMode('generated')
-        setWorldSeed('')
-        setPaperGlobal(defaultPaperConfig())
         setSaveMessage(null)
         setSaveError(null)
         setError(null)
+
+        let parsedProfile: ProfileDocument | null = null
+        if (profileData?.yaml) {
+          try {
+            parsedProfile = YAML.parse(profileData.yaml) as ProfileDocument
+          } catch (parseError) {
+            console.error('Failed to parse project profile YAML', parseError)
+            setError('Failed to parse existing profile YAML. Please fix the file and retry.')
+            return
+          }
+        }
+
+        if (parsedProfile) {
+          setProfileSource('existing')
+          const pluginEntries = normalizePluginsFromProfile(parsedProfile)
+          setPlugins(pluginEntries.length > 0 ? pluginEntries : [])
+
+          const { fields: extractedServerProps, seed: configSeed } =
+            extractServerPropertiesFromProfile(parsedProfile, projectData)
+          setServerProperties(extractedServerProps)
+
+          const extractedPaperGlobal = extractPaperGlobalFromProfile(parsedProfile)
+          setPaperGlobal(extractedPaperGlobal)
+
+          const normalizedWorldMode = parsedProfile.world?.mode?.trim() || 'generated'
+          const normalizedWorldName = parsedProfile.world?.name?.trim() || 'world'
+          const worldSeedValue =
+            parsedProfile.world?.seed?.trim() || configSeed || ''
+
+          setWorldMode(normalizedWorldMode)
+          setWorldName(normalizedWorldName)
+          setWorldSeed(worldSeedValue)
+        } else {
+          setProfileSource('new')
+          setPlugins(normalizeProjectPlugins(projectData))
+          setServerProperties(defaultServerProperties(projectData))
+          setWorldName('world')
+          setWorldMode('generated')
+          setWorldSeed('')
+          setPaperGlobal(defaultPaperConfig())
+        }
+
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : 'Failed to load project')
@@ -235,12 +398,12 @@ function GenerateProfile() {
   }, [id])
 
   useEffect(() => {
-    if (!project) return
+    if (!project || profileSource !== 'new') return
     setServerProperties((prev) => ({
       ...prev,
       motd: `Welcome to ${project.name}`,
     }))
-  }, [project?.name])
+  }, [project?.name, profileSource])
 
   const profileDocument = useMemo(() => {
     if (!project) {
@@ -642,6 +805,7 @@ function GenerateProfile() {
                         }
                       : prev,
                   )
+                  setProfileSource('existing')
                   setSaveMessage(`Profile saved to ${result.path}`)
                 } catch (err) {
                   setSaveError(err instanceof Error ? err.message : 'Failed to save profile.')

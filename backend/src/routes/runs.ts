@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 import { Router } from "express";
-import { getRun, listRuns, stopRun, subscribeRunEvents } from "../services/runQueue";
+import { getRun, listRuns, stopRun, subscribeRunEvents, sendRunCommand } from "../services/runQueue";
 
 const router = Router();
 
@@ -74,6 +74,42 @@ router.post("/:id/stop", async (req, res) => {
   } catch (error) {
     console.error("Failed to stop run", error);
     res.status(500).json({ error: "Failed to stop run" });
+  }
+});
+
+router.post("/:id/command", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { command } = req.body ?? {};
+    if (typeof command !== "string" || command.trim().length === 0) {
+      res.status(400).json({ error: "Command is required" });
+      return;
+    }
+
+    const run = getRun(id);
+    if (!run) {
+      res.status(404).json({ error: "Run not found" });
+      return;
+    }
+
+    await sendRunCommand(id, command);
+    res.status(200).json({ ok: true });
+  } catch (error) {
+    console.error("Failed to send run command", error);
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("not found")) {
+      res.status(404).json({ error: message });
+      return;
+    }
+    if (message.includes("empty") || message.includes("Command cannot")) {
+      res.status(400).json({ error: message });
+      return;
+    }
+    if (message.includes("not accepting") || message.includes("Command channel")) {
+      res.status(409).json({ error: message });
+      return;
+    }
+    res.status(500).json({ error: "Failed to send command" });
   }
 });
 

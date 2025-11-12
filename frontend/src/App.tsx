@@ -152,100 +152,100 @@ function App() {
 
   const sidebar = (
     <>
-      <button
-        type="button"
-        className="brand-button"
-        onClick={() => navigate('/')}
-        aria-label="Return to dashboard"
-      >
-        <span className="brand-badge" aria-hidden="true">
-          <Package size={28} weight="duotone" />
-        </span>
-        <div className="brand">
-          <h1>MC Server Manager</h1>
-          <p className="brand-subtitle">Define • Build • Deploy</p>
-        </div>
-      </button>
+            <button
+              type="button"
+              className="brand-button"
+              onClick={() => navigate('/')}
+              aria-label="Return to dashboard"
+            >
+              <span className="brand-badge" aria-hidden="true">
+                <Package size={28} weight="duotone" />
+              </span>
+              <div className="brand">
+                <h1>MC Server Manager</h1>
+                <p className="brand-subtitle">Define • Build • Deploy</p>
+              </div>
+            </button>
 
-      {NAV_SECTIONS.map((section) => (
-        <section key={section.label} className="sidebar-section">
-          <p className="sidebar-heading">{section.label}</p>
-          <nav className="sidebar-nav" aria-label={section.label}>
-            {section.items.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.exact}
-                className="sidebar-link"
-              >
-                <span className="sidebar-icon">{item.icon}</span>
-                {item.label}
-              </NavLink>
+            {NAV_SECTIONS.map((section) => (
+              <section key={section.label} className="sidebar-section">
+                <p className="sidebar-heading">{section.label}</p>
+                <nav className="sidebar-nav" aria-label={section.label}>
+                  {section.items.map((item) => (
+                    <NavLink
+                      key={item.to}
+                      to={item.to}
+                      end={item.exact}
+                      className="sidebar-link"
+                    >
+                      <span className="sidebar-icon">{item.icon}</span>
+                      {item.label}
+                    </NavLink>
+                  ))}
+                </nav>
+              </section>
             ))}
-          </nav>
-        </section>
-      ))}
 
-      <footer className="sidebar-foot">
-        <div className="sidebar-env" aria-live="polite">
-          <span role="status">●</span>
-          {ENVIRONMENT_LABEL} environment
-        </div>
-      </footer>
+            <footer className="sidebar-foot">
+              <div className="sidebar-env" aria-live="polite">
+                <span role="status">●</span>
+                {ENVIRONMENT_LABEL} environment
+              </div>
+            </footer>
     </>
   )
 
   const topbar = (
     <>
-      <div className="topbar-context">
-        <small>{ENVIRONMENT_LABEL} mode</small>
-        <h2>{currentTitle}</h2>
-      </div>
+              <div className="topbar-context">
+                <small>{ENVIRONMENT_LABEL} mode</small>
+                <h2>{currentTitle}</h2>
+              </div>
 
-      <label className="topbar-search">
-        <MagnifyingGlass size={18} weight="bold" aria-hidden="true" />
-        <input
-          type="search"
-          placeholder="Search projects, builds, plugins"
-          aria-label="Global search"
-        />
-      </label>
+              <label className="topbar-search">
+                <MagnifyingGlass size={18} weight="bold" aria-hidden="true" />
+                <input
+                  type="search"
+                  placeholder="Search projects, builds, plugins"
+                  aria-label="Global search"
+                />
+              </label>
 
-      <div className="topbar-actions">
-        <ActiveActionIndicator />
-        <Button
-          variant="ghost"
-          icon={<Building size={16} weight="fill" aria-hidden="true" />}
-          onClick={() => navigate('/projects/new')}
-        >
-          New Project
-        </Button>
-        {authStatus?.authenticated ? (
-          <>
-            <span className="avatar" aria-hidden="true">
-              {initials}
-            </span>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="utility-button"
-              onClick={handleSignOut}
-              disabled={signingOut}
-            >
-              {signingOut ? 'Signing out…' : 'Sign out'}
-            </Button>
-          </>
-        ) : (
-          <Button
-            variant="primary"
-            className="primary-with-icon"
-            icon={<GithubLogo size={18} weight="fill" aria-hidden="true" />}
+              <div className="topbar-actions">
+                <ActiveActionIndicator />
+                <Button
+                  variant="ghost"
+                  icon={<Building size={16} weight="fill" aria-hidden="true" />}
+                  onClick={() => navigate('/projects/new')}
+                >
+                  New Project
+                </Button>
+                {authStatus?.authenticated ? (
+                  <>
+                    <span className="avatar" aria-hidden="true">
+                      {initials}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="utility-button"
+                      onClick={handleSignOut}
+                      disabled={signingOut}
+                    >
+                      {signingOut ? 'Signing out…' : 'Sign out'}
+                    </Button>
+                  </>
+                ) : (
+                  <Button
+                    variant="primary"
+                    className="primary-with-icon"
+                    icon={<GithubLogo size={18} weight="fill" aria-hidden="true" />}
             onClick={() => startGitHubLogin(`${window.location.origin}${location.pathname}`)}
-          >
-            Sign in with GitHub
-          </Button>
-        )}
-      </div>
+                  >
+                    Sign in with GitHub
+                  </Button>
+                )}
+              </div>
     </>
   )
 
@@ -254,20 +254,20 @@ function App() {
       <ToastProvider>
         <AppShell sidebar={sidebar} topbar={topbar}>
           <MainCanvas data-route={location.pathname}>
-            {authError && <p className="error-text">{authError}</p>}
-            <Routes>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/projects" element={<Projects />} />
-              <Route path="/projects/new" element={<NewProject />} />
-              <Route path="/projects/import" element={<ImportProject />} />
-              <Route path="/projects/:id" element={<ProjectDetail />} />
-              <Route path="/projects/:id/profile" element={<GenerateProfile />} />
-              <Route path="/plugins" element={<PluginLibrary />} />
-              <Route path="/plugins/add" element={<AddPlugin />} />
-              <Route path="/dev/tools" element={<TestTools />} />
-              <Route path="/deployments" element={<Deployments />} />
-              <Route path="*" element={<NotFound />} />
-            </Routes>
+              {authError && <p className="error-text">{authError}</p>}
+              <Routes>
+                <Route path="/" element={<Dashboard />} />
+                <Route path="/projects" element={<Projects />} />
+                <Route path="/projects/new" element={<NewProject />} />
+                <Route path="/projects/import" element={<ImportProject />} />
+                <Route path="/projects/:id" element={<ProjectDetail />} />
+                <Route path="/projects/:id/profile" element={<GenerateProfile />} />
+                <Route path="/plugins" element={<PluginLibrary />} />
+                <Route path="/plugins/add" element={<AddPlugin />} />
+                <Route path="/dev/tools" element={<TestTools />} />
+                <Route path="/deployments" element={<Deployments />} />
+                <Route path="*" element={<NotFound />} />
+              </Routes>
           </MainCanvas>
         </AppShell>
         <ToastViewport />

@@ -18,6 +18,8 @@ import {
   fetchProjectConfigFile,
   updateProjectConfigFile,
   deleteProject,
+  sendRunCommand,
+  resetProjectWorkspace,
   type ProjectSummary,
   type BuildJob,
   type RunJob,
@@ -122,6 +124,9 @@ function ProjectDetail() {
   const [builds, setBuilds] = useState<BuildJob[]>([])
   const [runs, setRuns] = useState<RunJob[]>([])
   const [runBusy, setRunBusy] = useState<Record<string, boolean>>({})
+  const [commandInputs, setCommandInputs] = useState<Record<string, string>>({})
+  const [commandBusy, setCommandBusy] = useState<Record<string, boolean>>({})
+  const [runsError, setRunsError] = useState<string | null>(null)
   const [manifestPreview, setManifestPreview] = useState<ManifestPreview | null>(null)
   const [libraryPlugins, setLibraryPlugins] = useState<StoredPluginRecord[]>([])
   const [libraryLoading, setLibraryLoading] = useState(false)
@@ -246,6 +251,34 @@ function ProjectDetail() {
     },
   )
 
+  const {
+    run: resetWorkspaceAction,
+    busy: resetWorkspaceBusy,
+  } = useAsyncAction(
+    async () => {
+      if (!id) {
+        throw new Error('Project identifier missing.')
+      }
+      return resetProjectWorkspace(id)
+    },
+    {
+      label: 'Resetting workspace',
+      onSuccess: () => {
+        setRunsError(null)
+      },
+      successToast: (result) => ({
+        title: 'Workspace reset',
+        description: `Workspace path ${result.workspacePath} reset to latest artifact on next run.`,
+        variant: 'success',
+      }),
+      errorToast: (error) => ({
+        title: 'Workspace reset failed',
+        description: error instanceof Error ? error.message : 'Failed to reset workspace',
+        variant: 'danger',
+      }),
+    },
+  )
+
   const busy = queueBuildBusy || generateManifestBusy || scanAssetsBusy || runLocallyBusy
 
   const loadLibrary = useCallback(async () => {
@@ -310,6 +343,41 @@ function ProjectDetail() {
       }),
     },
   )
+
+  const { run: dispatchRunCommand } = useAsyncAction(
+    async (target: RunJob, command: string) => {
+      await sendRunCommand(target.id, command)
+    },
+    {
+      label: (target) => `Sending command to ${target.id}`,
+      onStart: (target) => {
+        setCommandBusy((prev) => ({ ...prev, [target.id]: true }))
+      },
+      onSuccess: (_result, [target]) => {
+        setCommandInputs((prev) => ({ ...prev, [target.id]: '' }))
+        setRunsError(null)
+      },
+      onError: (error) => {
+        setRunsError(error instanceof Error ? error.message : 'Failed to send command')
+      },
+      onFinally: (target) => {
+        setCommandBusy((prev) => {
+          const next = { ...prev }
+          delete next[target.id]
+          return next
+        })
+      },
+      errorToast: (error) => ({
+        title: 'Command failed',
+        description: error instanceof Error ? error.message : 'Failed to send command',
+        variant: 'danger',
+      }),
+    },
+  )
+
+  const handleCommandChange = useCallback((runId: string, value: string) => {
+    setCommandInputs((prev) => ({ ...prev, [runId]: value }))
+  }, [])
 
   useEffect(() => {
     if (!id) return
@@ -822,13 +890,6 @@ useEffect(() => {
             >
               Run locally
             </Button>
-            <Button
-              variant="link"
-              onClick={() => navigate(`/projects/${project.id}/profile`)}
-              disabled={busy}
-            >
-              Generate profile YAML
-            </Button>
           </div>
         </CardContent>
       </Card>
@@ -837,6 +898,7 @@ useEffect(() => {
         <Tabs defaultValue="overview">
           <TabList>
             <TabTrigger value="overview">Overview</TabTrigger>
+            <TabTrigger value="profile">Profile</TabTrigger>
             <TabTrigger value="plugins">Plugins</TabTrigger>
             <TabTrigger value="configs">Config Files</TabTrigger>
             <TabTrigger value="builds">Builds</TabTrigger>
@@ -944,6 +1006,31 @@ useEffect(() => {
               </div>
             </TabPanel>
 
+            <TabPanel value="profile">
+              <ContentSection as="article">
+                <header>
+                  <h3>Profile YAML</h3>
+                  <div className="dev-buttons">
+                    <Button
+                      type="button"
+                      variant="primary"
+                      onClick={() => navigate(`/projects/${project.id}/profile`)}
+                      disabled={busy}
+                    >
+                      Edit profile
+                    </Button>
+                  </div>
+                </header>
+                <p className="muted">
+                  The server profile keeps your build definition in sync. Save updates to{' '}
+                  <code>profiles/base.yml</code> to control plugins, config templates, and overrides used in builds.
+                </p>
+                <p className="muted">
+                  Editing the profile will rescan assets automatically so manifests and builds stay aligned with your latest configuration.
+                </p>
+              </ContentSection>
+            </TabPanel>
+
             <TabPanel value="builds">
               <ContentSection as="article">
                 <header>
@@ -1039,7 +1126,18 @@ useEffect(() => {
               <ContentSection as="article">
                 <header>
                   <h3>Local Runs</h3>
+                  <div className="dev-buttons">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={() => void resetWorkspaceAction()}
+                      disabled={resetWorkspaceBusy}
+                    >
+                      Reset workspace
+                    </Button>
+                  </div>
                 </header>
+                {runsError && <p className="muted">Run controls: {runsError}</p>}
                 {runs.length === 0 && <p className="muted">No local run activity yet.</p>}
                 {runs.length > 0 && (
                   <ul className="project-list">
@@ -1064,6 +1162,32 @@ useEffect(() => {
                               Workspace: <code>{run.workspacePath}</code>
                             </p>
                           )}
+                          {run.workspaceStatus && (
+                            <p className="muted">
+                              Workspace build {run.workspaceStatus.lastBuildId ?? 'unknown'} · Last sync{' '}
+                              {run.workspaceStatus.lastSyncedAt
+                                ? new Date(run.workspaceStatus.lastSyncedAt).toLocaleString()
+                                : 'unknown'}
+                              {run.workspaceStatus.dirtyPaths.length > 0
+                                ? ` · ${run.workspaceStatus.dirtyPaths.length} local change${
+                                    run.workspaceStatus.dirtyPaths.length === 1 ? '' : 's'
+                                  }`
+                                : ' · In sync'}
+                            </p>
+                          )}
+                          {run.workspaceStatus?.dirtyPaths?.length ? (
+                            <details>
+                              <summary>Local changes ({run.workspaceStatus.dirtyPaths.length})</summary>
+                              <ul className="muted">
+                                {run.workspaceStatus.dirtyPaths.slice(0, 10).map((path) => (
+                                  <li key={path}>{path}</li>
+                                ))}
+                                {run.workspaceStatus.dirtyPaths.length > 10 && (
+                                  <li>...and {run.workspaceStatus.dirtyPaths.length - 10} more</li>
+                                )}
+                              </ul>
+                            </details>
+                          ) : null}
                           {run.logs.length > 0 && (
                             <details>
                               <summary>View logs</summary>
@@ -1078,6 +1202,47 @@ useEffect(() => {
                                   .join('\n')}
                               </pre>
                             </details>
+                          )}
+                          {run.status === 'running' && (
+                            <div>
+                              {run.consoleAvailable ? (
+                                <form
+                                  style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}
+                                  onSubmit={(event) => {
+                                    event.preventDefault()
+                                    const command = commandInputs[run.id]?.trim() ?? ''
+                                    if (!command) {
+                                      return
+                                    }
+                                    void dispatchRunCommand(run, command)
+                                  }}
+                                >
+                                  <input
+                                    type="text"
+                                    aria-label="Console command"
+                                    placeholder="/say Hello"
+                                    value={commandInputs[run.id] ?? ''}
+                                    onChange={(event) =>
+                                      handleCommandChange(run.id, event.target.value)
+                                    }
+                                    disabled={Boolean(commandBusy[run.id])}
+                                    style={{ flex: 1 }}
+                                  />
+                                  <Button
+                                    type="submit"
+                                    disabled={
+                                      Boolean(commandBusy[run.id]) ||
+                                      !commandInputs[run.id] ||
+                                      commandInputs[run.id].trim().length === 0
+                                    }
+                                  >
+                                    Send
+                                  </Button>
+                                </form>
+                              ) : (
+                                <p className="muted">Console not available yet.</p>
+                              )}
+                            </div>
                           )}
                           {run.error && <p className="error-text">{run.error}</p>}
                         </div>
