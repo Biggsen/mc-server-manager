@@ -1,5 +1,5 @@
 import { SpinnerGap } from '@phosphor-icons/react'
-import { useActiveAsyncActions } from '../../lib/asyncActions'
+import { useActiveAsyncActions } from '../../lib/asyncActionsContext'
 
 export function ActiveActionIndicator() {
   const activeActions = useActiveAsyncActions()

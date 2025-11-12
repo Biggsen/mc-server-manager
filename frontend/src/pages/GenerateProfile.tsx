@@ -130,7 +130,6 @@ function extractServerPropertiesFromProfile(
 ): ExtractedServerProperties {
   const defaults = defaultServerProperties(project)
   const result: ServerPropertiesFields = { ...defaults }
-  let seedFromConfig: string | undefined
 
   const entry = profile?.configs?.files?.find(
     (file) =>
@@ -158,7 +157,7 @@ function extractServerPropertiesFromProfile(
     data.onlineMode ?? data['online-mode'],
     defaults.onlineMode,
   )
-  seedFromConfig = coerceString(
+  const seedFromConfig = coerceString(
     data.levelSeed ?? data.seed ?? data['level-seed'] ?? data['world-seed'],
     '',
   )
@@ -403,7 +402,7 @@ function GenerateProfile() {
       ...prev,
       motd: `Welcome to ${project.name}`,
     }))
-  }, [project?.name, profileSource])
+  }, [project, profileSource])
 
   const profileDocument = useMemo(() => {
     if (!project) {

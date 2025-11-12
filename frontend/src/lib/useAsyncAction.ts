@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useAsyncActionsRegistry } from './asyncActions'
+import { useAsyncActionsRegistry } from './asyncActionsContext'
 import { useToast, type ToastOptions } from '../components/ui/toast'
 
 type ToastConfig<Result, Args extends unknown[]> =

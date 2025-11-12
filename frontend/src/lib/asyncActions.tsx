@@ -1,25 +1,9 @@
+import { useCallback, useMemo, useState, type ReactNode } from 'react'
 import {
-  createContext,
-  useCallback,
-  useContext,
-  useMemo,
-  useState,
-  type ReactNode,
-} from 'react'
-
-export interface ActiveAsyncAction {
-  id: number
-  label: string
-  startedAt: number
-}
-
-interface AsyncActionsContextValue {
-  actions: ActiveAsyncAction[]
-  register: (label: string) => number
-  complete: (id: number) => void
-}
-
-const AsyncActionsContext = createContext<AsyncActionsContextValue | null>(null)
+  AsyncActionsContext,
+  type ActiveAsyncAction,
+  type AsyncActionsContextValue,
+} from './asyncActionsContext'
 
 let nextActionId = 1
 
@@ -51,17 +35,3 @@ export function AsyncActionsProvider({ children }: AsyncActionsProviderProps) {
 
   return <AsyncActionsContext.Provider value={value}>{children}</AsyncActionsContext.Provider>
 }
-
-export function useAsyncActionsRegistry(): AsyncActionsContextValue {
-  const context = useContext(AsyncActionsContext)
-  if (!context) {
-    throw new Error('useAsyncActionsRegistry must be used within an AsyncActionsProvider')
-  }
-  return context
-}
-
-export function useActiveAsyncActions(): ActiveAsyncAction[] {
-  return useAsyncActionsRegistry().actions
-}
-
-

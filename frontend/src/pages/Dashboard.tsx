@@ -94,7 +94,7 @@ function Dashboard() {
         )
         setRunsError(null)
       },
-      onError: (error, [run]) => {
+      onError: (error) => {
         console.error('Failed to stop run', error)
         setRunsError(error instanceof Error ? error.message : 'Failed to stop run')
       },
