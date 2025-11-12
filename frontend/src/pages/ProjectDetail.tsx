@@ -11,7 +11,6 @@ import {
   scanProjectAssets,
   runProjectLocally,
   stopRunJob,
-  fetchPluginLibrary,
   deleteProjectPlugin,
   fetchProjectConfigs,
   uploadProjectConfig,
@@ -24,7 +23,6 @@ import {
   type BuildJob,
   type RunJob,
   type RunLogEntry,
-  type StoredPluginRecord,
   type ProjectConfigSummary,
 } from '../lib/api'
 import {
@@ -47,12 +45,6 @@ import { ContentSection } from '../components/layout'
 import { useAsyncAction } from '../lib/useAsyncAction'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? '/api'
-const catalogProviderLabel: Record<'hangar' | 'modrinth' | 'spiget', string> = {
-  hangar: 'Hangar',
-  modrinth: 'Modrinth',
-  spiget: 'Spigot',
-}
-
 const sourceBadgeLabel: Record<'download' | 'upload', string> = {
   download: 'Download URL',
   upload: 'Uploaded jar',
@@ -72,7 +64,6 @@ const runStatusLabel: Record<
 
 type PluginWithSource =
   | NonNullable<ProjectSummary['plugins']>[number]
-  | StoredPluginRecord
   | { source?: { uploadPath?: string | null } | null }
 
 function getStoredPluginSourceKind(plugin: PluginWithSource): 'download' | 'upload' {
@@ -128,11 +119,6 @@ function ProjectDetail() {
   const [commandBusy, setCommandBusy] = useState<Record<string, boolean>>({})
   const [runsError, setRunsError] = useState<string | null>(null)
   const [manifestPreview, setManifestPreview] = useState<ManifestPreview | null>(null)
-  const [libraryPlugins, setLibraryPlugins] = useState<StoredPluginRecord[]>([])
-  const [libraryLoading, setLibraryLoading] = useState(false)
-  const [libraryError, setLibraryError] = useState<string | null>(null)
-  const [libraryQuery, setLibraryQuery] = useState('')
-  const [libraryBusy, setLibraryBusy] = useState<string | null>(null)
   const [configFiles, setConfigFiles] = useState<ProjectConfigSummary[]>([])
   const [configsLoading, setConfigsLoading] = useState(false)
   const [configsError, setConfigsError] = useState<string | null>(null)
@@ -281,19 +267,6 @@ function ProjectDetail() {
 
   const busy = queueBuildBusy || generateManifestBusy || scanAssetsBusy || runLocallyBusy
 
-  const loadLibrary = useCallback(async () => {
-    try {
-      setLibraryLoading(true)
-      const plugins = await fetchPluginLibrary()
-      setLibraryPlugins(plugins)
-      setLibraryError(null)
-    } catch (err) {
-      setLibraryError(err instanceof Error ? err.message : 'Failed to load saved plugins.')
-    } finally {
-      setLibraryLoading(false)
-    }
-  }, [])
-
   const loadConfigs = useCallback(async () => {
     if (!id) return
     try {
@@ -336,7 +309,7 @@ function ProjectDetail() {
         description: `Stop requested for ${target.id}.`,
         variant: 'warning',
       }),
-      errorToast: (error, [target]) => ({
+      errorToast: (error) => ({
         title: 'Failed to stop run',
         description: error instanceof Error ? error.message : 'Failed to stop run',
         variant: 'danger',
@@ -528,10 +501,6 @@ function ProjectDetail() {
     }
   }, [id])
 
-  useEffect(() => {
-    void loadLibrary()
-  }, [loadLibrary])
-
 useEffect(() => {
   void loadConfigs()
 }, [loadConfigs])
@@ -546,70 +515,6 @@ useEffect(() => {
   const latestBuild = useMemo(
     () => builds.find((build) => build.status === 'succeeded'),
     [builds],
-  )
-
-  const filteredLibrary = useMemo(() => {
-    const term = libraryQuery.trim().toLowerCase()
-    if (!term) {
-      return libraryPlugins
-    }
-    return libraryPlugins.filter((plugin) => {
-      const haystack = [
-        plugin.id,
-        plugin.version,
-        plugin.provider,
-        plugin.source?.slug,
-        plugin.source?.projectUrl,
-      ]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase()
-      return haystack.includes(term)
-    })
-  }, [libraryPlugins, libraryQuery])
-
-  const projectPluginKeys = useMemo(() => {
-    if (!project?.plugins) {
-      return new Set<string>()
-    }
-    return new Set(project.plugins.map((plugin) => `${plugin.id}:${plugin.version}`))
-  }, [project?.plugins])
-
-  const handleAddLibraryPlugin = useCallback(
-    async (plugin: StoredPluginRecord) => {
-      if (!id) {
-        return
-      }
-      try {
-        setLibraryBusy(`${plugin.id}:${plugin.version}`)
-        const plugins = await addProjectPlugin(id, {
-          pluginId: plugin.id,
-          version: plugin.version,
-          provider: plugin.provider,
-          downloadUrl: plugin.source?.downloadUrl,
-          minecraftVersionMin: plugin.minecraftVersionMin ?? plugin.source?.minecraftVersionMin,
-          minecraftVersionMax: plugin.minecraftVersionMax ?? plugin.source?.minecraftVersionMax,
-          cachePath: plugin.cachePath ?? plugin.source?.cachePath,
-          source: plugin.source,
-        })
-        setProject((prev) => (prev ? { ...prev, plugins: plugins ?? prev.plugins } : prev))
-        toast({
-          title: 'Plugin added',
-          description: `${plugin.id} ${plugin.version} added from library.`,
-          variant: 'success',
-        })
-        await loadLibrary()
-      } catch (err) {
-        toast({
-          title: 'Failed to add plugin',
-          description: err instanceof Error ? err.message : 'Failed to add plugin from saved library.',
-          variant: 'danger',
-        })
-      } finally {
-        setLibraryBusy(null)
-      }
-    },
-    [id, loadLibrary, toast],
   )
 
   const handleRemovePlugin = useCallback(
@@ -940,69 +845,6 @@ useEffect(() => {
                     </p>
                   )}
                 </ContentSection>
-
-                <ContentSection as="article">
-                  <header>
-                    <h3>Configured Plugins</h3>
-                  </header>
-                  {project.plugins && project.plugins.length > 0 ? (
-                    <ul className="project-list">
-                      {project.plugins.map((plugin) => {
-                        const supportRange = formatMinecraftRange(
-                          plugin.minecraftVersionMin ?? plugin.source?.minecraftVersionMin,
-                          plugin.minecraftVersionMax ?? plugin.source?.minecraftVersionMax,
-                        )
-                        const sourceKind = getStoredPluginSourceKind(plugin)
-                        return (
-                          <li key={`${plugin.id}:${plugin.version}`}>
-                            <div>
-                              <strong>{plugin.id}</strong>{' '}
-                              <Badge variant="outline">{sourceBadgeLabel[sourceKind]}</Badge>{' '}
-                              {plugin.provider && plugin.provider !== 'custom' && (
-                                <Badge variant="accent">{plugin.provider}</Badge>
-                              )}{' '}
-                              <span className="muted">v{plugin.version}</span>
-                              {supportRange && <p className="muted">Supports: {supportRange}</p>}
-                              {plugin.source?.projectUrl && (
-                                <p className="muted">
-                                  <a href={plugin.source.projectUrl} target="_blank" rel="noreferrer">
-                                    View project
-                                  </a>
-                                </p>
-                              )}
-                              {plugin.source?.downloadUrl && (
-                                <p className="muted">
-                                  <a href={plugin.source.downloadUrl} target="_blank" rel="noreferrer">
-                                    Download URL
-                                  </a>
-                                </p>
-                              )}
-                              {plugin.source?.uploadPath && (
-                                <p className="muted">Uploaded jar: {plugin.source.uploadPath}</p>
-                              )}
-                              {(plugin.cachePath ?? plugin.source?.cachePath) && (
-                                <p className="muted">
-                                  Cache: {plugin.cachePath ?? plugin.source?.cachePath}
-                                </p>
-                              )}
-                            </div>
-                            <div className="dev-buttons">
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                onClick={() => handleRemovePlugin(plugin.id)}
-                              >
-                                Remove
-                              </Button>
-                            </div>
-                          </li>
-                        )
-                      })}
-                    </ul>
-                  ) : (
-                    <p className="muted">No plugins configured yet.</p>
-                  )}
-                </ContentSection>
               </div>
             </TabPanel>
 
@@ -1271,59 +1113,24 @@ useEffect(() => {
               <div className="assets-grid">
                 <ContentSection as="article">
                   <header>
-                    <h3>Saved Plugins</h3>
+                    <h3>Configured Plugins</h3>
                   </header>
-                  <div className="form-grid">
-                    <div className="field span-2">
-                      <label htmlFor="saved-plugin-search">Search saved plugins</label>
-                      <input
-                        id="saved-plugin-search"
-                        value={libraryQuery}
-                        onChange={(event) => setLibraryQuery(event.target.value)}
-                        placeholder="Filter by name, version, or source"
-                      />
-                    </div>
-                  </div>
-                  {libraryError && <p className="error-text">{libraryError}</p>}
-                  {libraryLoading && (
+                  {project.plugins && project.plugins.length > 0 ? (
                     <ul className="project-list">
-                      {[0, 1, 2].map((index) => (
-                        <li key={index}>
-                          <div>
-                            <Skeleton style={{ width: '60%', height: '18px' }} />
-                            <Skeleton style={{ width: '40%', height: '14px', marginTop: '8px' }} />
-                            <Skeleton style={{ width: '50%', height: '14px', marginTop: '8px' }} />
-                          </div>
-                          <div className="dev-buttons">
-                            <Skeleton style={{ width: '120px', height: '36px', borderRadius: '999px' }} />
-                          </div>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  {!libraryLoading && filteredLibrary.length === 0 && (
-                    <p className="muted">
-                      {libraryQuery.trim()
-                        ? 'No saved plugins match that search.'
-                        : 'No saved plugins yet. Add one via download URL or upload to populate this list.'}
-                    </p>
-                  )}
-                  {!libraryLoading && filteredLibrary.length > 0 && (
-                    <ul className="project-list">
-                      {filteredLibrary.map((plugin) => {
-                        const key = `${plugin.id}:${plugin.version}`
+                      {project.plugins.map((plugin) => {
                         const supportRange = formatMinecraftRange(
                           plugin.minecraftVersionMin ?? plugin.source?.minecraftVersionMin,
                           plugin.minecraftVersionMax ?? plugin.source?.minecraftVersionMax,
                         )
-                        const alreadyAdded = projectPluginKeys.has(key)
-                        const busyKey = libraryBusy === key
                         const sourceKind = getStoredPluginSourceKind(plugin)
                         return (
-                          <li key={key}>
+                          <li key={`${plugin.id}:${plugin.version}`}>
                             <div>
                               <strong>{plugin.id}</strong>{' '}
-                              <span className="badge">{sourceBadgeLabel[sourceKind]}</span>{' '}
+                              <Badge variant="outline">{sourceBadgeLabel[sourceKind]}</Badge>{' '}
+                              {plugin.provider && plugin.provider !== 'custom' && (
+                                <Badge variant="accent">{plugin.provider}</Badge>
+                              )}{' '}
                               <span className="muted">v{plugin.version}</span>
                               {supportRange && <p className="muted">Supports: {supportRange}</p>}
                               {plugin.source?.projectUrl && (
@@ -1343,41 +1150,40 @@ useEffect(() => {
                               {plugin.source?.uploadPath && (
                                 <p className="muted">Uploaded jar: {plugin.source.uploadPath}</p>
                               )}
-                              {plugin.cachePath && <p className="muted">Cache: {plugin.cachePath}</p>}
-                              {plugin.cachedAt && (
-                                <p className="muted">Cached {new Date(plugin.cachedAt).toLocaleString()}</p>
-                              )}
-                              {plugin.lastUsedAt && (
-                                <p className="muted">Last used {new Date(plugin.lastUsedAt).toLocaleString()}</p>
+                              {(plugin.cachePath ?? plugin.source?.cachePath) && (
+                                <p className="muted">
+                                  Cache: {plugin.cachePath ?? plugin.source?.cachePath}
+                                </p>
                               )}
                             </div>
                             <div className="dev-buttons">
                               <Button
                                 type="button"
-                                variant="primary"
-                                disabled={alreadyAdded || busyKey}
-                                onClick={() => void handleAddLibraryPlugin(plugin)}
+                                variant="ghost"
+                                onClick={() => handleRemovePlugin(plugin.id)}
                               >
-                                {alreadyAdded ? 'Already added' : busyKey ? 'Adding…' : 'Add to server'}
+                                Remove
                               </Button>
                             </div>
                           </li>
                         )
                       })}
                     </ul>
+                  ) : (
+                    <p className="muted">No plugins configured yet.</p>
                   )}
                 </ContentSection>
 
                 <ContentSection as="article">
                   <header>
-                    <h3>Add Plugins</h3>
+                    <h3>Plugin Library</h3>
                   </header>
                   <p className="muted">
-                    To add new plugins to the library, visit the{' '}
+                    Manage saved plugins and add new ones from the{' '}
                     <Link to="/plugins" className="link">
                       Plugin Library
                     </Link>{' '}
-                    page. Once added to the library, plugins can be added to this project from the list above.
+                    page.
                   </p>
                 </ContentSection>
               </div>
