@@ -71,16 +71,18 @@ interface ProfileDocument {
   }
   plugins?: Array<{ id: string; version?: string }>
   configs?: {
-    files?: Array<{
-      template?: string
-      output?: string
-      data?: unknown
-    }>
+    files?: ProfileConfigFileEntry[]
   }
   overrides?: Array<{ path: string; value: unknown }>
   mergePolicy?: {
     arrays?: 'replace' | 'merge'
   }
+}
+
+type ProfileConfigFileEntry = {
+  template?: string
+  output?: string
+  data?: unknown
 }
 
 interface ExtractedServerProperties {
@@ -223,7 +225,7 @@ function buildProfileDocument(options: {
       version: entry.version.trim(),
     }))
 
-  const configEntries: ProfileDocument['configs']['files'] = []
+  const configEntries: ProfileConfigFileEntry[] = []
 
   if (options.serverProperties.include) {
     configEntries.push({
