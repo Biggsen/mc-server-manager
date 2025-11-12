@@ -2,34 +2,38 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Play, FileText, MagnifyingGlass, Package as PackageIcon } from '@phosphor-icons/react'
 import {
-  fetchProject,
-  fetchBuilds,
+  addProjectPlugin,
+  deleteProject,
+  deleteProjectConfigFile,
+  deleteProjectPlugin,
   fetchBuildManifest,
+  fetchBuilds,
+  fetchProject,
+  fetchProjectConfigFile,
+  fetchProjectConfigs,
+  fetchProjectPluginConfigs,
   fetchProjectRuns,
+  fetchPluginLibrary,
+  resetProjectWorkspace,
+  runProjectLocally,
+  scanProjectAssets,
+  sendRunCommand,
+  stopRunJob,
   triggerBuild,
   triggerManifest,
-  scanProjectAssets,
-  runProjectLocally,
-  stopRunJob,
-  deleteProjectPlugin,
-  fetchProjectConfigs,
-  uploadProjectConfig,
-  fetchProjectConfigFile,
   updateProjectConfigFile,
-  deleteProjectConfigFile,
-  fetchProjectPluginConfigs,
   updateProjectPluginConfigs,
-  deleteProject,
-  sendRunCommand,
-  resetProjectWorkspace,
-  type ProjectSummary,
+  uploadProjectConfig,
+  uploadProjectPlugin,
   type BuildJob,
-  type RunJob,
-  type RunLogEntry,
-  type ProjectConfigSummary,
   type PluginConfigDefinitionView,
   type PluginConfigRequirement,
+  type ProjectConfigSummary,
   type ProjectPluginConfigMapping,
+  type ProjectSummary,
+  type RunJob,
+  type RunLogEntry,
+  type StoredPluginRecord,
 } from '../lib/api'
 import {
   Badge,
@@ -201,6 +205,76 @@ function ProjectDetail() {
   const [deleteRepo, setDeleteRepo] = useState(false)
   const [deleteBusy, setDeleteBusy] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [addPluginOpen, setAddPluginOpen] = useState(false)
+  const [addPluginMode, setAddPluginMode] = useState<'library' | 'upload'>('library')
+  const [addPluginBusy, setAddPluginBusy] = useState(false)
+  const [addPluginError, setAddPluginError] = useState<string | null>(null)
+  const [libraryLoading, setLibraryLoading] = useState(false)
+  const [libraryError, setLibraryError] = useState<string | null>(null)
+  const [libraryPlugins, setLibraryPlugins] = useState<StoredPluginRecord[]>([])
+  const [selectedLibraryPlugin, setSelectedLibraryPlugin] = useState('')
+  const [uploadPluginId, setUploadPluginId] = useState('')
+  const [uploadPluginVersion, setUploadPluginVersion] = useState('')
+  const [uploadPluginMin, setUploadPluginMin] = useState('')
+  const [uploadPluginMax, setUploadPluginMax] = useState('')
+  const [uploadPluginFile, setUploadPluginFile] = useState<File | null>(null)
+
+  const existingProjectPlugins = useMemo(() => {
+    const set = new Set<string>()
+    for (const plugin of project?.plugins ?? []) {
+      set.add(`${plugin.id}:${plugin.version}`)
+    }
+    return set
+  }, [project?.plugins])
+
+  const resetAddPluginForms = useCallback(() => {
+    setAddPluginError(null)
+    setSelectedLibraryPlugin('')
+    setUploadPluginId('')
+    setUploadPluginVersion('')
+    setUploadPluginMin('')
+    setUploadPluginMax('')
+    setUploadPluginFile(null)
+  }, [])
+
+  const openAddPluginPanel = useCallback(() => {
+    resetAddPluginForms()
+    setAddPluginMode('library')
+    setAddPluginOpen(true)
+  }, [resetAddPluginForms])
+
+  const closeAddPluginPanel = useCallback(() => {
+    setAddPluginOpen(false)
+    setAddPluginBusy(false)
+    resetAddPluginForms()
+  }, [resetAddPluginForms])
+
+  const handleSelectAddPluginMode = useCallback((mode: 'library' | 'upload') => {
+    setAddPluginMode(mode)
+    setAddPluginError(null)
+    if (mode === 'library') {
+      setUploadPluginId('')
+      setUploadPluginVersion('')
+      setUploadPluginMin('')
+      setUploadPluginMax('')
+      setUploadPluginFile(null)
+    } else {
+      setSelectedLibraryPlugin('')
+    }
+  }, [])
+
+  const handleRefreshLibrary = useCallback(async () => {
+    setLibraryLoading(true)
+    setLibraryError(null)
+    try {
+      const items = await fetchPluginLibrary()
+      setLibraryPlugins(items)
+    } catch (err) {
+      setLibraryError(err instanceof Error ? err.message : 'Failed to load plugin library.')
+    } finally {
+      setLibraryLoading(false)
+    }
+  }, [])
 
   const {
     run: queueBuild,
@@ -441,6 +515,128 @@ function ProjectDetail() {
     setPluginConfigManager(null)
   }, [])
 
+  const handleAddLibraryPlugin = useCallback(
+    async (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault()
+      if (!id) {
+        setAddPluginError('Project identifier missing.')
+        return
+      }
+      if (!selectedLibraryPlugin) {
+        setAddPluginError('Select a plugin to add.')
+        return
+      }
+
+      const target = libraryPlugins.find(
+        (plugin) => `${plugin.id}:${plugin.version}` === selectedLibraryPlugin,
+      )
+      if (!target) {
+        setAddPluginError('Selected plugin is no longer available in the library.')
+        return
+      }
+
+      setAddPluginBusy(true)
+      setAddPluginError(null)
+      try {
+        const plugins = await addProjectPlugin(id, {
+          pluginId: target.id,
+          version: target.version,
+          provider: target.provider,
+          downloadUrl: target.source?.downloadUrl,
+          minecraftVersionMin: target.minecraftVersionMin ?? target.source?.minecraftVersionMin,
+          minecraftVersionMax: target.minecraftVersionMax ?? target.source?.minecraftVersionMax,
+          cachePath: target.cachePath ?? target.source?.cachePath,
+          source: target.source ? { ...target.source } : undefined,
+        })
+        setProject((prev) => (prev ? { ...prev, plugins: plugins ?? [] } : prev))
+        toast({
+          title: 'Plugin added',
+          description: `${target.id} v${target.version} added to project.`,
+          variant: 'success',
+        })
+        closeAddPluginPanel()
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to add plugin.'
+        setAddPluginError(message)
+        toast({
+          title: 'Failed to add plugin',
+          description: message,
+          variant: 'danger',
+        })
+      } finally {
+        setAddPluginBusy(false)
+      }
+    },
+    [
+      addProjectPlugin,
+      closeAddPluginPanel,
+      id,
+      libraryPlugins,
+      selectedLibraryPlugin,
+      setProject,
+      toast,
+    ],
+  )
+
+  const handleUploadPlugin = useCallback(
+    async (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault()
+      if (!id) {
+        setAddPluginError('Project identifier missing.')
+        return
+      }
+      if (!uploadPluginId.trim() || !uploadPluginVersion.trim()) {
+        setAddPluginError('Plugin id and version are required.')
+        return
+      }
+      if (!uploadPluginFile) {
+        setAddPluginError('Select a plugin jar to upload.')
+        return
+      }
+
+      setAddPluginBusy(true)
+      setAddPluginError(null)
+      try {
+        const plugins = await uploadProjectPlugin(id, {
+          pluginId: uploadPluginId.trim(),
+          version: uploadPluginVersion.trim(),
+          file: uploadPluginFile,
+          minecraftVersionMin: uploadPluginMin.trim() || undefined,
+          minecraftVersionMax: uploadPluginMax.trim() || undefined,
+        })
+        setProject((prev) => (prev ? { ...prev, plugins: plugins ?? [] } : prev))
+        toast({
+          title: 'Plugin uploaded',
+          description: `${uploadPluginId.trim()} v${uploadPluginVersion.trim()} uploaded to project.`,
+          variant: 'success',
+        })
+        closeAddPluginPanel()
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to upload plugin.'
+        setAddPluginError(message)
+        toast({
+          title: 'Upload failed',
+          description: message,
+          variant: 'danger',
+        })
+      } finally {
+        setAddPluginBusy(false)
+      }
+    },
+    [
+      closeAddPluginPanel,
+      id,
+      setProject,
+      toast,
+      uploadPluginFile,
+      uploadPluginId,
+      uploadPluginMax,
+      uploadPluginMin,
+      uploadPluginVersion,
+      uploadProjectPlugin,
+    ],
+  )
+
   const refreshPluginConfigManager = useCallback(async () => {
     if (!pluginConfigManager) return
     await openPluginConfigManager(pluginConfigManager.pluginId)
@@ -650,6 +846,23 @@ function ProjectDetail() {
   const handleCommandChange = useCallback((runId: string, value: string) => {
     setCommandInputs((prev) => ({ ...prev, [runId]: value }))
   }, [])
+
+  useEffect(() => {
+    if (!addPluginOpen || addPluginMode !== 'library') {
+      return
+    }
+    if (libraryLoading || libraryPlugins.length > 0 || libraryError) {
+      return
+    }
+    void handleRefreshLibrary()
+  }, [
+    addPluginMode,
+    addPluginOpen,
+    handleRefreshLibrary,
+    libraryError,
+    libraryLoading,
+    libraryPlugins.length,
+  ])
 
   useEffect(() => {
     if (!id) return
@@ -1427,7 +1640,26 @@ useEffect(() => {
               <div className="assets-grid">
                 <ContentSection as="article">
                   <header>
-                    <h3>Configured Plugins</h3>
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: '1rem',
+                      }}
+                    >
+                      <h3>Configured Plugins</h3>
+                      <div className="dev-buttons">
+                        <Button
+                          type="button"
+                          variant="primary"
+                          onClick={addPluginOpen ? closeAddPluginPanel : openAddPluginPanel}
+                          disabled={addPluginBusy}
+                        >
+                          {addPluginOpen ? 'Close' : 'Add plugin'}
+                        </Button>
+                      </div>
+                    </div>
                   </header>
                   {project.plugins && project.plugins.length > 0 ? (
                     <ul className="project-list">
@@ -1494,6 +1726,187 @@ useEffect(() => {
                     <p className="muted">No plugins configured yet.</p>
                   )}
                 </ContentSection>
+
+                {addPluginOpen && (
+                  <ContentSection as="article">
+                    <header>
+                      <h3>Add Plugin to Project</h3>
+                    </header>
+
+                    <div
+                      className="dev-buttons"
+                      style={{ marginBottom: '1rem', flexWrap: 'wrap', rowGap: '0.5rem' }}
+                    >
+                      <Button
+                        type="button"
+                        variant={addPluginMode === 'library' ? 'primary' : 'ghost'}
+                        onClick={() => handleSelectAddPluginMode('library')}
+                        disabled={addPluginBusy}
+                      >
+                        From library
+                      </Button>
+                      <Button
+                        type="button"
+                        variant={addPluginMode === 'upload' ? 'primary' : 'ghost'}
+                        onClick={() => handleSelectAddPluginMode('upload')}
+                        disabled={addPluginBusy}
+                      >
+                        Upload jar
+                      </Button>
+                    </div>
+
+                    {addPluginError && <p className="error-text">{addPluginError}</p>}
+
+                    {addPluginMode === 'library' && (
+                      <>
+                        {libraryLoading && <p className="muted">Loading plugin library…</p>}
+                        {libraryError && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                            <p className="error-text">{libraryError}</p>
+                            <div className="dev-buttons">
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                onClick={() => void handleRefreshLibrary()}
+                                disabled={libraryLoading}
+                              >
+                                Retry
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+                        {!libraryLoading && !libraryError && libraryPlugins.length === 0 && (
+                          <p className="muted">
+                            No saved plugins yet. Add plugins from the Plugin Library page first.
+                          </p>
+                        )}
+                        {!libraryLoading && !libraryError && libraryPlugins.length > 0 && (
+                          <form onSubmit={handleAddLibraryPlugin} className="form-grid">
+                            <div className="field">
+                              <label htmlFor="library-plugin-select">Library plugin</label>
+                              <select
+                                id="library-plugin-select"
+                                value={selectedLibraryPlugin}
+                                onChange={(event) => setSelectedLibraryPlugin(event.target.value)}
+                                required
+                              >
+                                <option value="">Select a plugin</option>
+                                {libraryPlugins.map((plugin) => {
+                                  const key = `${plugin.id}:${plugin.version}`
+                                  const providerLabel =
+                                    plugin.provider && plugin.provider !== 'custom'
+                                      ? ` (${plugin.provider})`
+                                      : ''
+                                  const isAlreadyAdded = existingProjectPlugins.has(key)
+                                  return (
+                                    <option key={key} value={key} disabled={isAlreadyAdded}>
+                                      {plugin.id} v{plugin.version}
+                                      {providerLabel}
+                                      {isAlreadyAdded ? ' · already added' : ''}
+                                    </option>
+                                  )
+                                })}
+                              </select>
+                            </div>
+                            <div className="dev-buttons" style={{ gridColumn: '1 / -1' }}>
+                              <Button
+                                type="submit"
+                                disabled={!selectedLibraryPlugin || addPluginBusy}
+                              >
+                                {addPluginBusy ? 'Adding…' : 'Add plugin'}
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                onClick={() => void handleRefreshLibrary()}
+                                disabled={libraryLoading}
+                              >
+                                Refresh
+                              </Button>
+                            </div>
+                          </form>
+                        )}
+                      </>
+                    )}
+
+                    {addPluginMode === 'upload' && (
+                      <form onSubmit={handleUploadPlugin} className="form-grid">
+                        <div className="field">
+                          <label htmlFor="upload-plugin-id">Plugin id</label>
+                          <input
+                            id="upload-plugin-id"
+                            value={uploadPluginId}
+                            onChange={(event) => setUploadPluginId(event.target.value)}
+                            placeholder="WorldGuard"
+                            required
+                            disabled={addPluginBusy}
+                          />
+                        </div>
+                        <div className="field">
+                          <label htmlFor="upload-plugin-version">Version</label>
+                          <input
+                            id="upload-plugin-version"
+                            value={uploadPluginVersion}
+                            onChange={(event) => setUploadPluginVersion(event.target.value)}
+                            placeholder="7.0.9"
+                            required
+                            disabled={addPluginBusy}
+                          />
+                        </div>
+                        <div className="field">
+                          <label htmlFor="upload-plugin-file">Plugin jar</label>
+                          <input
+                            id="upload-plugin-file"
+                            type="file"
+                            accept=".jar,.zip"
+                            onChange={(event) => setUploadPluginFile(event.target.files?.[0] ?? null)}
+                            required
+                            disabled={addPluginBusy}
+                          />
+                          {uploadPluginFile && (
+                            <p className="muted">Selected file: {uploadPluginFile.name}</p>
+                          )}
+                        </div>
+                        <div className="field">
+                          <label htmlFor="upload-plugin-min">Minecraft version min</label>
+                          <input
+                            id="upload-plugin-min"
+                            value={uploadPluginMin}
+                            onChange={(event) => setUploadPluginMin(event.target.value)}
+                            placeholder="1.20"
+                            disabled={addPluginBusy}
+                          />
+                        </div>
+                        <div className="field">
+                          <label htmlFor="upload-plugin-max">Minecraft version max</label>
+                          <input
+                            id="upload-plugin-max"
+                            value={uploadPluginMax}
+                            onChange={(event) => setUploadPluginMax(event.target.value)}
+                            placeholder="1.20.1"
+                            disabled={addPluginBusy}
+                          />
+                        </div>
+                        <div className="dev-buttons" style={{ gridColumn: '1 / -1' }}>
+                          <Button
+                            type="submit"
+                            disabled={
+                              addPluginBusy ||
+                              !uploadPluginId.trim() ||
+                              !uploadPluginVersion.trim() ||
+                              !uploadPluginFile
+                            }
+                          >
+                            {addPluginBusy ? 'Uploading…' : 'Upload plugin'}
+                          </Button>
+                          <Button type="button" variant="ghost" onClick={closeAddPluginPanel}>
+                            Cancel
+                          </Button>
+                        </div>
+                      </form>
+                    )}
+                  </ContentSection>
+                )}
 
                 <ContentSection as="article">
                   <header>
