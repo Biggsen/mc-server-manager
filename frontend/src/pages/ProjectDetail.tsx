@@ -16,6 +16,9 @@ import {
   uploadProjectConfig,
   fetchProjectConfigFile,
   updateProjectConfigFile,
+  deleteProjectConfigFile,
+  fetchProjectPluginConfigs,
+  updateProjectPluginConfigs,
   deleteProject,
   sendRunCommand,
   resetProjectWorkspace,
@@ -24,6 +27,9 @@ import {
   type RunJob,
   type RunLogEntry,
   type ProjectConfigSummary,
+  type PluginConfigDefinitionView,
+  type PluginConfigRequirement,
+  type ProjectPluginConfigMapping,
 } from '../lib/api'
 import {
   Badge,
@@ -79,6 +85,66 @@ interface ManifestPreview {
   content: unknown
 }
 
+type PluginConfigDraft = {
+  key: string
+  definitionId: string
+  source: 'library' | 'custom'
+  label: string
+  description: string
+  defaultPath: string
+  path: string
+  requirement: PluginConfigRequirement
+  notes: string
+  missing: boolean
+  uploaded?: ProjectConfigSummary
+  hasExistingMapping: boolean
+}
+
+type PluginConfigManagerState = {
+  pluginId: string
+  pluginVersion: string
+  busy: boolean
+  saving: boolean
+  error: string | null
+  drafts: PluginConfigDraft[]
+  uploads: ProjectConfigSummary[]
+}
+
+function toPluginConfigDraft(view: PluginConfigDefinitionView, index: number): PluginConfigDraft {
+  return {
+    key: `${view.id}-${index}-${Math.random().toString(36).slice(2)}`,
+    definitionId: view.id,
+    source: view.source,
+    label: view.label ?? '',
+    description: view.description ?? '',
+    defaultPath: view.defaultPath,
+    path: view.mapping?.path ?? view.resolvedPath ?? view.defaultPath,
+    requirement: view.mapping?.requirement ?? view.requirement ?? 'optional',
+    notes: view.mapping?.notes ?? '',
+    missing: view.missing,
+    uploaded: view.uploaded,
+    hasExistingMapping: Boolean(view.mapping),
+  }
+}
+
+function createCustomPluginConfigDraft(): PluginConfigDraft {
+  const definitionId = `custom/${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+  return {
+    key: `${definitionId}-${Math.random().toString(36).slice(2)}`,
+    definitionId,
+    source: 'custom',
+    label: '',
+    description: '',
+    defaultPath: '',
+    path: '',
+    requirement: 'optional',
+    notes: '',
+    missing: true,
+    uploaded: undefined,
+    hasExistingMapping: false,
+  }
+}
+
 function formatMinecraftRange(min?: string | null, max?: string | null): string | null {
   if (!min && !max) {
     return null
@@ -110,6 +176,7 @@ function ProjectDetail() {
 
   const [loading, setLoading] = useState(true)
   const initialLoadRef = useRef(true)
+  const configUploadFormRef = useRef<HTMLFormElement | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [project, setProject] = useState<ProjectSummary | null>(null)
   const [builds, setBuilds] = useState<BuildJob[]>([])
@@ -124,10 +191,13 @@ function ProjectDetail() {
   const [configsError, setConfigsError] = useState<string | null>(null)
   const [configUploadPath, setConfigUploadPath] = useState('')
   const [configUploadFile, setConfigUploadFile] = useState<File | null>(null)
+  const [configUploadPlugin, setConfigUploadPlugin] = useState('')
+  const [configUploadDefinition, setConfigUploadDefinition] = useState('')
   const [configUploadBusy, setConfigUploadBusy] = useState(false)
   const [configEditor, setConfigEditor] = useState<{ path: string; content: string } | null>(null)
   const [configEditorBusy, setConfigEditorBusy] = useState(false)
   const [configEditorError, setConfigEditorError] = useState<string | null>(null)
+  const [pluginConfigManager, setPluginConfigManager] = useState<PluginConfigManagerState | null>(null)
   const [deleteRepo, setDeleteRepo] = useState(false)
   const [deleteBusy, setDeleteBusy] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
@@ -280,6 +350,235 @@ function ProjectDetail() {
       setConfigsLoading(false)
     }
   }, [id])
+
+  const pluginDefinitionOptions = useMemo(() => {
+    const map: Record<string, Array<{ definitionId: string; path: string; label: string }>> = {}
+    for (const plugin of project?.plugins ?? []) {
+      const mappings = plugin.configMappings ?? []
+      map[plugin.id] = mappings.map((mapping) => {
+        const path = mapping.path ?? ''
+        const label = path ? `${mapping.definitionId} · ${path}` : mapping.definitionId
+        return {
+          definitionId: mapping.definitionId,
+          path,
+          label,
+        }
+      })
+    }
+    if (pluginConfigManager) {
+      map[pluginConfigManager.pluginId] = pluginConfigManager.drafts.map((draft) => ({
+        definitionId: draft.definitionId,
+        path: draft.path,
+        label: draft.path ? `${draft.definitionId || 'Custom'} · ${draft.path}` : draft.definitionId || 'Custom',
+      }))
+    }
+    return map
+  }, [pluginConfigManager, project?.plugins])
+
+  const selectedDefinitionOptions = pluginDefinitionOptions[configUploadPlugin] ?? []
+  const selectedDefinition = selectedDefinitionOptions.find(
+    (option) => option.definitionId === configUploadDefinition,
+  )
+
+  const openPluginConfigManager = useCallback(
+    async (pluginId: string) => {
+      if (!id || !project) return
+      const target = project.plugins?.find((entry) => entry.id === pluginId)
+      if (!target) {
+        toast({
+          title: 'Plugin not found',
+          description: `Plugin ${pluginId} is not part of this project.`,
+          variant: 'danger',
+        })
+        return
+      }
+      setPluginConfigManager({
+        pluginId: target.id,
+        pluginVersion: target.version,
+        busy: true,
+        saving: false,
+        error: null,
+        drafts: [],
+        uploads: [],
+      })
+      try {
+        const data = await fetchProjectPluginConfigs(id, pluginId)
+        setPluginConfigManager({
+          pluginId: target.id,
+          pluginVersion: target.version,
+          busy: false,
+          saving: false,
+          error: null,
+          drafts: data.definitions.map((definition, index) => toPluginConfigDraft(definition, index)),
+          uploads: data.uploads,
+        })
+        setProject((prev) =>
+          prev
+            ? {
+                ...prev,
+                plugins: prev.plugins?.map((plugin) =>
+                  plugin.id === pluginId ? { ...plugin, configMappings: data.mappings } : plugin,
+                ),
+              }
+            : prev,
+        )
+      } catch (err) {
+        setPluginConfigManager((prev) =>
+          prev && prev.pluginId === pluginId
+            ? {
+                ...prev,
+                busy: false,
+                error: err instanceof Error ? err.message : 'Failed to load config paths.',
+              }
+            : prev,
+        )
+      }
+    },
+    [id, project, toast],
+  )
+
+  const closePluginConfigManager = useCallback(() => {
+    setPluginConfigManager(null)
+  }, [])
+
+  const refreshPluginConfigManager = useCallback(async () => {
+    if (!pluginConfigManager) return
+    await openPluginConfigManager(pluginConfigManager.pluginId)
+  }, [openPluginConfigManager, pluginConfigManager])
+
+  const updatePluginConfigDraft = useCallback(
+    (key: string, changes: Partial<PluginConfigDraft>) => {
+      setPluginConfigManager((prev) =>
+        prev
+          ? {
+              ...prev,
+              drafts: prev.drafts.map((draft) =>
+                draft.key === key ? { ...draft, ...changes } : draft,
+              ),
+            }
+          : prev,
+      )
+    },
+    [],
+  )
+
+  const addCustomPluginConfigDraft = useCallback(() => {
+    setPluginConfigManager((prev) =>
+      prev
+        ? {
+            ...prev,
+            drafts: [...prev.drafts, createCustomPluginConfigDraft()],
+          }
+        : prev,
+    )
+  }, [])
+
+  const removePluginConfigDraft = useCallback((key: string) => {
+    setPluginConfigManager((prev) =>
+      prev
+        ? {
+            ...prev,
+            drafts: prev.drafts.filter((draft) => draft.key !== key),
+          }
+        : prev,
+    )
+  }, [])
+
+  const handleSavePluginConfigManager = useCallback(async () => {
+    if (!id || !pluginConfigManager) return
+    const sanitizedMappings: ProjectPluginConfigMapping[] = []
+    for (const draft of pluginConfigManager.drafts) {
+      const path = draft.path.trim()
+      if (!path) {
+        setPluginConfigManager((prev) =>
+          prev
+            ? {
+                ...prev,
+                error: 'Each config mapping must include a relative path.',
+              }
+            : prev,
+        )
+        return
+      }
+      sanitizedMappings.push({
+        definitionId: draft.definitionId,
+        path,
+        requirement: draft.requirement,
+        notes: draft.notes.trim() || undefined,
+      })
+    }
+    setPluginConfigManager((prev) =>
+      prev
+        ? {
+            ...prev,
+            saving: true,
+            error: null,
+          }
+        : prev,
+    )
+    try {
+      const response = await updateProjectPluginConfigs(id, pluginConfigManager.pluginId, {
+        mappings: sanitizedMappings,
+      })
+      setProject((prev) =>
+        prev
+          ? {
+              ...prev,
+              plugins: prev.plugins?.map((plugin) =>
+                plugin.id === pluginConfigManager.pluginId
+                  ? { ...plugin, configMappings: response.mappings }
+                  : plugin,
+              ),
+            }
+          : prev,
+      )
+      setPluginConfigManager({
+        pluginId: response.plugin.id,
+        pluginVersion: response.plugin.version,
+        busy: false,
+        saving: false,
+        error: null,
+        drafts: response.definitions.map((definition, index) => toPluginConfigDraft(definition, index)),
+        uploads: response.uploads,
+      })
+      toast({
+        title: 'Plugin config paths updated',
+        description: `Saved ${sanitizedMappings.length} mapping${
+          sanitizedMappings.length === 1 ? '' : 's'
+        } for ${response.plugin.id}.`,
+        variant: 'success',
+      })
+    } catch (err) {
+      setPluginConfigManager((prev) =>
+        prev
+          ? {
+              ...prev,
+              saving: false,
+              error: err instanceof Error ? err.message : 'Failed to save plugin config paths.',
+            }
+          : prev,
+      )
+    }
+  }, [id, pluginConfigManager, toast, updateProjectPluginConfigs])
+
+  const prepareConfigUpload = useCallback(
+    (pluginId: string, definitionId: string, path: string) => {
+      setConfigUploadPlugin(pluginId)
+      setConfigUploadDefinition(definitionId)
+      if (path) {
+        setConfigUploadPath(path)
+      }
+      configUploadFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    },
+    [],
+  )
+
+  useEffect(() => {
+    if (configUploadPlugin && !pluginDefinitionOptions[configUploadPlugin]) {
+      setConfigUploadPlugin('')
+      setConfigUploadDefinition('')
+    }
+  }, [configUploadPlugin, pluginDefinitionOptions])
 
   const { run: requestStopRun } = useAsyncAction(
     async (target: RunJob) => stopRunJob(target.id),
@@ -555,13 +854,20 @@ useEffect(() => {
         const configs = await uploadProjectConfig(id, {
           path: configUploadPath.trim(),
           file: configUploadFile,
+          pluginId: configUploadPlugin.trim() ? configUploadPlugin.trim() : undefined,
+          definitionId: configUploadDefinition.trim() ? configUploadDefinition.trim() : undefined,
         })
         setConfigFiles(configs)
         setConfigsError(null)
         setConfigUploadPath('')
         setConfigUploadFile(null)
+        setConfigUploadPlugin('')
+        setConfigUploadDefinition('')
         if (event.currentTarget instanceof HTMLFormElement) {
           event.currentTarget.reset()
+        }
+        if (pluginConfigManager && configUploadPlugin && pluginConfigManager.pluginId === configUploadPlugin) {
+          void refreshPluginConfigManager()
         }
       } catch (err) {
         setConfigsError(err instanceof Error ? err.message : 'Failed to upload config file.')
@@ -569,7 +875,15 @@ useEffect(() => {
         setConfigUploadBusy(false)
       }
     },
-    [configUploadFile, configUploadPath, id],
+    [
+      configUploadDefinition,
+      configUploadFile,
+      configUploadPath,
+      configUploadPlugin,
+      id,
+      pluginConfigManager,
+      refreshPluginConfigManager,
+    ],
   )
 
   const handleEditConfig = useCallback(
@@ -1164,6 +1478,13 @@ useEffect(() => {
                               >
                                 Remove
                               </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              onClick={() => void openPluginConfigManager(plugin.id)}
+                            >
+                              Manage config paths
+                            </Button>
                             </div>
                           </li>
                         )
@@ -1186,6 +1507,235 @@ useEffect(() => {
                     page.
                   </p>
                 </ContentSection>
+
+                {pluginConfigManager && (
+                  <ContentSection as="article" className="plugin-config-manager">
+                    <header>
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: '1rem',
+                        }}
+                      >
+                        <div>
+                          <h3>
+                            Manage Config Paths · {pluginConfigManager.pluginId}{' '}
+                            <span className="muted">v{pluginConfigManager.pluginVersion ?? 'latest'}</span>
+                          </h3>
+                          <p className="muted">
+                            Define per-project config file paths and requirements. These mappings drive uploads,
+                            manifests, and status indicators.
+                          </p>
+                        </div>
+                        <div className="dev-buttons">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            onClick={() => void refreshPluginConfigManager()}
+                            disabled={pluginConfigManager.busy || pluginConfigManager.saving}
+                          >
+                            Refresh
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            onClick={closePluginConfigManager}
+                            disabled={pluginConfigManager.saving}
+                          >
+                            Close
+                          </Button>
+                        </div>
+                      </div>
+                    </header>
+
+                    {pluginConfigManager.error && <p className="error-text">{pluginConfigManager.error}</p>}
+                    {pluginConfigManager.busy && <p className="muted">Loading plugin config paths…</p>}
+
+                    {!pluginConfigManager.busy && (
+                      <>
+                        <div className="config-definition-list">
+                          {pluginConfigManager.drafts.length === 0 && (
+                            <p className="muted">No config mappings yet. Add a custom entry or define paths in the library.</p>
+                          )}
+                          {pluginConfigManager.drafts.map((draft, index) => (
+                            <div key={draft.key} className="config-definition-card">
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <div>
+                                  <strong>{draft.label || draft.definitionId}</strong>{' '}
+                                  {draft.source === 'custom' && <Badge variant="accent">Custom</Badge>}{' '}
+                                  <span className="muted">#{index + 1}</span>
+                                </div>
+                                <div className="dev-buttons">
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    onClick={() =>
+                                      prepareConfigUpload(
+                                        pluginConfigManager.pluginId,
+                                        draft.definitionId,
+                                        draft.path || draft.defaultPath,
+                                      )
+                                    }
+                                  >
+                                    Upload file
+                                  </Button>
+                                  {draft.source === 'custom' && (
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      onClick={() => removePluginConfigDraft(draft.key)}
+                                      disabled={pluginConfigManager.saving}
+                                    >
+                                      Remove
+                                    </Button>
+                                  )}
+                                  {draft.uploaded && (
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      onClick={async () => {
+                                        if (!id) return
+                                        if (
+                                          !window.confirm(
+                                            `Delete config file ${draft.uploaded?.path ?? draft.path}? This cannot be undone.`,
+                                          )
+                                        ) {
+                                          return
+                                        }
+                                        try {
+                                          const next = await deleteProjectConfigFile(
+                                            id,
+                                            draft.uploaded?.path ?? draft.path,
+                                          )
+                                          setConfigFiles(next)
+                                          void refreshPluginConfigManager()
+                                          toast({
+                                            title: 'Config deleted',
+                                            description: `${draft.uploaded?.path ?? draft.path} removed from project.`,
+                                            variant: 'warning',
+                                          })
+                                        } catch (err) {
+                                          toast({
+                                            title: 'Delete failed',
+                                            description:
+                                              err instanceof Error ? err.message : 'Failed to delete config file.',
+                                            variant: 'danger',
+                                          })
+                                        }
+                                      }}
+                                      disabled={pluginConfigManager.saving}
+                                    >
+                                      Delete file
+                                    </Button>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="form-grid" style={{ marginTop: '0.75rem' }}>
+                                <div className="field">
+                                  <label htmlFor={`plugin-config-path-${draft.key}`}>Resolved path</label>
+                                  <input
+                                    id={`plugin-config-path-${draft.key}`}
+                                    value={draft.path}
+                                    onChange={(event) =>
+                                      updatePluginConfigDraft(draft.key, { path: event.target.value })
+                                    }
+                                    placeholder={draft.defaultPath || 'plugins/example/config.yml'}
+                                    disabled={pluginConfigManager.saving}
+                                  />
+                                  {draft.defaultPath && draft.defaultPath !== draft.path && (
+                                    <p className="muted">Default: {draft.defaultPath}</p>
+                                  )}
+                                </div>
+                                <div className="field">
+                                  <label htmlFor={`plugin-config-requirement-${draft.key}`}>Requirement</label>
+                                  <select
+                                    id={`plugin-config-requirement-${draft.key}`}
+                                    value={draft.requirement}
+                                    onChange={(event) =>
+                                      updatePluginConfigDraft(draft.key, {
+                                        requirement: event.target.value as PluginConfigRequirement,
+                                      })
+                                    }
+                                    disabled={pluginConfigManager.saving}
+                                  >
+                                    <option value="required">Required</option>
+                                    <option value="optional">Optional</option>
+                                    <option value="generated">Generated</option>
+                                  </select>
+                                </div>
+                                <div className="field">
+                                  <label htmlFor={`plugin-config-notes-${draft.key}`}>Notes</label>
+                                  <input
+                                    id={`plugin-config-notes-${draft.key}`}
+                                    value={draft.notes}
+                                    onChange={(event) =>
+                                      updatePluginConfigDraft(draft.key, { notes: event.target.value })
+                                    }
+                                    placeholder="Optional guidance"
+                                    disabled={pluginConfigManager.saving}
+                                  />
+                                </div>
+                              </div>
+
+                              <div className="config-definition-actions">
+                                {draft.uploaded ? (
+                                  <span className="muted">
+                                    Uploaded {formatBytes(draft.uploaded.size)} ·{' '}
+                                    {new Date(draft.uploaded.modifiedAt).toLocaleString()}
+                                  </span>
+                                ) : draft.missing ? (
+                                  <span className="muted">Not uploaded yet</span>
+                                ) : (
+                                  <span className="muted">&nbsp;</span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="form-actions" style={{ marginTop: '1.5rem', display: 'flex', gap: '1rem' }}>
+                          <Button
+                            type="button"
+                            variant="primary"
+                            disabled={pluginConfigManager.saving}
+                            onClick={() => void handleSavePluginConfigManager()}
+                          >
+                            {pluginConfigManager.saving ? 'Saving…' : 'Save mappings'}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            onClick={addCustomPluginConfigDraft}
+                            disabled={pluginConfigManager.saving}
+                          >
+                            Add custom config
+                          </Button>
+                        </div>
+
+                        {pluginConfigManager.uploads.length > 0 && (
+                          <div style={{ marginTop: '1.5rem' }}>
+                            <h4>Other uploaded files</h4>
+                            <ul className="project-list">
+                              {pluginConfigManager.uploads.map((upload) => (
+                                <li key={upload.path}>
+                                  <div>
+                                    <strong>{upload.path}</strong>
+                                    <p className="muted">
+                                      {formatBytes(upload.size)} · Updated {new Date(upload.modifiedAt).toLocaleString()}
+                                    </p>
+                                  </div>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </ContentSection>
+                )}
               </div>
             </TabPanel>
 
@@ -1195,8 +1745,73 @@ useEffect(() => {
                   <header>
                     <h3>Plugin Config Files</h3>
                   </header>
-                  <form className="page-form" onSubmit={handleUploadConfig}>
-                    <div className="form-grid">
+                  <form
+                    ref={configUploadFormRef}
+                    className="page-form config-upload-form"
+                    onSubmit={handleUploadConfig}
+                  >
+                    <div className="stacked-fields">
+                      <div className="field">
+                        <label htmlFor="config-upload-plugin">Plugin (optional)</label>
+                        <select
+                          id="config-upload-plugin"
+                          value={configUploadPlugin}
+                          onChange={(event) => {
+                            const value = event.target.value
+                            setConfigUploadPlugin(value)
+                            if (value) {
+                              const options = pluginDefinitionOptions[value] ?? []
+                              const first = options[0]
+                              setConfigUploadDefinition(first ? first.definitionId : '')
+                              if (first?.path && (!configUploadPath || configUploadPath.trim().length === 0)) {
+                                setConfigUploadPath(first.path)
+                              }
+                            } else {
+                              setConfigUploadDefinition('')
+                            }
+                          }}
+                        >
+                          <option value="">No association</option>
+                          {(project?.plugins ?? []).map((plugin) => (
+                            <option key={plugin.id} value={plugin.id}>
+                              {plugin.id}
+                              {plugin.configMappings && plugin.configMappings.length > 0
+                                ? ` (${plugin.configMappings.length})`
+                                : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="field">
+                        <label htmlFor="config-upload-definition">Config mapping</label>
+                        <select
+                          id="config-upload-definition"
+                          value={configUploadDefinition}
+                          onChange={(event) => {
+                            const value = event.target.value
+                            setConfigUploadDefinition(value)
+                            const options = pluginDefinitionOptions[configUploadPlugin] ?? []
+                            const selected = options.find((option) => option.definitionId === value)
+                            if (
+                              selected?.path &&
+                              (!configUploadPath || configUploadPath.trim().length === 0)
+                            ) {
+                              setConfigUploadPath(selected.path)
+                            }
+                          }}
+                          disabled={!configUploadPlugin || (pluginDefinitionOptions[configUploadPlugin] ?? []).length === 0}
+                        >
+                          <option value="">None</option>
+                          {(pluginDefinitionOptions[configUploadPlugin] ?? []).map((option) => (
+                            <option key={option.definitionId} value={option.definitionId}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                        {selectedDefinition?.path && (
+                          <p className="muted">Suggested path: {selectedDefinition.path}</p>
+                        )}
+                      </div>
                       <div className="field">
                         <label htmlFor="config-upload-path">Relative path</label>
                         <input
@@ -1215,7 +1830,7 @@ useEffect(() => {
                         />
                       </div>
                     </div>
-                    <div className="form-actions">
+                    <div className="config-upload-actions">
                       <Button type="submit" variant="ghost" disabled={configUploadBusy}>
                         {configUploadBusy ? 'Uploading…' : 'Upload config'}
                       </Button>
@@ -1251,6 +1866,12 @@ useEffect(() => {
                             <p className="muted">
                               {formatBytes(file.size)} · Updated {new Date(file.modifiedAt).toLocaleString()}
                             </p>
+                            {file.pluginId && (
+                              <p className="muted">
+                                Plugin: {file.pluginId}
+                                {file.definitionId ? ` · ${file.definitionId}` : ''}
+                              </p>
+                            )}
                           </div>
                           <div className="dev-buttons">
                             <Button
@@ -1259,6 +1880,37 @@ useEffect(() => {
                               onClick={() => void handleEditConfig(file.path)}
                             >
                               Edit
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              onClick={async () => {
+                                if (!id) return
+                                if (!window.confirm(`Delete config file ${file.path}? This cannot be undone.`)) {
+                                  return
+                                }
+                                try {
+                                  const next = await deleteProjectConfigFile(id, file.path)
+                                  setConfigFiles(next)
+                                  if (pluginConfigManager) {
+                                    void refreshPluginConfigManager()
+                                  }
+                                  toast({
+                                    title: 'Config deleted',
+                                    description: `${file.path} removed from project.`,
+                                    variant: 'warning',
+                                  })
+                                } catch (err) {
+                                  toast({
+                                    title: 'Delete failed',
+                                    description:
+                                      err instanceof Error ? err.message : 'Failed to delete config file.',
+                                    variant: 'danger',
+                                  })
+                                }
+                              }}
+                            >
+                              Delete
                             </Button>
                           </div>
                         </li>

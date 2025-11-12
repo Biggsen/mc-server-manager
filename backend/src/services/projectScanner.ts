@@ -63,7 +63,7 @@ function uniqueBy<T>(items: T[], key: (item: T) => string): T[] {
 
 export interface ScannedAssets {
   plugins: Array<{ id: string; version: string; sha256: string }>;
-  configs: Array<{ path: string; sha256: string }>;
+  configs: Array<{ path: string; sha256: string; pluginId?: string; definitionId?: string }>;
 }
 
 export async function scanProjectAssets(project: StoredProject): Promise<ScannedAssets> {
@@ -124,6 +124,16 @@ export async function scanProjectAssets(project: StoredProject): Promise<Scanned
     }),
   );
 
+  const mappingIndex = new Map<string, { pluginId: string; definitionId?: string }>();
+  for (const plugin of project.plugins ?? []) {
+    for (const mapping of plugin.configMappings ?? []) {
+      const resolvedPath = mapping.path?.trim();
+      if (resolvedPath) {
+        mappingIndex.set(resolvedPath, { pluginId: plugin.id, definitionId: mapping.definitionId });
+      }
+    }
+  }
+
   const configs = await Promise.all(
     configEntries.map(async (entry) => {
       const output = entry.output ?? "";
@@ -141,9 +151,13 @@ export async function scanProjectAssets(project: StoredProject): Promise<Scanned
         hash = computeHashFromString(output);
       }
 
+      const mapped = output ? mappingIndex.get(output) : undefined;
+
       return {
         path: output || entry.template || "unknown",
         sha256: hash ?? computeHashFromString(JSON.stringify(entry)),
+        pluginId: mapped?.pluginId,
+        definitionId: mapped?.definitionId,
       };
     }),
   );

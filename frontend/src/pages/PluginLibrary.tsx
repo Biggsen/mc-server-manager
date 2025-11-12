@@ -5,8 +5,11 @@ import {
   fetchPluginLibrary,
   deleteLibraryPlugin,
   fetchProjects,
+  updateLibraryPluginConfigs,
   type StoredPluginRecord,
   type ProjectSummary,
+  type PluginConfigDefinition,
+  type PluginConfigRequirement,
 } from '../lib/api'
 import { Button } from '../components/ui'
 import { ContentSection } from '../components/layout'
@@ -18,6 +21,43 @@ function getPluginSourceKind(plugin: StoredPluginRecord): 'download' | 'upload' 
     return 'upload'
   }
   return 'download'
+}
+
+type ConfigDefinitionDraft = {
+  key: string
+  id: string
+  path: string
+  requirement: PluginConfigRequirement
+  label: string
+  description: string
+}
+
+const requirementOptions: { value: PluginConfigRequirement; label: string }[] = [
+  { value: 'required', label: 'Required' },
+  { value: 'optional', label: 'Optional' },
+  { value: 'generated', label: 'Generated' },
+]
+
+function definitionToDraft(definition: PluginConfigDefinition, index: number): ConfigDefinitionDraft {
+  return {
+    key: `${definition.id ?? 'definition'}-${index}-${Math.random().toString(36).slice(2)}`,
+    id: definition.id ?? '',
+    path: definition.path ?? '',
+    label: definition.label ?? '',
+    description: definition.description ?? '',
+    requirement: definition.requirement ?? 'optional',
+  }
+}
+
+function createEmptyDraft(): ConfigDefinitionDraft {
+  return {
+    key: `draft-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    id: '',
+    path: '',
+    label: '',
+    description: '',
+    requirement: 'optional',
+  }
 }
 
 const sourceLabel: Record<'download' | 'upload', string> = {
@@ -34,6 +74,13 @@ function PluginLibrary() {
   const [query, setQuery] = useState('')
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all')
   const [projectFilter, setProjectFilter] = useState<'all' | string>('all')
+  const [configEditor, setConfigEditor] = useState<{
+    plugin: StoredPluginRecord
+    drafts: ConfigDefinitionDraft[]
+    busy: boolean
+    error: string | null
+    touched: boolean
+  } | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -298,12 +345,292 @@ function PluginLibrary() {
                     >
                       Delete
                     </button>
+                    <button
+                      type="button"
+                      className="ghost"
+                      onClick={() => {
+                        const drafts: ConfigDefinitionDraft[] = (plugin.configDefinitions ?? []).map(
+                          (definition, index) => definitionToDraft(definition, index),
+                        )
+                        setConfigEditor({
+                          plugin,
+                          drafts,
+                          busy: false,
+                          error: null,
+                          touched: false,
+                        })
+                      }}
+                    >
+                      Manage config paths
+                    </button>
                   </td>
                 </tr>
               )
             })}
           </tbody>
         </table>
+      )}
+
+      {configEditor && (
+        <div className="library-config-editor">
+          <ContentSection as="article">
+            <header>
+              <div style={{ display: 'flex', gap: '1rem', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <h3>
+                    Manage Config Paths · {configEditor.plugin.id} {configEditor.plugin.version}
+                  </h3>
+                  <p className="muted">
+                    Define expected config files for this plugin. Paths are relative to project root.
+                  </p>
+                </div>
+                <div className="dev-buttons">
+                  <Button
+                    variant="ghost"
+                    onClick={() => setConfigEditor(null)}
+                    disabled={configEditor.busy}
+                  >
+                    Close
+                  </Button>
+                </div>
+              </div>
+            </header>
+
+            {configEditor.error && <p className="error-text">{configEditor.error}</p>}
+
+            <div className="config-definition-list">
+              {configEditor.drafts.length === 0 && (
+                <p className="muted">No config paths defined yet. Add one to get started.</p>
+              )}
+              {configEditor.drafts.map((draft, index) => (
+                <div key={draft.key} className="config-definition-card">
+                  <div className="form-grid">
+                    <div className="field">
+                      <label htmlFor={`config-label-${draft.key}`}>Label</label>
+                      <input
+                        id={`config-label-${draft.key}`}
+                        value={draft.label}
+                        onChange={(event) => {
+                          const value = event.target.value
+                          setConfigEditor((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  touched: true,
+                                  drafts: prev.drafts.map((item) =>
+                                    item.key === draft.key ? { ...item, label: value } : item,
+                                  ),
+                                }
+                              : prev,
+                          )
+                        }}
+                        placeholder="WorldGuard regions"
+                      />
+                    </div>
+                    <div className="field">
+                      <label htmlFor={`config-path-${draft.key}`}>Relative path</label>
+                      <input
+                        id={`config-path-${draft.key}`}
+                        value={draft.path}
+                        onChange={(event) => {
+                          const value = event.target.value
+                          setConfigEditor((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  touched: true,
+                                  drafts: prev.drafts.map((item) =>
+                                    item.key === draft.key ? { ...item, path: value } : item,
+                                  ),
+                                }
+                              : prev,
+                          )
+                        }}
+                        placeholder="plugins/WorldGuard/worlds/world/regions.yml"
+                        required
+                      />
+                    </div>
+                    <div className="field">
+                      <label htmlFor={`config-requirement-${draft.key}`}>Requirement</label>
+                      <select
+                        id={`config-requirement-${draft.key}`}
+                        value={draft.requirement}
+                        onChange={(event) => {
+                          const value = event.target.value as PluginConfigRequirement
+                          setConfigEditor((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  touched: true,
+                                  drafts: prev.drafts.map((item) =>
+                                    item.key === draft.key ? { ...item, requirement: value } : item,
+                                  ),
+                                }
+                              : prev,
+                          )
+                        }}
+                      >
+                        {requirementOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="field">
+                      <label htmlFor={`config-description-${draft.key}`}>Description</label>
+                      <input
+                        id={`config-description-${draft.key}`}
+                        value={draft.description}
+                        onChange={(event) => {
+                          const value = event.target.value
+                          setConfigEditor((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  touched: true,
+                                  drafts: prev.drafts.map((item) =>
+                                    item.key === draft.key ? { ...item, description: value } : item,
+                                  ),
+                                }
+                              : prev,
+                          )
+                        }}
+                        placeholder="Optional details for teammates"
+                      />
+                    </div>
+                  </div>
+                  <div className="config-definition-actions">
+                    <span className="muted">#{index + 1}</span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={() =>
+                        setConfigEditor((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                touched: true,
+                                drafts: prev.drafts.filter((item) => item.key !== draft.key),
+                              }
+                            : prev,
+                        )
+                      }
+                      disabled={configEditor.busy}
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="form-actions" style={{ marginTop: '1rem' }}>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() =>
+                  setConfigEditor((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          touched: true,
+                          drafts: [
+                            ...prev.drafts,
+                            createEmptyDraft(),
+                          ],
+                        }
+                      : prev,
+                  )
+                }
+                disabled={configEditor.busy}
+              >
+                Add config path
+              </Button>
+            </div>
+
+            <div className="form-actions" style={{ marginTop: '1.5rem', display: 'flex', gap: '1rem' }}>
+              <Button
+                type="button"
+                variant="primary"
+                disabled={configEditor.busy}
+                onClick={async () => {
+                  if (!configEditor) return
+                  const sanitized: PluginConfigDefinition[] = []
+                  for (const draft of configEditor.drafts) {
+                    const path = draft.path.trim()
+                    if (!path) {
+                      setConfigEditor((prev) =>
+                        prev ? { ...prev, error: 'Each config must include a relative path.' } : prev,
+                      )
+                      return
+                    }
+                    sanitized.push({
+                      id: draft.id.trim(),
+                      path,
+                      label: draft.label.trim() || undefined,
+                      description: draft.description.trim() || undefined,
+                      requirement: draft.requirement,
+                    })
+                  }
+                  try {
+                    setConfigEditor((prev) => (prev ? { ...prev, busy: true, error: null } : prev))
+                    const updated = await updateLibraryPluginConfigs(configEditor.plugin.id, configEditor.plugin.version, {
+                      configDefinitions: sanitized,
+                    })
+                    setPlugins((prev) =>
+                      prev.map((plugin) =>
+                        plugin.id === updated.id && plugin.version === updated.version
+                          ? { ...updated }
+                          : plugin,
+                      ),
+                    )
+                    setConfigEditor({
+                      plugin: updated,
+                      drafts: (updated.configDefinitions ?? []).map((definition, index) =>
+                        definitionToDraft(definition, index),
+                      ),
+                      busy: false,
+                      error: null,
+                      touched: false,
+                    })
+                  } catch (err) {
+                    setConfigEditor((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            busy: false,
+                            error: err instanceof Error ? err.message : 'Failed to save config paths.',
+                          }
+                        : prev,
+                    )
+                  }
+                }}
+              >
+                {configEditor.busy ? 'Saving…' : 'Save changes'}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={configEditor.busy}
+                onClick={() => {
+                  const plugin = configEditor.plugin
+                  setConfigEditor({
+                    plugin,
+                    drafts: (plugin.configDefinitions ?? []).map((definition, index) =>
+                      definitionToDraft(definition, index),
+                    ),
+                    busy: false,
+                    error: null,
+                    touched: false,
+                  })
+                }}
+              >
+                Reset
+              </Button>
+            </div>
+          </ContentSection>
+        </div>
       )}
     </ContentSection>
   )

@@ -315,6 +315,33 @@ function GenerateProfile() {
   const [saveMessage, setSaveMessage] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
 
+  const missingRequiredConfigs = useMemo(() => {
+    const missing: Array<{ pluginId: string; definitionId: string; path: string }> = []
+    if (!project?.plugins) {
+      return missing
+    }
+    const configPaths = new Set(configs.map((config) => config.path))
+    for (const plugin of project.plugins) {
+      for (const mapping of plugin.configMappings ?? []) {
+        if (mapping.requirement !== 'required') {
+          continue
+        }
+        const path = (mapping.path ?? '').trim()
+        if (!path) {
+          continue
+        }
+        if (!configPaths.has(path)) {
+          missing.push({
+            pluginId: plugin.id,
+            definitionId: mapping.definitionId,
+            path,
+          })
+        }
+      }
+    }
+    return missing
+  }, [project?.plugins, configs])
+
   useEffect(() => {
     if (!id) {
       setError('Project identifier missing')
@@ -484,6 +511,22 @@ function GenerateProfile() {
           </Link>
         </div>
       </header>
+
+      {missingRequiredConfigs.length > 0 && (
+        <div className="alert-block alert-block--warning">
+          <strong>Missing required plugin configs</strong>
+          <p className="muted">
+            Upload these files before generating a profile to keep builds in sync.
+          </p>
+          <ul>
+            {missingRequiredConfigs.map((item) => (
+              <li key={`${item.pluginId}:${item.definitionId}`}>
+                <code>{item.path}</code> · {item.pluginId} ({item.definitionId})
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <form
         className="page-form"

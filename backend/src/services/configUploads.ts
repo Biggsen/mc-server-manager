@@ -1,5 +1,5 @@
 import { createHash } from "crypto";
-import { mkdir, readFile, readdir, stat, writeFile } from "fs/promises";
+import { mkdir, readFile, readdir, stat, unlink, writeFile } from "fs/promises";
 import { dirname, join, posix, relative as pathRelative } from "path";
 import type { StoredProject } from "../types/storage";
 import { resolveProjectRoot } from "./projectFiles";
@@ -32,6 +32,8 @@ export interface ConfigFileSummary {
   size: number;
   modifiedAt: string;
   sha256?: string;
+  pluginId?: string;
+  definitionId?: string;
 }
 
 export interface ConfigFileContent {
@@ -90,9 +92,26 @@ export async function readUploadedConfigFile(
   };
 }
 
+export async function deleteUploadedConfigFile(
+  project: StoredProject,
+  relativePath: string,
+): Promise<void> {
+  const sanitized = sanitizeRelativePath(relativePath);
+  const target = join(getUploadsRoot(project), sanitized);
+  await unlink(target);
+}
+
 export async function listUploadedConfigFiles(project: StoredProject): Promise<ConfigFileSummary[]> {
   const root = getUploadsRoot(project);
   const summaries: ConfigFileSummary[] = [];
+  const metadataMap = new Map<string, { pluginId?: string; definitionId?: string; sha256?: string }>();
+  for (const entry of project.configs ?? []) {
+    metadataMap.set(entry.path, {
+      pluginId: entry.pluginId,
+      definitionId: entry.definitionId,
+      sha256: entry.sha256,
+    });
+  }
 
   async function walk(current: string): Promise<void> {
     let entries;
@@ -119,10 +138,14 @@ export async function listUploadedConfigFiles(project: StoredProject): Promise<C
         }
         const details = await stat(entryPath);
         const relative = posix.normalize(pathRelative(root, entryPath).replace(/\\/g, "/"));
+        const metadata = metadataMap.get(relative);
         summaries.push({
           path: relative,
           size: details.size,
           modifiedAt: details.mtime.toISOString(),
+          sha256: metadata?.sha256,
+          pluginId: metadata?.pluginId,
+          definitionId: metadata?.definitionId,
         });
       }),
     );

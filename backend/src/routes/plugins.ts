@@ -6,8 +6,18 @@ import { existsSync } from "fs";
 import { mkdir, writeFile } from "fs/promises";
 import { join, relative } from "path";
 import { fetchPluginVersions, searchPlugins } from "../services/pluginCatalog";
-import { deleteStoredPlugin, listStoredPlugins, upsertStoredPlugin } from "../storage/pluginsStore";
-import type { PluginProvider, PluginSourceReference } from "../types/plugins";
+import {
+  deleteStoredPlugin,
+  findStoredPlugin,
+  listStoredPlugins,
+  upsertStoredPlugin,
+} from "../storage/pluginsStore";
+import type {
+  PluginConfigDefinition,
+  PluginConfigRequirement,
+  PluginProvider,
+  PluginSourceReference,
+} from "../types/plugins";
 
 const router = Router();
 
@@ -34,6 +44,117 @@ function toRelativeCachePath(absolutePath: string): string {
 
 function toPosixPath(pathString: string): string {
   return pathString.replace(/\\/g, "/");
+}
+
+function normalizeConfigPath(input: unknown): string {
+  if (typeof input !== "string") {
+    throw new Error("config path must be a string");
+  }
+  let normalized = input.replace(/\\/g, "/").trim();
+  if (normalized.startsWith("/")) {
+    normalized = normalized.slice(1);
+  }
+  if (!normalized) {
+    throw new Error("config path cannot be empty");
+  }
+  if (normalized.includes("..")) {
+    throw new Error("config path cannot contain traversal segments");
+  }
+  return normalized;
+}
+
+function slugifyConfigId(input: string): string {
+  return input
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+const CONFIG_REQUIREMENTS: PluginConfigRequirement[] = ["required", "optional", "generated"];
+
+function parseConfigDefinitions(input: unknown): PluginConfigDefinition[] | undefined {
+  if (input === undefined || input === null) {
+    return undefined;
+  }
+  const raw =
+    typeof input === "string"
+      ? (() => {
+          try {
+            return JSON.parse(input) as unknown;
+          } catch (error) {
+            throw new Error("configDefinitions must be valid JSON");
+          }
+        })()
+      : input;
+  if (!Array.isArray(raw)) {
+    throw new Error("configDefinitions must be an array");
+  }
+  const seenIds = new Set<string>();
+  const seenPaths = new Set<string>();
+  const normalized: PluginConfigDefinition[] = raw.map((entry, index) => {
+    if (typeof entry !== "object" || entry === null) {
+      throw new Error(`configDefinitions[${index}] must be an object`);
+    }
+    const candidateId =
+      typeof (entry as { id?: unknown }).id === "string"
+        ? slugifyConfigId((entry as { id: string }).id)
+        : "";
+    const candidateLabel =
+      typeof (entry as { label?: unknown }).label === "string" ? (entry as { label: string }).label : "";
+    const path = normalizeConfigPath((entry as { path?: unknown }).path);
+    const id = candidateId || slugifyConfigId(candidateLabel) || slugifyConfigId(path);
+    if (!id) {
+      throw new Error(`configDefinitions[${index}] is missing a valid id`);
+    }
+    if (seenIds.has(id)) {
+      throw new Error(`Duplicate config definition id "${id}"`);
+    }
+    if (seenPaths.has(path)) {
+      throw new Error(`Duplicate config path "${path}"`);
+    }
+    seenIds.add(id);
+    seenPaths.add(path);
+
+    let requirement: PluginConfigRequirement | undefined;
+    const incomingRequirement = (entry as { requirement?: unknown }).requirement;
+    if (incomingRequirement !== undefined) {
+      if (typeof incomingRequirement !== "string") {
+        throw new Error(`configDefinitions[${index}].requirement must be a string`);
+      }
+      const normalizedRequirement = incomingRequirement.toLowerCase() as PluginConfigRequirement;
+      if (!CONFIG_REQUIREMENTS.includes(normalizedRequirement)) {
+        throw new Error(
+          `configDefinitions[${index}].requirement must be one of ${CONFIG_REQUIREMENTS.join(", ")}`,
+        );
+      }
+      requirement = normalizedRequirement;
+    }
+
+    let tags: string[] | undefined;
+    const incomingTags = (entry as { tags?: unknown }).tags;
+    if (incomingTags !== undefined) {
+      if (!Array.isArray(incomingTags) || incomingTags.some((tag) => typeof tag !== "string")) {
+        throw new Error(`configDefinitions[${index}].tags must be an array of strings`);
+      }
+      tags = incomingTags.map((tag) => tag.trim()).filter((tag) => tag.length > 0);
+    }
+
+    const description =
+      typeof (entry as { description?: unknown }).description === "string"
+        ? (entry as { description: string }).description
+        : undefined;
+
+    return {
+      id,
+      path,
+      label: candidateLabel?.trim() ? candidateLabel.trim() : undefined,
+      requirement,
+      description: description?.trim() ? description.trim() : undefined,
+      tags,
+    };
+  });
+  return normalized;
 }
 
 async function ensurePluginCache(
@@ -73,6 +194,7 @@ router.post("/library", async (req: Request, res: Response) => {
       minecraftVersionMin,
       minecraftVersionMax,
       cachePath,
+      configDefinitions: rawConfigDefinitions,
     } = req.body ?? {};
 
     if (!pluginId || !version) {
@@ -147,6 +269,14 @@ router.post("/library", async (req: Request, res: Response) => {
           }
         : undefined;
 
+    let configDefinitions: PluginConfigDefinition[] | undefined;
+    try {
+      configDefinitions = parseConfigDefinitions(rawConfigDefinitions);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : "Invalid configDefinitions" });
+      return;
+    }
+
     const stored = await upsertStoredPlugin({
       id: pluginId,
       version,
@@ -156,6 +286,7 @@ router.post("/library", async (req: Request, res: Response) => {
       minecraftVersionMax: sourceRef?.minecraftVersionMax ?? finalMax,
       source: sourceRef,
       cachePath: cachePath ?? sourceRef?.cachePath,
+      configDefinitions,
     });
 
     const plugins = await listStoredPlugins();
@@ -172,7 +303,13 @@ router.post(
   async (req: Request, res: Response) => {
     try {
       const file = req.file;
-      const { pluginId, version, minecraftVersionMin, minecraftVersionMax } = req.body ?? {};
+      const {
+        pluginId,
+        version,
+        minecraftVersionMin,
+        minecraftVersionMax,
+        configDefinitions: rawConfigDefinitions,
+      } = req.body ?? {};
 
       if (!file) {
         res.status(400).json({ error: "Plugin file is required" });
@@ -199,6 +336,14 @@ router.post(
       const sha256 = createHash("sha256").update(file.buffer).digest("hex");
       const { cachePath } = await ensurePluginCache(pluginId, version, safeName, file.buffer);
 
+      let configDefinitions: PluginConfigDefinition[] | undefined;
+      try {
+        configDefinitions = parseConfigDefinitions(rawConfigDefinitions);
+      } catch (error) {
+        res.status(400).json({ error: error instanceof Error ? error.message : "Invalid configDefinitions" });
+        return;
+      }
+
       const stored = await upsertStoredPlugin({
         id: pluginId,
         version,
@@ -216,6 +361,7 @@ router.post(
           cachePath,
         },
         cachePath,
+        configDefinitions,
       });
 
       const plugins = await listStoredPlugins();
@@ -246,6 +392,40 @@ router.delete("/library/:id/:version", async (req: Request, res: Response) => {
   } catch (error) {
     console.error("Failed to delete stored plugin", error);
     res.status(500).json({ error: "Failed to delete stored plugin" });
+  }
+});
+
+router.put("/library/:id/:version/configs", async (req: Request, res: Response) => {
+  try {
+    const { id, version } = req.params;
+    if (!id || !version) {
+      res.status(400).json({ error: "Plugin id and version are required" });
+      return;
+    }
+
+    const existing = await findStoredPlugin(id, version);
+    if (!existing) {
+      res.status(404).json({ error: "Plugin not found in library" });
+      return;
+    }
+
+    let configDefinitions: PluginConfigDefinition[] | undefined;
+    try {
+      configDefinitions = parseConfigDefinitions(req.body?.configDefinitions ?? []);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : "Invalid configDefinitions" });
+      return;
+    }
+
+    const updated = await upsertStoredPlugin({
+      ...existing,
+      configDefinitions,
+    });
+
+    res.json({ plugin: updated });
+  } catch (error) {
+    console.error("Failed to update plugin config definitions", error);
+    res.status(500).json({ error: "Failed to update plugin config definitions" });
   }
 });
 

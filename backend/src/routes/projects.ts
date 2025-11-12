@@ -17,7 +17,14 @@ import {
 } from "../storage/projectsStore";
 import type { ProjectSummary } from "../types/projects";
 import type { ManifestMetadata, RepoMetadata, StoredProject } from "../types/storage";
-import type { PluginProvider, PluginSourceReference } from "../types/plugins";
+import type {
+  PluginProvider,
+  PluginSourceReference,
+  PluginConfigDefinition,
+  PluginConfigRequirement,
+  ProjectPlugin,
+  ProjectPluginConfigMapping,
+} from "../types/plugins";
 import { renderManifest, type ManifestOverrides } from "../services/manifestService";
 import { enqueueBuild } from "../services/buildQueue";
 import { scanProjectAssets } from "../services/projectScanner";
@@ -30,13 +37,15 @@ import {
   writeProjectFileBuffer,
 } from "../services/projectFiles";
 import { enqueueRun, listRuns, resetProjectWorkspace } from "../services/runQueue";
-import { upsertStoredPlugin } from "../storage/pluginsStore";
+import { findStoredPlugin, upsertStoredPlugin } from "../storage/pluginsStore";
 import { deleteProjectResources } from "../services/projectDeletion";
 import {
   listUploadedConfigFiles,
   overwriteUploadedConfigFile,
   readUploadedConfigFile,
   saveUploadedConfigFile,
+  deleteUploadedConfigFile,
+  type ConfigFileSummary,
 } from "../services/configUploads";
 
 const router = Router();
@@ -56,6 +65,267 @@ const configUpload = multer({
 
 function sanitizeFileName(name: string): string {
   return name.replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
+function sanitizeConfigPathStrict(path: string): string {
+  let normalized = path.replace(/\\/g, "/").trim();
+  if (normalized.startsWith("/")) {
+    normalized = normalized.slice(1);
+  }
+  if (!normalized) {
+    throw new Error("Config path cannot be empty");
+  }
+  if (normalized.includes("..")) {
+    throw new Error("Config path cannot contain traversal segments");
+  }
+  return normalized;
+}
+
+function sanitizeOptionalConfigPath(input: unknown): string | undefined {
+  if (input === undefined || input === null) {
+    return undefined;
+  }
+  if (typeof input !== "string") {
+    throw new Error("Config path override must be a string");
+  }
+  const trimmed = input.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  return sanitizeConfigPathStrict(trimmed);
+}
+
+const PLUGIN_CONFIG_REQUIREMENTS: PluginConfigRequirement[] = ["required", "optional", "generated"];
+
+function normalizeRequirement(
+  value: unknown,
+  fallback: PluginConfigRequirement = "optional",
+): PluginConfigRequirement {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return fallback;
+  }
+  const normalized = value.trim().toLowerCase() as PluginConfigRequirement;
+  if (!PLUGIN_CONFIG_REQUIREMENTS.includes(normalized)) {
+    throw new Error(
+      `Requirement must be one of ${PLUGIN_CONFIG_REQUIREMENTS.join(", ")}`,
+    );
+  }
+  return normalized;
+}
+
+interface PluginConfigDefinitionView {
+  id: string;
+  source: "library" | "custom";
+  label?: string;
+  description?: string;
+  tags?: string[];
+  defaultPath: string;
+  resolvedPath: string;
+  requirement: PluginConfigRequirement;
+  notes?: string;
+  mapping?: ProjectPluginConfigMapping;
+  uploaded?: ConfigFileSummary;
+  missing: boolean;
+}
+
+function buildPluginConfigViews(
+  pluginId: string,
+  plugin: ProjectPlugin,
+  libraryDefinitions: PluginConfigDefinition[],
+  summaries: ConfigFileSummary[],
+): { definitions: PluginConfigDefinitionView[]; unmatchedUploads: ConfigFileSummary[] } {
+  const definitionMap = new Map<string, PluginConfigDefinition>();
+  for (const definition of libraryDefinitions) {
+    definitionMap.set(definition.id, definition);
+  }
+  const mappings = plugin.configMappings ?? [];
+  const mappingById = new Map<string, ProjectPluginConfigMapping>();
+  for (const mapping of mappings) {
+    mappingById.set(mapping.definitionId, mapping);
+  }
+
+  const relevantDefinitionIds = new Set<string>([
+    ...libraryDefinitions.map((definition) => definition.id),
+    ...mappings.map((mapping) => mapping.definitionId),
+  ]);
+
+  const pluginSummaries = summaries.filter((summary) => {
+    if (summary.pluginId === pluginId) {
+      return true;
+    }
+    if (summary.definitionId && relevantDefinitionIds.has(summary.definitionId)) {
+      return true;
+    }
+    return false;
+  });
+
+  const summaryByDefinition = new Map<string, ConfigFileSummary>();
+  const summaryByPath = new Map<string, ConfigFileSummary[]>();
+  for (const summary of pluginSummaries) {
+    if (summary.definitionId) {
+      summaryByDefinition.set(summary.definitionId, summary);
+    }
+    const bucket = summaryByPath.get(summary.path);
+    if (bucket) {
+      bucket.push(summary);
+    } else {
+      summaryByPath.set(summary.path, [summary]);
+    }
+  }
+
+  const matchedSummaries = new Set<ConfigFileSummary>();
+
+  const resolveUpload = (definitionId: string, resolvedPath: string): ConfigFileSummary | undefined => {
+    const byId = summaryByDefinition.get(definitionId);
+    if (byId) {
+      return byId;
+    }
+    const bucket = summaryByPath.get(resolvedPath);
+    if (bucket && bucket.length > 0) {
+      const directMatch = bucket.find(
+        (summary) => summary.pluginId === pluginId || summary.pluginId === undefined,
+      );
+      return directMatch ?? bucket[0];
+    }
+    return undefined;
+  };
+
+  const views: PluginConfigDefinitionView[] = [];
+
+  for (const definition of libraryDefinitions) {
+    const mapping = mappingById.get(definition.id);
+    const resolvedPath = mapping?.path ?? definition.path;
+    const resolvedRequirement = mapping
+      ? normalizeRequirement(mapping.requirement, definition.requirement ?? "optional")
+      : normalizeRequirement(definition.requirement, "optional");
+    const uploaded = resolveUpload(definition.id, resolvedPath);
+    if (uploaded) {
+      matchedSummaries.add(uploaded);
+    }
+    views.push({
+      id: definition.id,
+      source: "library",
+      label: definition.label,
+      description: definition.description,
+      tags: definition.tags,
+      defaultPath: definition.path,
+      resolvedPath,
+      requirement: resolvedRequirement,
+      notes: mapping?.notes,
+      mapping,
+      uploaded,
+      missing: resolvedRequirement === "required" && !uploaded,
+    });
+  }
+
+  for (const mapping of mappings) {
+    if (definitionMap.has(mapping.definitionId)) {
+      continue;
+    }
+    const resolvedPath = mapping.path ?? "";
+    const resolvedRequirement = normalizeRequirement(mapping.requirement, "optional");
+    const uploaded = resolveUpload(mapping.definitionId, resolvedPath);
+    if (uploaded) {
+      matchedSummaries.add(uploaded);
+    }
+    views.push({
+      id: mapping.definitionId,
+      source: "custom",
+      label: mapping.definitionId,
+      description: undefined,
+      tags: undefined,
+      defaultPath: resolvedPath,
+      resolvedPath,
+      requirement: resolvedRequirement,
+      notes: mapping.notes,
+      mapping,
+      uploaded,
+      missing: resolvedRequirement === "required" && !uploaded,
+    });
+  }
+
+  views.sort((a, b) => a.resolvedPath.localeCompare(b.resolvedPath));
+
+  const unmatchedUploads = pluginSummaries.filter((summary) => !matchedSummaries.has(summary));
+
+  return { definitions: views, unmatchedUploads };
+}
+
+function findPluginMappingForPath(
+  project: StoredProject,
+  path: string,
+): { pluginId: string; definitionId?: string } | undefined {
+  for (const plugin of project.plugins ?? []) {
+    for (const mapping of plugin.configMappings ?? []) {
+      if (mapping.path === path) {
+        return { pluginId: plugin.id, definitionId: mapping.definitionId };
+      }
+    }
+  }
+  return undefined;
+}
+
+async function reconcilePluginConfigMetadata(
+  projectId: string,
+  project: StoredProject,
+  plugin: ProjectPlugin,
+  libraryDefinitions: PluginConfigDefinition[],
+): Promise<void> {
+  const mappings = plugin.configMappings ?? [];
+  const mappingById = new Map<string, ProjectPluginConfigMapping>();
+  for (const mapping of mappings) {
+    mappingById.set(mapping.definitionId, mapping);
+  }
+
+  const resolvedPathMap = new Map<string, { pluginId: string; definitionId: string }>();
+  for (const definition of libraryDefinitions) {
+    const mapping = mappingById.get(definition.id);
+    const resolvedPath = mapping?.path ?? definition.path;
+    if (resolvedPath) {
+      resolvedPathMap.set(resolvedPath, { pluginId: plugin.id, definitionId: definition.id });
+    }
+  }
+  for (const mapping of mappings) {
+    if (!mapping.path) {
+      continue;
+    }
+    resolvedPathMap.set(mapping.path, { pluginId: plugin.id, definitionId: mapping.definitionId });
+  }
+
+  const knownDefinitionIds = new Set<string>([
+    ...libraryDefinitions.map((definition) => definition.id),
+    ...mappings.map((mapping) => mapping.definitionId),
+  ]);
+
+  let changed = false;
+  const nextConfigs = (project.configs ?? []).map((entry) => {
+    const mappingInfo = resolvedPathMap.get(entry.path);
+    if (mappingInfo) {
+      if (entry.pluginId !== mappingInfo.pluginId || entry.definitionId !== mappingInfo.definitionId) {
+        changed = true;
+        return {
+          ...entry,
+          pluginId: mappingInfo.pluginId,
+          definitionId: mappingInfo.definitionId,
+        };
+      }
+      return entry;
+    }
+    if (entry.pluginId === plugin.id && entry.definitionId && !knownDefinitionIds.has(entry.definitionId)) {
+      changed = true;
+      const cloned: typeof entry = { ...entry };
+      delete (cloned as { definitionId?: string }).definitionId;
+      return cloned;
+    }
+    return entry;
+  });
+
+  if (!changed) {
+    return;
+  }
+
+  nextConfigs.sort((a, b) => a.path.localeCompare(b.path));
+  await setProjectAssets(projectId, { configs: nextConfigs });
 }
 
 interface RepoParseSuccess {
@@ -526,17 +796,7 @@ router.post("/:id/plugins", async (req: Request, res: Response) => {
           }
         : undefined;
 
-    const updated = await upsertProjectPlugin(id, {
-      id: pluginId,
-      version,
-      provider: sourceRef?.provider ?? resolvedProvider ?? providerValue,
-      minecraftVersionMin: sourceRef?.minecraftVersionMin ?? finalMin,
-      minecraftVersionMax: sourceRef?.minecraftVersionMax ?? finalMax,
-      cachePath: cachePath ?? sourceRef?.cachePath,
-      source: sourceRef,
-    });
-
-    await upsertStoredPlugin({
+    const stored = await upsertStoredPlugin({
       id: pluginId,
       version,
       provider: sourceRef?.provider ?? resolvedProvider ?? providerValue,
@@ -547,10 +807,37 @@ router.post("/:id/plugins", async (req: Request, res: Response) => {
       cachePath: cachePath ?? sourceRef?.cachePath,
     });
 
+    const configDefinitions = stored.configDefinitions ?? [];
+    const defaultMappings: ProjectPluginConfigMapping[] =
+      configDefinitions.map((definition) => ({
+        definitionId: definition.id,
+        path: definition.path,
+        requirement: definition.requirement,
+      })) ?? [];
+
+    const updatedProject =
+      (await upsertProjectPlugin(id, {
+        id: pluginId,
+        version,
+        provider: stored.provider ?? resolvedProvider ?? providerValue,
+        minecraftVersionMin: stored.minecraftVersionMin ?? finalMin,
+        minecraftVersionMax: stored.minecraftVersionMax ?? finalMax,
+        cachePath: cachePath ?? stored.cachePath,
+        source: stored.source ?? sourceRef,
+        configMappings: defaultMappings,
+      })) ?? project;
+
+    const updatedPlugin = updatedProject.plugins?.find((entry) => entry.id === pluginId);
+    if (updatedPlugin) {
+      await reconcilePluginConfigMetadata(id, updatedProject, updatedPlugin, configDefinitions);
+    }
+
+    const refreshedProject = (await findProject(id)) ?? updatedProject;
+
     res.status(200).json({
       project: {
         id,
-        plugins: updated?.plugins ?? [],
+        plugins: refreshedProject.plugins ?? [],
       },
     });
   } catch (error) {
@@ -600,23 +887,7 @@ router.post(
       await writeProjectFileBuffer(project, relativePath, file.buffer);
       const sha256 = createHash("sha256").update(file.buffer).digest("hex");
 
-      const updated = await upsertProjectPlugin(id, {
-        id: pluginId,
-        version,
-        provider: "custom",
-        source: {
-          provider: "custom",
-          slug: pluginId,
-          uploadPath: relativePath,
-          sha256,
-          minecraftVersionMin: normalizedMin,
-          minecraftVersionMax: normalizedMax,
-        },
-        minecraftVersionMin: normalizedMin,
-        minecraftVersionMax: normalizedMax,
-      });
-
-      await upsertStoredPlugin({
+      const stored = await upsertStoredPlugin({
         id: pluginId,
         version,
         provider: "custom",
@@ -632,11 +903,44 @@ router.post(
           minecraftVersionMax: normalizedMax,
         },
       });
+      const configDefinitions = stored.configDefinitions ?? [];
+      const defaultMappings: ProjectPluginConfigMapping[] =
+        configDefinitions.map((definition) => ({
+          definitionId: definition.id,
+          path: definition.path,
+          requirement: definition.requirement,
+        })) ?? [];
+
+      const updatedProject =
+        (await upsertProjectPlugin(id, {
+          id: pluginId,
+          version,
+          provider: stored.provider ?? "custom",
+          source: stored.source ?? {
+            provider: "custom",
+            slug: pluginId,
+            uploadPath: relativePath,
+            sha256,
+            minecraftVersionMin: normalizedMin,
+            minecraftVersionMax: normalizedMax,
+          },
+          minecraftVersionMin: stored.minecraftVersionMin ?? normalizedMin,
+          minecraftVersionMax: stored.minecraftVersionMax ?? normalizedMax,
+          cachePath: stored.cachePath,
+          configMappings: defaultMappings,
+        })) ?? project;
+
+      const updatedPlugin = updatedProject.plugins?.find((entry) => entry.id === pluginId);
+      if (updatedPlugin) {
+        await reconcilePluginConfigMetadata(id, updatedProject, updatedPlugin, configDefinitions);
+      }
+
+      const refreshedProject = (await findProject(id)) ?? updatedProject;
 
       res.status(201).json({
         project: {
           id,
-          plugins: updated?.plugins ?? [],
+          plugins: refreshedProject.plugins ?? [],
         },
       });
     } catch (error) {
@@ -836,6 +1140,168 @@ router.delete("/:id", async (req: Request, res: Response) => {
   }
 });
 
+router.get("/:id/plugins/:pluginId/configs", async (req: Request, res: Response) => {
+  try {
+    const { id, pluginId } = req.params;
+    const project = await findProject(id);
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    const plugin = project.plugins?.find((entry) => entry.id === pluginId);
+    if (!plugin) {
+      res.status(404).json({ error: "Plugin not found on project" });
+      return;
+    }
+    const stored = plugin.version ? await findStoredPlugin(plugin.id, plugin.version) : undefined;
+    const libraryDefinitions = stored?.configDefinitions ?? [];
+    const summaries = await listUploadedConfigFiles(project);
+    const { definitions, unmatchedUploads } = buildPluginConfigViews(pluginId, plugin, libraryDefinitions, summaries);
+    res.json({
+      plugin: {
+        id: plugin.id,
+        version: plugin.version,
+      },
+      libraryDefinitions,
+      mappings: plugin.configMappings ?? [],
+      definitions,
+      uploads: unmatchedUploads,
+    });
+  } catch (error) {
+    console.error("Failed to load plugin config definitions", error);
+    res.status(500).json({ error: "Failed to load plugin config definitions" });
+  }
+});
+
+router.put("/:id/plugins/:pluginId/configs", async (req: Request, res: Response) => {
+  try {
+    const { id, pluginId } = req.params;
+    const project = await findProject(id);
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    const plugin = project.plugins?.find((entry) => entry.id === pluginId);
+    if (!plugin) {
+      res.status(404).json({ error: "Plugin not found on project" });
+      return;
+    }
+
+    const stored = plugin.version ? await findStoredPlugin(plugin.id, plugin.version) : undefined;
+    const libraryDefinitions = stored?.configDefinitions ?? [];
+
+    const rawMappings = Array.isArray(req.body?.mappings) ? req.body.mappings : [];
+    if (!Array.isArray(rawMappings)) {
+      res.status(400).json({ error: "mappings must be an array" });
+      return;
+    }
+
+    const order: string[] = [];
+    const mappingById = new Map<string, ProjectPluginConfigMapping>();
+
+    for (const [index, raw] of rawMappings.entries()) {
+      if (typeof raw !== "object" || raw === null) {
+        res.status(400).json({ error: `mappings[${index}] must be an object` });
+        return;
+      }
+      const definitionIdValue =
+        typeof (raw as { definitionId?: unknown }).definitionId === "string"
+          ? (raw as { definitionId: string }).definitionId.trim()
+          : "";
+      if (!definitionIdValue) {
+        res.status(400).json({ error: `mappings[${index}].definitionId is required` });
+        return;
+      }
+
+      let pathValue: string | undefined;
+      try {
+        pathValue = sanitizeOptionalConfigPath((raw as { path?: unknown }).path);
+      } catch (error) {
+        res.status(400).json({
+          error:
+            error instanceof Error
+              ? `mappings[${index}].path: ${error.message}`
+              : `Invalid path for mappings[${index}]`,
+        });
+        return;
+      }
+
+      let requirementValue: PluginConfigRequirement | undefined;
+      if ("requirement" in (raw as Record<string, unknown>)) {
+        try {
+          requirementValue = normalizeRequirement((raw as { requirement?: unknown }).requirement, "optional");
+        } catch (error) {
+          res.status(400).json({
+            error:
+              error instanceof Error
+                ? `mappings[${index}].requirement: ${error.message}`
+                : `Invalid requirement for mappings[${index}]`,
+          });
+          return;
+        }
+      }
+
+      const notesValue =
+        typeof (raw as { notes?: unknown }).notes === "string"
+          ? (raw as { notes: string }).notes.trim() || undefined
+          : undefined;
+
+      const normalized: ProjectPluginConfigMapping = {
+        definitionId: definitionIdValue,
+        path: pathValue,
+        requirement: requirementValue,
+        notes: notesValue,
+      };
+      if (!order.includes(definitionIdValue)) {
+        order.push(definitionIdValue);
+      }
+      mappingById.set(definitionIdValue, normalized);
+    }
+
+    const normalizedMappings: ProjectPluginConfigMapping[] = order
+      .map((idValue) => mappingById.get(idValue))
+      .filter((mapping): mapping is ProjectPluginConfigMapping => Boolean(mapping));
+
+    const updatedProject =
+      (await upsertProjectPlugin(id, {
+        id: plugin.id,
+        version: plugin.version,
+        configMappings: normalizedMappings,
+      })) ?? project;
+
+    const updatedPlugin = updatedProject.plugins?.find((entry) => entry.id === pluginId);
+    if (!updatedPlugin) {
+      res.status(500).json({ error: "Failed to update plugin config mappings" });
+      return;
+    }
+
+    await reconcilePluginConfigMetadata(id, updatedProject, updatedPlugin, libraryDefinitions);
+    const finalProject = (await findProject(id)) ?? updatedProject;
+    const finalPlugin = finalProject.plugins?.find((entry) => entry.id === pluginId);
+    if (!finalPlugin) {
+      res.status(500).json({ error: "Failed to load updated plugin configuration" });
+      return;
+    }
+
+    const summaries = await listUploadedConfigFiles(finalProject);
+    const { definitions, unmatchedUploads } = buildPluginConfigViews(pluginId, finalPlugin, libraryDefinitions, summaries);
+
+    res.json({
+      plugin: {
+        id: finalPlugin.id,
+        version: finalPlugin.version,
+      },
+      libraryDefinitions,
+      mappings: finalPlugin.configMappings ?? [],
+      definitions,
+      uploads: unmatchedUploads,
+    });
+  } catch (error) {
+    console.error("Failed to update plugin config mappings", error);
+    res.status(500).json({ error: "Failed to update plugin config mappings" });
+  }
+});
+
 router.get("/:id/configs", async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
@@ -878,11 +1344,28 @@ async function updateProjectConfigMetadata(
   project: StoredProject,
   configPath: string,
   sha256: string,
+  pluginId?: string,
+  definitionId?: string,
 ): Promise<void> {
   const currentConfigs = project.configs ?? [];
   const nextConfigs = currentConfigs.filter((entry) => entry.path !== configPath);
-  nextConfigs.push({ path: configPath, sha256 });
+  const entry = {
+    path: configPath,
+    sha256,
+    pluginId,
+    definitionId,
+  };
+  nextConfigs.push(entry);
   nextConfigs.sort((a, b) => a.path.localeCompare(b.path));
+  await setProjectAssets(projectId, { configs: nextConfigs });
+}
+
+async function removeProjectConfigMetadata(projectId: string, project: StoredProject, configPath: string): Promise<void> {
+  const currentConfigs = project.configs ?? [];
+  const nextConfigs = currentConfigs.filter((entry) => entry.path !== configPath);
+  if (nextConfigs.length === currentConfigs.length) {
+    return;
+  }
   await setProjectAssets(projectId, { configs: nextConfigs });
 }
 
@@ -910,8 +1393,26 @@ router.post(
         return;
       }
 
+      const pluginIdRaw =
+        typeof req.body?.pluginId === "string" ? req.body.pluginId.trim() : "";
+      const definitionIdRaw =
+        typeof req.body?.definitionId === "string" ? req.body.definitionId.trim() : "";
+      const pluginIdValue = pluginIdRaw.length > 0 ? pluginIdRaw : undefined;
+      const definitionIdValue = definitionIdRaw.length > 0 ? definitionIdRaw : undefined;
+
       const saved = await saveUploadedConfigFile(project, relativePath, file.buffer);
-      await updateProjectConfigMetadata(id, project, saved.path, saved.sha256);
+      const derivedMapping =
+        pluginIdValue || definitionIdValue
+          ? undefined
+          : findPluginMappingForPath(project, saved.path);
+      await updateProjectConfigMetadata(
+        id,
+        project,
+        saved.path,
+        saved.sha256,
+        pluginIdValue ?? derivedMapping?.pluginId,
+        definitionIdValue ?? derivedMapping?.definitionId,
+      );
       const refreshed = (await findProject(id)) ?? project;
       const configs = await listUploadedConfigFiles(refreshed);
       res.status(201).json({ configs });
@@ -927,7 +1428,7 @@ router.post(
 router.put("/:id/configs/file", async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { path, content } = req.body ?? {};
+    const { path, content, pluginId: pluginIdInput, definitionId: definitionIdInput } = req.body ?? {};
     const project = await findProject(id);
     if (!project) {
       res.status(404).json({ error: "Project not found" });
@@ -937,14 +1438,67 @@ router.put("/:id/configs/file", async (req: Request, res: Response) => {
       res.status(400).json({ error: "path and content are required" });
       return;
     }
+    const pluginIdOverride =
+      typeof pluginIdInput === "string" && pluginIdInput.trim().length > 0
+        ? pluginIdInput.trim()
+        : undefined;
+    const definitionIdOverride =
+      typeof definitionIdInput === "string" && definitionIdInput.trim().length > 0
+        ? definitionIdInput.trim()
+        : undefined;
+    const existingEntry = (project.configs ?? []).find((entry) => entry.path === path);
+    const derivedMapping =
+      pluginIdOverride || definitionIdOverride
+        ? undefined
+        : findPluginMappingForPath(project, path);
     const saved = await overwriteUploadedConfigFile(project, path, content);
-    await updateProjectConfigMetadata(id, project, saved.path, saved.sha256);
+    await updateProjectConfigMetadata(
+      id,
+      project,
+      saved.path,
+      saved.sha256,
+      pluginIdOverride ?? existingEntry?.pluginId ?? derivedMapping?.pluginId,
+      definitionIdOverride ?? existingEntry?.definitionId ?? derivedMapping?.definitionId,
+    );
     res.json({ success: true });
   } catch (error) {
     console.error("Failed to update config file", error);
     const message = error instanceof Error ? error.message : "Failed to update config file";
     const status = message.toLowerCase().includes("relativepath") ? 400 : 500;
     res.status(status).json({ error: message });
+  }
+});
+
+router.delete("/:id/configs/file", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { path } = req.query;
+    const project = await findProject(id);
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    if (typeof path !== "string" || path.trim().length === 0) {
+      res.status(400).json({ error: "path query parameter is required" });
+      return;
+    }
+    try {
+      await deleteUploadedConfigFile(project, path);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") {
+        res.status(404).json({ error: "Config file not found" });
+        return;
+      }
+      throw error;
+    }
+    await removeProjectConfigMetadata(id, project, path);
+    const refreshed = (await findProject(id)) ?? project;
+    const configs = await listUploadedConfigFiles(refreshed);
+    res.status(200).json({ configs });
+  } catch (error) {
+    console.error("Failed to delete config file", error);
+    res.status(500).json({ error: "Failed to delete config file" });
   }
 });
 

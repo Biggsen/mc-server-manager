@@ -1,5 +1,12 @@
 import type { ProjectPlugin } from "./plugins";
 
+export interface StoredProjectConfigEntry {
+  path: string;
+  sha256?: string;
+  pluginId?: string;
+  definitionId?: string;
+}
+
 export interface RepoMetadata {
   id?: number;
   owner: string;
@@ -21,7 +28,7 @@ export interface StoredProject {
   profilePath?: string;
   repo?: RepoMetadata;
   plugins?: ProjectPlugin[];
-  configs?: Array<{ path: string; sha256?: string }>;
+  configs?: StoredProjectConfigEntry[];
   manifest?: ManifestMetadata;
   createdAt: string;
   updatedAt: string;

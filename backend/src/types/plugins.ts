@@ -16,6 +16,24 @@ export interface PluginSourceReference {
   cachePath?: string;
 }
 
+export type PluginConfigRequirement = "required" | "optional" | "generated";
+
+export interface PluginConfigDefinition {
+  id: string;
+  path: string;
+  label?: string;
+  requirement?: PluginConfigRequirement;
+  description?: string;
+  tags?: string[];
+}
+
+export interface ProjectPluginConfigMapping {
+  definitionId: string;
+  path?: string;
+  requirement?: PluginConfigRequirement;
+  notes?: string;
+}
+
 export interface ProjectPlugin {
   id: string;
   version: string;
@@ -25,6 +43,7 @@ export interface ProjectPlugin {
   minecraftVersionMin?: string;
   minecraftVersionMax?: string;
   cachePath?: string;
+  configMappings?: ProjectPluginConfigMapping[];
 }
 
 export interface StoredPluginRecord {
@@ -41,6 +60,6 @@ export interface StoredPluginRecord {
   lastUsedAt?: string;
   createdAt: string;
   updatedAt: string;
+  configDefinitions?: PluginConfigDefinition[];
 }
-
 

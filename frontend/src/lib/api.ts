@@ -7,6 +7,24 @@ export interface PluginSearchResult {
   projectUrl?: string
 }
 
+export type PluginConfigRequirement = 'required' | 'optional' | 'generated'
+
+export interface PluginConfigDefinition {
+  id: string
+  path: string
+  label?: string
+  requirement?: PluginConfigRequirement
+  description?: string
+  tags?: string[]
+}
+
+export interface ProjectPluginConfigMapping {
+  definitionId: string
+  path?: string
+  requirement?: PluginConfigRequirement
+  notes?: string
+}
+
 export interface StoredPluginRecord {
   id: string
   version: string
@@ -34,6 +52,7 @@ export interface StoredPluginRecord {
   }
   createdAt: string
   updatedAt: string
+  configDefinitions?: PluginConfigDefinition[]
 }
 
 export async function searchPlugins(
@@ -168,10 +187,13 @@ export interface ProjectSummary {
       sha256?: string
       cachePath?: string
     }
+    configMappings?: ProjectPluginConfigMapping[]
   }>
   configs?: Array<{
     path: string
     sha256?: string
+    pluginId?: string
+    definitionId?: string
   }>
   repo?: RepoMetadata
 }
@@ -449,6 +471,31 @@ export interface ProjectConfigSummary {
   size: number
   modifiedAt: string
   sha256?: string
+  pluginId?: string
+  definitionId?: string
+}
+
+export interface PluginConfigDefinitionView {
+  id: string
+  source: 'library' | 'custom'
+  label?: string
+  description?: string
+  tags?: string[]
+  defaultPath: string
+  resolvedPath: string
+  requirement: PluginConfigRequirement
+  notes?: string
+  mapping?: ProjectPluginConfigMapping
+  uploaded?: ProjectConfigSummary
+  missing: boolean
+}
+
+export interface ProjectPluginConfigsResponse {
+  plugin: { id: string; version: string }
+  libraryDefinitions: PluginConfigDefinition[]
+  mappings: ProjectPluginConfigMapping[]
+  definitions: PluginConfigDefinitionView[]
+  uploads: ProjectConfigSummary[]
 }
 
 export async function fetchProjectConfigs(projectId: string): Promise<ProjectConfigSummary[]> {
@@ -458,11 +505,17 @@ export async function fetchProjectConfigs(projectId: string): Promise<ProjectCon
 
 export async function uploadProjectConfig(
   projectId: string,
-  payload: { path: string; file: File },
+  payload: { path: string; file: File; pluginId?: string; definitionId?: string },
 ): Promise<ProjectConfigSummary[]> {
   const form = new FormData()
   form.append('relativePath', payload.path)
   form.append('file', payload.file)
+  if (payload.pluginId) {
+    form.append('pluginId', payload.pluginId)
+  }
+  if (payload.definitionId) {
+    form.append('definitionId', payload.definitionId)
+  }
   const response = await fetch(`${API_BASE}/projects/${projectId}/configs/upload`, {
     method: 'POST',
     body: form,
@@ -490,13 +543,58 @@ export async function fetchProjectConfigFile(
 
 export async function updateProjectConfigFile(
   projectId: string,
-  payload: { path: string; content: string },
+  payload: { path: string; content: string; pluginId?: string; definitionId?: string },
 ): Promise<void> {
   await request(`/projects/${projectId}/configs/file`, {
     method: 'PUT',
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      path: payload.path,
+      content: payload.content,
+      pluginId: payload.pluginId,
+      definitionId: payload.definitionId,
+    }),
   })
   emitProjectsUpdated()
+}
+
+export async function fetchProjectPluginConfigs(
+  projectId: string,
+  pluginId: string,
+): Promise<ProjectPluginConfigsResponse> {
+  return request<ProjectPluginConfigsResponse>(
+    `/projects/${projectId}/plugins/${encodeURIComponent(pluginId)}/configs`,
+  )
+}
+
+export async function updateProjectPluginConfigs(
+  projectId: string,
+  pluginId: string,
+  payload: { mappings: ProjectPluginConfigMapping[] },
+): Promise<ProjectPluginConfigsResponse> {
+  const data = await request<ProjectPluginConfigsResponse>(
+    `/projects/${projectId}/plugins/${encodeURIComponent(pluginId)}/configs`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ mappings: payload.mappings }),
+    },
+  )
+  emitProjectsUpdated()
+  return data
+}
+
+export async function deleteProjectConfigFile(
+  projectId: string,
+  path: string,
+): Promise<ProjectConfigSummary[]> {
+  const params = new URLSearchParams({ path })
+  const data = await request<{ configs: ProjectConfigSummary[] }>(
+    `/projects/${projectId}/configs/file?${params.toString()}`,
+    {
+      method: 'DELETE',
+    },
+  )
+  emitProjectsUpdated()
+  return data.configs
 }
 
 export async function deleteProject(
@@ -632,6 +730,21 @@ export async function uploadLibraryPlugin(payload: {
     plugin: StoredPluginRecord
     plugins: StoredPluginRecord[]
   }
+  return data.plugin
+}
+
+export async function updateLibraryPluginConfigs(
+  pluginId: string,
+  version: string,
+  payload: { configDefinitions: PluginConfigDefinition[] },
+): Promise<StoredPluginRecord> {
+  const data = await request<{ plugin: StoredPluginRecord }>(
+    `/plugins/library/${encodeURIComponent(pluginId)}/${encodeURIComponent(version)}/configs`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ configDefinitions: payload.configDefinitions }),
+    },
+  )
   return data.plugin
 }
 

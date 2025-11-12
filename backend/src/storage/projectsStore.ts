@@ -222,6 +222,8 @@ export async function setProjectAssets(id: string, payload: AssetsPayload): Prom
         if (cachePath && mergedSource) {
           mergedSource.cachePath = cachePath;
         }
+        const mergedMappings =
+          plugin.configMappings ?? previous?.configMappings ?? [];
         return {
           ...previous,
           id: plugin.id,
@@ -232,6 +234,7 @@ export async function setProjectAssets(id: string, payload: AssetsPayload): Prom
           cachePath,
           minecraftVersionMin: plugin.minecraftVersionMin ?? previous?.minecraftVersionMin,
           minecraftVersionMax: plugin.minecraftVersionMax ?? previous?.minecraftVersionMax,
+          configMappings: mergedMappings,
         };
       });
     }
@@ -239,6 +242,8 @@ export async function setProjectAssets(id: string, payload: AssetsPayload): Prom
       project.configs = payload.configs.map((config) => ({
         path: config.path,
         sha256: config.sha256 ?? "<pending>",
+        pluginId: config.pluginId,
+        definitionId: config.definitionId,
       }));
     }
     return project;

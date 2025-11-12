@@ -101,6 +101,7 @@ export async function upsertStoredPlugin(record: StoredPluginInput): Promise<Sto
       minecraftVersionMax: record.minecraftVersionMax ?? existing.minecraftVersionMax,
       provider: record.provider ?? existing.provider,
       source: record.source ?? existing.source,
+      configDefinitions: record.configDefinitions ?? existing.configDefinitions,
     };
   } else {
     const created: StoredPluginRecord = {
@@ -117,6 +118,7 @@ export async function upsertStoredPlugin(record: StoredPluginInput): Promise<Sto
       lastUsedAt,
       createdAt: record.createdAt ?? now,
       updatedAt: now,
+      configDefinitions: record.configDefinitions ? [...record.configDefinitions] : undefined,
     };
     snapshot.plugins.push(created);
   }
