@@ -181,6 +181,7 @@ function ProjectDetail() {
   const [loading, setLoading] = useState(true)
   const initialLoadRef = useRef(true)
   const configUploadFormRef = useRef<HTMLFormElement | null>(null)
+  const logRefs = useRef<Record<string, HTMLPreElement | null>>({})
   const configUploadFileInputRef = useRef<HTMLInputElement | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [project, setProject] = useState<ProjectSummary | null>(null)
@@ -957,6 +958,15 @@ function ProjectDetail() {
     },
   )
 
+  useEffect(() => {
+    runs.forEach((run) => {
+      const element = logRefs.current[run.id]
+      if (element) {
+        element.scrollTop = element.scrollHeight
+      }
+    })
+  }, [runs])
+
   const handleCommandChange = useCallback((runId: string, value: string) => {
     setCommandInputs((prev) => ({ ...prev, [runId]: value }))
   }, [])
@@ -1697,7 +1707,12 @@ useEffect(() => {
                           {run.logs.length > 0 && (
                             <details>
                               <summary>View logs</summary>
-                              <pre className="log-box">
+                              <pre
+                                className="log-box"
+                                ref={(element) => {
+                                  logRefs.current[run.id] = element
+                                }}
+                              >
                                 {run.logs
                                   .map(
                                     (entry) =>

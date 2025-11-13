@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useMemo, useState } from 'react'
+import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Building, Plug } from '@phosphor-icons/react'
 import { Button, type ButtonProps } from '../components/ui'
@@ -8,6 +8,8 @@ import {
   fetchPluginLibrary,
   fetchRuns,
   stopRunJob,
+  runProjectLocally,
+  sendRunCommand,
   type ProjectSummary,
   type BuildJob,
   type RunJob,
@@ -53,6 +55,10 @@ function Dashboard() {
   const [runsLoading, setRunsLoading] = useState(true)
   const [runsError, setRunsError] = useState<string | null>(null)
   const [runBusy, setRunBusy] = useState<Record<string, boolean>>({})
+  const [startingRun, setStartingRun] = useState<Record<string, boolean>>({})
+  const [commandInputs, setCommandInputs] = useState<Record<string, string>>({})
+  const [commandBusy, setCommandBusy] = useState<Record<string, boolean>>({})
+  const logRefs = useRef<Record<string, HTMLPreElement | null>>({})
 
   const { run: queueProjectBuild } = useAsyncAction(
     async (project: ProjectSummary) => triggerBuild(project.id),
@@ -117,6 +123,92 @@ function Dashboard() {
       }),
     },
   )
+
+  const { run: requestRunProject } = useAsyncAction(
+    async (project: ProjectSummary) => runProjectLocally(project.id),
+    {
+      label: (project) => `Starting local run • ${project.name}`,
+      onStart: (project) => {
+        setStartingRun((prev) => ({ ...prev, [project.id]: true }))
+      },
+      onSuccess: (run) => {
+        setRuns((prev) => {
+          const remaining = prev.filter((existing) => existing.id !== run.id)
+          return [run, ...remaining]
+        })
+        setRunsError(null)
+      },
+      onError: (error, [project]) => {
+        console.error('Failed to queue local run', error)
+        setRunsError(error instanceof Error ? error.message : 'Failed to start local run')
+      },
+      onFinally: (project) => {
+        setStartingRun((prev) => {
+          const next = { ...prev }
+          delete next[project.id]
+          return next
+        })
+      },
+      successToast: (_run, [project]) => ({
+        title: 'Run queued',
+        description: `${project.name} is starting locally.`,
+        variant: 'success',
+      }),
+      errorToast: (error, [project]) => ({
+        title: 'Run failed',
+        description:
+          error instanceof Error ? error.message : `Failed to start ${project.name} locally`,
+        variant: 'danger',
+      }),
+    },
+  )
+
+  const { run: sendRunCommandAction } = useAsyncAction(
+    async (run: RunJob, command: string) => sendRunCommand(run.id, command),
+    {
+      label: (run) => `Sending command • ${run.id}`,
+      onStart: (run) => {
+        setCommandBusy((prev) => ({ ...prev, [run.id]: true }))
+      },
+      onSuccess: (_result, [run]) => {
+        setCommandInputs((prev) => ({ ...prev, [run.id]: '' }))
+      },
+      onError: (error) => {
+        console.error('Failed to send run command', error)
+        setRunsError(error instanceof Error ? error.message : 'Failed to send command')
+      },
+      onFinally: (run) => {
+        setCommandBusy((prev) => {
+          const next = { ...prev }
+          delete next[run.id]
+          return next
+        })
+      },
+      successToast: (_result, [run]) => ({
+        title: 'Command sent',
+        description: `Command dispatched to ${run.projectId}.`,
+        variant: 'success',
+      }),
+      errorToast: (error, [run]) => ({
+        title: 'Command failed',
+        description: error instanceof Error ? error.message : `Failed to send command to ${run.id}`,
+        variant: 'danger',
+      }),
+    },
+  )
+
+  const handleCommandInputChange = useCallback((runId: string, value: string) => {
+    setCommandInputs((prev) => ({ ...prev, [runId]: value }))
+  }, [])
+
+  useEffect(() => {
+    runs.forEach((run) => {
+      const element = logRefs.current[run.id]
+      if (element) {
+        element.scrollTop = element.scrollHeight
+      }
+    })
+  }, [runs])
 
   useEffect(() => {
     let active = true
@@ -240,10 +332,14 @@ function Dashboard() {
             return [normalized, ...prev]
           }
           const existing = prev[index]
+          const existingLogs = Array.isArray(existing.logs) ? existing.logs : []
+          const normalizedLogs = Array.isArray(normalized.logs) ? normalized.logs : []
+          const logs =
+            normalizedLogs.length >= existingLogs.length ? normalizedLogs : existingLogs
           const merged: RunJob = {
             ...existing,
             ...normalized,
-            logs: existing.logs ?? normalized.logs ?? [],
+            logs,
           }
           const next = prev.slice()
           next[index] = merged
@@ -254,8 +350,37 @@ function Dashboard() {
       }
     }
 
+    const handleRunLog = (event: MessageEvent) => {
+      try {
+        const payload = JSON.parse(event.data) as {
+          runId: string
+          projectId: string
+          entry: RunJob['logs'][number]
+        }
+        if (!payload.runId || !payload.entry) {
+          return
+        }
+        setRuns((prev) =>
+          prev.map((run) => {
+            if (run.id !== payload.runId) {
+              return run
+            }
+            const logs = Array.isArray(run.logs) ? run.logs.slice() : []
+            logs.push(payload.entry)
+            return {
+              ...run,
+              logs,
+            }
+          }),
+        )
+      } catch (err) {
+        console.error('Failed to parse run log payload', err)
+      }
+    }
+
     source.addEventListener('init', handleInit as EventListener)
     source.addEventListener('run-update', handleRunUpdate as EventListener)
+    source.addEventListener('run-log', handleRunLog as EventListener)
     source.onerror = (event) => {
       console.error('Run stream error', event)
     }
@@ -263,6 +388,7 @@ function Dashboard() {
     return () => {
       source.removeEventListener('init', handleInit as EventListener)
       source.removeEventListener('run-update', handleRunUpdate as EventListener)
+      source.removeEventListener('run-log', handleRunLog as EventListener)
       source.close()
     }
   }, [])
@@ -406,6 +532,25 @@ function Dashboard() {
                   <button
                     type="button"
                     className="ghost"
+                    disabled={
+                      startingRun[project.id] === true ||
+                      runs.some(
+                        (run) =>
+                          run.projectId === project.id &&
+                          (run.status === 'pending' ||
+                            run.status === 'running' ||
+                            run.status === 'stopping'),
+                      )
+                    }
+                    onClick={() => {
+                      void requestRunProject(project).catch(() => null)
+                    }}
+                  >
+                    {startingRun[project.id] === true ? 'Starting…' : 'Run locally'}
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost"
                     disabled={building[project.id] === 'running'}
                     onClick={() => {
                       void queueProjectBuild(project).catch(() => null)
@@ -434,7 +579,7 @@ function Dashboard() {
             {activeRuns.map((run) => {
               const project = projectLookup[run.projectId]
               return (
-                <li key={run.id}>
+                <li key={run.id} className="run-entry">
                   <div>
                     <h4>
                       {project ? project.name : run.projectId}{' '}
@@ -467,6 +612,66 @@ function Dashboard() {
                     >
                       {run.status === 'stopping' || runBusy[run.id] ? 'Stopping…' : 'Stop'}
                     </button>
+                  </div>
+                  <div className="run-console">
+                    <details className="console-logs" open={run.logs.length > 0}>
+                      <summary>View logs</summary>
+                      <pre
+                        className="log-box"
+                        ref={(element) => {
+                          logRefs.current[run.id] = element
+                        }}
+                      >
+                        {run.logs.length > 0
+                          ? run.logs
+                              .map(
+                                (entry) =>
+                                  `[${new Date(entry.timestamp).toLocaleTimeString()}][${
+                                    entry.stream
+                                  }] ${entry.message}`,
+                              )
+                              .join('\n')
+                          : 'No log entries yet.'}
+                      </pre>
+                    </details>
+                    {run.status === 'running' ? (
+                      run.consoleAvailable ? (
+                        <form
+                          className="console-command"
+                          onSubmit={(event) => {
+                            event.preventDefault()
+                            const command = commandInputs[run.id]?.trim() ?? ''
+                            if (!command) return
+                            void sendRunCommandAction(run, command).catch(() => null)
+                          }}
+                        >
+                          <input
+                            type="text"
+                            aria-label="Console command"
+                            placeholder="/say Hello"
+                            value={commandInputs[run.id] ?? ''}
+                            onChange={(event) =>
+                              handleCommandInputChange(run.id, event.target.value)
+                            }
+                            disabled={Boolean(commandBusy[run.id])}
+                          />
+                          <Button
+                            type="submit"
+                            disabled={
+                              Boolean(commandBusy[run.id]) ||
+                              !commandInputs[run.id] ||
+                              commandInputs[run.id]?.trim().length === 0
+                            }
+                          >
+                            {commandBusy[run.id] ? 'Sending…' : 'Send'}
+                          </Button>
+                        </form>
+                      ) : (
+                        <p className="muted" style={{ marginTop: '0.5rem' }}>
+                          Console not available yet.
+                        </p>
+                      )
+                    ) : null}
                   </div>
                 </li>
               )

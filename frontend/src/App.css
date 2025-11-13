@@ -728,7 +728,11 @@ ul {
   padding: 16px;
   max-height: 240px;
   overflow-y: auto;
+  overflow-x: auto;
+  max-width: 100%;
   background: rgba(2, 6, 23, 0.55);
+  font-family: var(--mc-font-mono);
+  font-size: 0.9rem;
 }
 
 .log-box ul {
