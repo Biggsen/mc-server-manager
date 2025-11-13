@@ -5,7 +5,7 @@ import { join } from "path";
 import { parse } from "yaml";
 import type { StoredProject } from "../types/storage";
 import { resolveProjectRoot } from "./projectFiles";
-import { listUploadedConfigFiles } from "./configUploads";
+import { deleteUploadedConfigFile, listUploadedConfigFiles } from "./configUploads";
 
 interface ProfileFileEntry {
   template?: string;
@@ -163,6 +163,7 @@ export async function scanProjectAssets(project: StoredProject): Promise<Scanned
     }),
   );
 
+  const activePaths = new Set<string>();
   const configMap = new Map<string, { path: string; sha256: string; pluginId?: string; definitionId?: string }>();
   for (const existing of project.configs ?? []) {
     configMap.set(existing.path, {
@@ -173,19 +174,48 @@ export async function scanProjectAssets(project: StoredProject): Promise<Scanned
     });
   }
   for (const config of configs) {
+    activePaths.add(config.path);
     configMap.set(config.path, config);
   }
 
   const uploadedSummaries = await listUploadedConfigFiles(project);
+  const cleanupTasks: Array<Promise<void>> = [];
   for (const summary of uploadedSummaries) {
     const previous = configMap.get(summary.path);
+    if (
+      !previous &&
+      summary.sha256 === undefined &&
+      summary.pluginId === undefined &&
+      summary.definitionId === undefined
+    ) {
+      cleanupTasks.push(
+        deleteUploadedConfigFile(project, summary.path).catch((error) => {
+          const code = (error as NodeJS.ErrnoException).code;
+          if (code !== "ENOENT") {
+            console.warn(`Failed to delete orphaned uploaded config ${summary.path}`, error);
+          }
+        }),
+      );
+      continue;
+    }
     const sha256 = summary.sha256 ?? previous?.sha256 ?? computeHashFromString(summary.path);
+    activePaths.add(summary.path);
     configMap.set(summary.path, {
       path: summary.path,
       sha256,
       pluginId: previous?.pluginId ?? summary.pluginId,
       definitionId: previous?.definitionId ?? summary.definitionId,
     });
+  }
+
+  if (cleanupTasks.length) {
+    await Promise.all(cleanupTasks);
+  }
+
+  for (const path of Array.from(configMap.keys())) {
+    if (!activePaths.has(path)) {
+      configMap.delete(path);
+    }
   }
 
   const mergedConfigs = Array.from(configMap.values()).sort((a, b) => a.path.localeCompare(b.path));

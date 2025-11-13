@@ -12,7 +12,6 @@ import {
   type ProjectSummary,
   type BuildJob,
   type RunJob,
-  type ProjectConfigSummary,
 } from '../lib/api'
 import { subscribeProjectsUpdated } from '../lib/events'
 import { ContentSection } from '../components/layout'
@@ -68,7 +67,7 @@ function projectMessageForRun(run: RunJob): ProjectMessage {
   }
 }
 
-function countPluginConfigs(configs: ProjectConfigSummary[]): number {
+function countPluginConfigs(configs: NonNullable<ProjectSummary['configs']>): number {
   return configs.filter(
     (config) =>
       config.pluginId !== undefined ||

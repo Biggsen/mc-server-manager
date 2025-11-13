@@ -21,8 +21,11 @@ export function ActiveActionIndicator() {
       aria-live="polite"
       aria-label={statusLabel}
     >
-      <span className="activity-indicator__icon" aria-hidden="true">
-        <SpinnerGap size={18} weight="bold" className={activeCount > 0 ? 'is-spinning' : ''} />
+      <span
+        className={`activity-indicator__icon${activeCount > 0 ? ' is-spinning' : ''}`}
+        aria-hidden="true"
+      >
+        <SpinnerGap size={18} weight="bold" />
       </span>
       <span className="activity-indicator__text">
         {label}

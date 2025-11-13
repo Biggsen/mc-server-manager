@@ -1,4 +1,5 @@
-import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Building, Plug } from '@phosphor-icons/react'
 import { Button, type ButtonProps } from '../components/ui'
@@ -138,7 +139,7 @@ function Dashboard() {
         })
         setRunsError(null)
       },
-      onError: (error, [project]) => {
+      onError: (error) => {
         console.error('Failed to queue local run', error)
         setRunsError(error instanceof Error ? error.message : 'Failed to start local run')
       },

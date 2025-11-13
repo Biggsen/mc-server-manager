@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import type { ReactNode } from 'react'
 import { NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import {
   MagnifyingGlass,
@@ -34,7 +35,7 @@ const ENVIRONMENT_LABEL = import.meta.env.VITE_ENV_LABEL ?? 'Local'
 type NavItem = {
   to: string
   label: string
-  icon: JSX.Element
+  icon: ReactNode
   exact?: boolean
 }
 

@@ -1,5 +1,5 @@
 import { createHash } from "crypto";
-import { mkdir, readFile, readdir, stat, unlink, writeFile } from "fs/promises";
+import { mkdir, readFile, readdir, rm, stat, unlink, writeFile } from "fs/promises";
 import { dirname, join, posix, relative as pathRelative } from "path";
 import type { StoredProject } from "../types/storage";
 import { resolveProjectRoot } from "./projectFiles";
@@ -25,6 +25,28 @@ function sanitizeRelativePath(input: string | undefined | null): string {
 
 function getUploadsRoot(project: StoredProject): string {
   return join(resolveProjectRoot(project), ...UPLOAD_ROOT_SEGMENTS);
+}
+
+async function pruneEmptyDirectories(root: string, target: string): Promise<void> {
+  let current = dirname(target);
+  while (current.startsWith(root) && current !== root) {
+    let entries: string[];
+    try {
+      entries = await readdir(current);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") {
+        current = dirname(current);
+        continue;
+      }
+      throw error;
+    }
+    if (entries.length > 0) {
+      break;
+    }
+    await rm(current, { recursive: false, force: true });
+    current = dirname(current);
+  }
 }
 
 export interface ConfigFileSummary {
@@ -99,6 +121,12 @@ export async function deleteUploadedConfigFile(
   const sanitized = sanitizeRelativePath(relativePath);
   const target = join(getUploadsRoot(project), sanitized);
   await unlink(target);
+  await pruneEmptyDirectories(getUploadsRoot(project), target).catch((error) => {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT" && code !== "ENOTEMPTY" && code !== "EPERM") {
+      throw error;
+    }
+  });
 }
 
 export async function listUploadedConfigFiles(project: StoredProject): Promise<ConfigFileSummary[]> {

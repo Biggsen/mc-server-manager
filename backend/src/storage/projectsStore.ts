@@ -243,7 +243,10 @@ export async function setProjectAssets(id: string, payload: AssetsPayload): Prom
       project.plugins = Array.from(existingMap.values());
     }
     if (payload.configs) {
-      const configMap = new Map<string, StoredProject["configs"][number]>();
+      const configMap = new Map<
+        string,
+        NonNullable<StoredProject["configs"]>[number]
+      >();
       for (const existing of project.configs ?? []) {
         configMap.set(existing.path, { ...existing });
       }
