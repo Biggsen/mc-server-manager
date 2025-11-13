@@ -12,6 +12,7 @@ import {
   type ProjectSummary,
   type BuildJob,
   type RunJob,
+  type ProjectConfigSummary,
 } from '../lib/api'
 import { subscribeProjectsUpdated } from '../lib/events'
 import { ContentSection } from '../components/layout'
@@ -65,6 +66,15 @@ function projectMessageForRun(run: RunJob): ProjectMessage {
     type: run.status === 'failed' ? 'error' : 'success',
     text: describeRunStatus(run),
   }
+}
+
+function countPluginConfigs(configs: ProjectConfigSummary[]): number {
+  return configs.filter(
+    (config) =>
+      config.pluginId !== undefined ||
+      config.definitionId !== undefined ||
+      config.path.startsWith('plugins/'),
+  ).length
 }
 
 function Projects() {
@@ -240,7 +250,7 @@ function Projects() {
       onSuccess: (assets, [project]) => {
         setProjectMessage(project.id, {
           type: 'success',
-          text: `Scanned ${assets.plugins.length} plugins, ${assets.configs.length} configs`,
+          text: `Scanned ${assets.plugins.length} plugins, ${countPluginConfigs(assets.configs)} plugin configs`,
         })
       },
       onError: (error, [project]) => {
@@ -255,7 +265,7 @@ function Projects() {
       },
       successToast: (assets, [project]) => ({
         title: 'Assets scanned',
-        description: `${project.name}: ${assets.plugins.length} plugins, ${assets.configs.length} configs`,
+        description: `${project.name}: ${assets.plugins.length} plugins, ${countPluginConfigs(assets.configs)} plugin configs`,
         variant: 'success',
       }),
       errorToast: (error, [project]) => ({

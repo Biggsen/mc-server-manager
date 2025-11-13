@@ -181,8 +181,12 @@ function ProjectDetail() {
   const [loading, setLoading] = useState(true)
   const initialLoadRef = useRef(true)
   const configUploadFormRef = useRef<HTMLFormElement | null>(null)
+  const configUploadFileInputRef = useRef<HTMLInputElement | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [project, setProject] = useState<ProjectSummary | null>(null)
+  const [pluginDefinitionCache, setPluginDefinitionCache] = useState<
+    Record<string, PluginConfigDefinitionView[]>
+  >({})
   const [builds, setBuilds] = useState<BuildJob[]>([])
   const [runs, setRuns] = useState<RunJob[]>([])
   const [runBusy, setRunBusy] = useState<Record<string, boolean>>({})
@@ -197,6 +201,7 @@ function ProjectDetail() {
   const [configUploadFile, setConfigUploadFile] = useState<File | null>(null)
   const [configUploadPlugin, setConfigUploadPlugin] = useState('')
   const [configUploadDefinition, setConfigUploadDefinition] = useState('')
+  const [configUploadPathDirty, setConfigUploadPathDirty] = useState(false)
   const [configUploadBusy, setConfigUploadBusy] = useState(false)
   const [configEditor, setConfigEditor] = useState<{ path: string; content: string } | null>(null)
   const [configEditorBusy, setConfigEditorBusy] = useState(false)
@@ -340,11 +345,19 @@ function ProjectDetail() {
     },
     {
       label: 'Scanning assets',
-      successToast: (assets) => ({
-        title: 'Assets scanned',
-        description: `Found ${assets.plugins.length} plugins and ${assets.configs.length} configs.`,
-        variant: 'success',
-      }),
+      successToast: (assets) => {
+        const pluginConfigTotal = assets.configs.filter(
+          (entry) =>
+            entry.pluginId !== undefined ||
+            entry.definitionId !== undefined ||
+            entry.path.startsWith('plugins/'),
+        ).length
+        return {
+          title: 'Assets scanned',
+          description: `Found ${assets.plugins.length} plugins and ${pluginConfigTotal} plugin configs.`,
+          variant: 'success',
+        }
+      },
       errorToast: (error) => ({
         title: 'Asset scan failed',
         description: error instanceof Error ? error.message : 'Asset scan failed',
@@ -427,32 +440,88 @@ function ProjectDetail() {
 
   const pluginDefinitionOptions = useMemo(() => {
     const map: Record<string, Array<{ definitionId: string; path: string; label: string }>> = {}
+    const formatOption = (definitionId: string, path: string, label?: string) => {
+      const base = (label ?? definitionId).trim()
+      return {
+        definitionId,
+        path,
+        label: path ? `${base} · ${path}` : base,
+      }
+    }
+
     for (const plugin of project?.plugins ?? []) {
       const mappings = plugin.configMappings ?? []
-      map[plugin.id] = mappings.map((mapping) => {
-        const path = mapping.path ?? ''
-        const label = path ? `${mapping.definitionId} · ${path}` : mapping.definitionId
-        return {
-          definitionId: mapping.definitionId,
-          path,
-          label,
-        }
-      })
+      map[plugin.id] = mappings.map((mapping) =>
+        formatOption(mapping.definitionId, mapping.path ?? '', mapping.definitionId),
+      )
+      const cachedDefinitions = pluginDefinitionCache[plugin.id]
+      if (cachedDefinitions) {
+        map[plugin.id] = cachedDefinitions.map((definition) =>
+          formatOption(
+            definition.id,
+            definition.resolvedPath ?? definition.defaultPath ?? '',
+            definition.label ?? definition.id,
+          ),
+        )
+      }
     }
     if (pluginConfigManager) {
-      map[pluginConfigManager.pluginId] = pluginConfigManager.drafts.map((draft) => ({
-        definitionId: draft.definitionId,
-        path: draft.path,
-        label: draft.path ? `${draft.definitionId || 'Custom'} · ${draft.path}` : draft.definitionId || 'Custom',
-      }))
+      map[pluginConfigManager.pluginId] = pluginConfigManager.drafts.map((draft) =>
+        formatOption(draft.definitionId, draft.path, draft.label || draft.definitionId || 'Custom'),
+      )
     }
     return map
-  }, [pluginConfigManager, project?.plugins])
+  }, [pluginConfigManager, pluginDefinitionCache, project?.plugins])
 
   const selectedDefinitionOptions = pluginDefinitionOptions[configUploadPlugin] ?? []
   const selectedDefinition = selectedDefinitionOptions.find(
     (option) => option.definitionId === configUploadDefinition,
   )
+
+  useEffect(() => {
+    if (!id || !project?.plugins) {
+      return
+    }
+    const missing = project.plugins
+      .map((plugin) => plugin.id)
+      .filter((pluginId) => !pluginDefinitionCache[pluginId])
+    if (missing.length === 0) {
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const results = await Promise.all(
+          missing.map(async (pluginId) => {
+            try {
+              const data = await fetchProjectPluginConfigs(id, pluginId)
+              return { pluginId, definitions: data.definitions }
+            } catch (error) {
+              console.error(`Failed to fetch config definitions for ${pluginId}`, error)
+              return null
+            }
+          }),
+        )
+        if (cancelled) {
+          return
+        }
+        setPluginDefinitionCache((prev) => {
+          const next = { ...prev }
+          for (const result of results) {
+            if (result) {
+              next[result.pluginId] = result.definitions
+            }
+          }
+          return next
+        })
+      } catch (error) {
+        console.error('Failed to prefetch plugin config definitions', error)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [fetchProjectPluginConfigs, id, pluginDefinitionCache, project?.plugins])
 
   const openPluginConfigManager = useCallback(
     async (pluginId: string) => {
@@ -486,6 +555,10 @@ function ProjectDetail() {
           drafts: data.definitions.map((definition, index) => toPluginConfigDraft(definition, index)),
           uploads: data.uploads,
         })
+        setPluginDefinitionCache((prev) => ({
+          ...prev,
+          [pluginId]: data.definitions,
+        }))
         setProject((prev) =>
           prev
             ? {
@@ -737,6 +810,10 @@ function ProjectDetail() {
         drafts: response.definitions.map((definition, index) => toPluginConfigDraft(definition, index)),
         uploads: response.uploads,
       })
+      setPluginDefinitionCache((prev) => ({
+        ...prev,
+        [response.plugin.id]: response.definitions,
+      }))
       toast({
         title: 'Plugin config paths updated',
         description: `Saved ${sanitizedMappings.length} mapping${
@@ -761,9 +838,8 @@ function ProjectDetail() {
     (pluginId: string, definitionId: string, path: string) => {
       setConfigUploadPlugin(pluginId)
       setConfigUploadDefinition(definitionId)
-      if (path) {
-        setConfigUploadPath(path)
-      }
+      setConfigUploadPath(path ?? '')
+      setConfigUploadPathDirty(false)
       configUploadFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
     },
     [],
@@ -773,8 +849,46 @@ function ProjectDetail() {
     if (configUploadPlugin && !pluginDefinitionOptions[configUploadPlugin]) {
       setConfigUploadPlugin('')
       setConfigUploadDefinition('')
+      setConfigUploadPath('')
+      setConfigUploadPathDirty(false)
     }
-  }, [configUploadPlugin, pluginDefinitionOptions])
+  }, [configUploadPathDirty, configUploadPlugin, pluginDefinitionOptions])
+
+  useEffect(() => {
+    if (!configUploadPlugin) {
+      return
+    }
+    const options = pluginDefinitionOptions[configUploadPlugin] ?? []
+    if (options.length === 0) {
+      if (configUploadDefinition) {
+        setConfigUploadDefinition('')
+      }
+      if (!configUploadPathDirty && configUploadPath) {
+        setConfigUploadPath('')
+      }
+      return
+    }
+    const match = options.find((option) => option.definitionId === configUploadDefinition)
+    if (!match) {
+      const [firstOption] = options
+      if (!firstOption) {
+        return
+      }
+      setConfigUploadDefinition(firstOption.definitionId)
+      setConfigUploadPath(firstOption.path)
+      setConfigUploadPathDirty(false)
+      return
+    }
+    if (!configUploadPathDirty && match.path !== configUploadPath) {
+      setConfigUploadPath(match.path)
+    }
+  }, [
+    configUploadDefinition,
+    configUploadPath,
+    configUploadPathDirty,
+    configUploadPlugin,
+    pluginDefinitionOptions,
+  ])
 
   const { run: requestStopRun } = useAsyncAction(
     async (target: RunJob) => stopRunJob(target.id),
@@ -1076,8 +1190,12 @@ useEffect(() => {
         setConfigUploadFile(null)
         setConfigUploadPlugin('')
         setConfigUploadDefinition('')
+        setConfigUploadPathDirty(false)
         if (event.currentTarget instanceof HTMLFormElement) {
           event.currentTarget.reset()
+        }
+        if (configUploadFileInputRef.current) {
+          configUploadFileInputRef.current.value = ''
         }
         if (pluginConfigManager && configUploadPlugin && pluginConfigManager.pluginId === configUploadPlugin) {
           void refreshPluginConfigManager()
@@ -1169,6 +1287,21 @@ useEffect(() => {
     )
   }
 
+  const pluginConfigFiles = useMemo(() => {
+    const source =
+      configFiles.length > 0
+        ? configFiles
+        : (project?.configs as ProjectConfigSummary[] | undefined) ?? []
+    return source.filter(
+      (entry) =>
+        entry.pluginId !== undefined ||
+        entry.definitionId !== undefined ||
+        entry.path.startsWith('plugins/'),
+    )
+  }, [configFiles, project?.configs])
+
+  const pluginConfigCount = pluginConfigFiles.length
+
   if (loading) {
     return (
       <div className="project-detail-loading">
@@ -1184,7 +1317,7 @@ useEffect(() => {
           </CardHeader>
           <CardContent>
             <div className="project-summary-card__meta">
-              {[0, 1, 2].map((index) => (
+              {[0, 1, 2, 3].map((index) => (
                 <div key={index}>
                   <Skeleton style={{ width: '72px', height: '12px' }} />
                   <Skeleton
@@ -1283,6 +1416,10 @@ useEffect(() => {
             <div>
               <span className="project-summary-card__meta-label">Plugins</span>
               <strong>{pluginCount}</strong>
+            </div>
+            <div>
+              <span className="project-summary-card__meta-label">Plugin configs</span>
+              <strong>{pluginConfigCount}</strong>
             </div>
             <div>
               <span className="project-summary-card__meta-label">Last manifest</span>
@@ -2172,15 +2309,15 @@ useEffect(() => {
                           onChange={(event) => {
                             const value = event.target.value
                             setConfigUploadPlugin(value)
+                            setConfigUploadPathDirty(false)
                             if (value) {
                               const options = pluginDefinitionOptions[value] ?? []
                               const first = options[0]
                               setConfigUploadDefinition(first ? first.definitionId : '')
-                              if (first?.path && (!configUploadPath || configUploadPath.trim().length === 0)) {
-                                setConfigUploadPath(first.path)
-                              }
+                              setConfigUploadPath(first ? first.path : '')
                             } else {
                               setConfigUploadDefinition('')
+                              setConfigUploadPath('')
                             }
                           }}
                         >
@@ -2203,13 +2340,13 @@ useEffect(() => {
                           onChange={(event) => {
                             const value = event.target.value
                             setConfigUploadDefinition(value)
+                            setConfigUploadPathDirty(false)
                             const options = pluginDefinitionOptions[configUploadPlugin] ?? []
                             const selected = options.find((option) => option.definitionId === value)
-                            if (
-                              selected?.path &&
-                              (!configUploadPath || configUploadPath.trim().length === 0)
-                            ) {
+                            if (selected) {
                               setConfigUploadPath(selected.path)
+                            } else if (!value) {
+                              setConfigUploadPath('')
                             }
                           }}
                           disabled={!configUploadPlugin || (pluginDefinitionOptions[configUploadPlugin] ?? []).length === 0}
@@ -2230,7 +2367,10 @@ useEffect(() => {
                         <input
                           id="config-upload-path"
                           value={configUploadPath}
-                          onChange={(event) => setConfigUploadPath(event.target.value)}
+                          onChange={(event) => {
+                            setConfigUploadPath(event.target.value)
+                            setConfigUploadPathDirty(true)
+                          }}
                           placeholder="plugins/WorldGuard/worlds/world/regions.yml"
                         />
                       </div>
@@ -2239,6 +2379,7 @@ useEffect(() => {
                         <input
                           id="config-upload-file"
                           type="file"
+                          ref={configUploadFileInputRef}
                           onChange={(event) => setConfigUploadFile(event.target.files?.[0] ?? null)}
                         />
                       </div>

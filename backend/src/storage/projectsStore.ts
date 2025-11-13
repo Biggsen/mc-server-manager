@@ -212,7 +212,8 @@ export async function setProjectAssets(id: string, payload: AssetsPayload): Prom
       for (const existing of project.plugins ?? []) {
         existingMap.set(existing.id, existing);
       }
-      project.plugins = payload.plugins.map((plugin) => {
+
+      for (const plugin of payload.plugins) {
         const previous = existingMap.get(plugin.id);
         const mergedSource =
           plugin.source && previous?.source
@@ -224,7 +225,7 @@ export async function setProjectAssets(id: string, payload: AssetsPayload): Prom
         }
         const mergedMappings =
           plugin.configMappings ?? previous?.configMappings ?? [];
-        return {
+        const merged: ProjectPlugin = {
           ...previous,
           id: plugin.id,
           version: plugin.version,
@@ -236,15 +237,26 @@ export async function setProjectAssets(id: string, payload: AssetsPayload): Prom
           minecraftVersionMax: plugin.minecraftVersionMax ?? previous?.minecraftVersionMax,
           configMappings: mergedMappings,
         };
-      });
+        existingMap.set(plugin.id, merged);
+      }
+
+      project.plugins = Array.from(existingMap.values());
     }
     if (payload.configs) {
-      project.configs = payload.configs.map((config) => ({
-        path: config.path,
-        sha256: config.sha256 ?? "<pending>",
-        pluginId: config.pluginId,
-        definitionId: config.definitionId,
-      }));
+      const configMap = new Map<string, StoredProject["configs"][number]>();
+      for (const existing of project.configs ?? []) {
+        configMap.set(existing.path, { ...existing });
+      }
+      for (const config of payload.configs) {
+        const previous = configMap.get(config.path);
+        configMap.set(config.path, {
+          path: config.path,
+          sha256: config.sha256 ?? previous?.sha256 ?? "<pending>",
+          pluginId: config.pluginId ?? previous?.pluginId,
+          definitionId: config.definitionId ?? previous?.definitionId,
+        });
+      }
+      project.configs = Array.from(configMap.values());
     }
     return project;
   });

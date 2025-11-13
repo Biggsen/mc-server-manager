@@ -5,6 +5,7 @@ import { join } from "path";
 import { parse } from "yaml";
 import type { StoredProject } from "../types/storage";
 import { resolveProjectRoot } from "./projectFiles";
+import { listUploadedConfigFiles } from "./configUploads";
 
 interface ProfileFileEntry {
   template?: string;
@@ -162,9 +163,36 @@ export async function scanProjectAssets(project: StoredProject): Promise<Scanned
     }),
   );
 
+  const configMap = new Map<string, { path: string; sha256: string; pluginId?: string; definitionId?: string }>();
+  for (const existing of project.configs ?? []) {
+    configMap.set(existing.path, {
+      path: existing.path,
+      sha256: existing.sha256 ?? "<pending>",
+      pluginId: existing.pluginId,
+      definitionId: existing.definitionId,
+    });
+  }
+  for (const config of configs) {
+    configMap.set(config.path, config);
+  }
+
+  const uploadedSummaries = await listUploadedConfigFiles(project);
+  for (const summary of uploadedSummaries) {
+    const previous = configMap.get(summary.path);
+    const sha256 = summary.sha256 ?? previous?.sha256 ?? computeHashFromString(summary.path);
+    configMap.set(summary.path, {
+      path: summary.path,
+      sha256,
+      pluginId: previous?.pluginId ?? summary.pluginId,
+      definitionId: previous?.definitionId ?? summary.definitionId,
+    });
+  }
+
+  const mergedConfigs = Array.from(configMap.values()).sort((a, b) => a.path.localeCompare(b.path));
+
   return {
     plugins,
-    configs,
+    configs: mergedConfigs,
   };
 }
 
