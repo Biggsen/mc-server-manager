@@ -35,21 +35,8 @@ import {
   type RunLogEntry,
   type StoredPluginRecord,
 } from '../lib/api'
-import {
-  Badge,
-  Button,
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-  Tabs,
-  TabList,
-  TabTrigger,
-  TabPanels,
-  TabPanel,
-  Skeleton,
-} from '../components/ui'
+import { Accordion, Alert, Anchor, Checkbox, Code, Grid, Group, Loader, NativeSelect, ScrollArea, SimpleGrid, Stack, Table, Tabs, Text, Textarea, TextInput, Title } from '@mantine/core'
+import { Badge, Button, Card, CardContent, CardHeader, Skeleton } from '../components/ui'
 import { useToast } from '../components/ui/toast'
 import { ContentSection } from '../components/layout'
 import { useAsyncAction } from '../lib/useAsyncAction'
@@ -1397,411 +1384,545 @@ useEffect(() => {
 
   return (
     <>
-      <Card className="project-summary-card">
-        <CardHeader>
-          <div className="project-summary-card__header">
-            <div>
-              <CardTitle>{project.name}</CardTitle>
-              <CardDescription>
-                {[project.minecraftVersion, project.loader.toUpperCase(), project.source === 'imported' ? 'Imported' : null]
-                  .filter(Boolean)
-                  .join(' · ')}
-              </CardDescription>
-            </div>
-            <Link className="link" to="/projects">
-              ← All Projects
-            </Link>
-          </div>
-        </CardHeader>
+      <Card>
         <CardContent>
-          <div className="project-summary-card__meta">
-            <div>
-              <span className="project-summary-card__meta-label">Minecraft</span>
-              <strong>{project.minecraftVersion}</strong>
-            </div>
-            <div>
-              <span className="project-summary-card__meta-label">Loader</span>
-              <strong>{project.loader.toUpperCase()}</strong>
-            </div>
-            <div>
-              <span className="project-summary-card__meta-label">Plugins</span>
-              <strong>{pluginCount}</strong>
-            </div>
-            <div>
-              <span className="project-summary-card__meta-label">Plugin configs</span>
-              <strong>{pluginConfigCount}</strong>
-            </div>
-            <div>
-              <span className="project-summary-card__meta-label">Last manifest</span>
-              <strong>{lastManifestGenerated}</strong>
-            </div>
-          </div>
-          <div className="project-summary-card__actions">
-            <Button
-              variant="primary"
-              icon={<PackageIcon size={18} weight="fill" aria-hidden="true" />}
-              onClick={() => void queueBuild()}
-              disabled={busy}
-            >
-              Trigger build
-            </Button>
-            <Button
-              variant="ghost"
-              icon={<FileText size={18} weight="fill" aria-hidden="true" />}
-              onClick={() => void generateManifest()}
-              disabled={busy}
-            >
-              Generate manifest
-            </Button>
-            <Button
-              variant="ghost"
-              icon={<MagnifyingGlass size={18} weight="bold" aria-hidden="true" />}
-              onClick={() => void scanAssets()}
-              disabled={busy}
-            >
-              Scan assets
-            </Button>
-            <Button
-              variant="pill"
-              icon={<Play size={18} weight="fill" aria-hidden="true" />}
-              onClick={() => void queueRunLocally()}
-              disabled={busy}
-            >
-              Run locally
-            </Button>
-          </div>
+          <Stack gap="xl">
+            <Group justify="space-between" align="flex-start">
+              <Stack gap={4}>
+                <Title order={2}>{project.name}</Title>
+                <Text size="sm" c="dimmed">
+                  {[project.minecraftVersion, project.loader.toUpperCase(), project.source === 'imported' ? 'Imported' : null]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </Text>
+              </Stack>
+              <Anchor component={Link} to="/projects" size="sm">
+                ← All Projects
+              </Anchor>
+            </Group>
+
+            <SimpleGrid cols={{ base: 1, sm: 2, md: 3, lg: 5 }} spacing="lg">
+              <Stack gap={4}>
+                <Text size="sm" c="dimmed">
+                  Minecraft
+                </Text>
+                <Text fw={600}>{project.minecraftVersion}</Text>
+              </Stack>
+              <Stack gap={4}>
+                <Text size="sm" c="dimmed">
+                  Loader
+                </Text>
+                <Text fw={600}>{project.loader.toUpperCase()}</Text>
+              </Stack>
+              <Stack gap={4}>
+                <Text size="sm" c="dimmed">
+                  Plugins
+                </Text>
+                <Text fw={600}>{pluginCount}</Text>
+              </Stack>
+              <Stack gap={4}>
+                <Text size="sm" c="dimmed">
+                  Plugin configs
+                </Text>
+                <Text fw={600}>{pluginConfigCount}</Text>
+              </Stack>
+              <Stack gap={4}>
+                <Text size="sm" c="dimmed">
+                  Last manifest
+                </Text>
+                <Text fw={600}>{lastManifestGenerated}</Text>
+              </Stack>
+            </SimpleGrid>
+
+            <Group gap="sm" wrap="wrap">
+              <Button
+                variant="primary"
+                icon={<PackageIcon size={18} weight="fill" aria-hidden="true" />}
+                onClick={() => void queueBuild()}
+                disabled={busy}
+              >
+                Trigger build
+              </Button>
+              <Button
+                variant="ghost"
+                icon={<FileText size={18} weight="fill" aria-hidden="true" />}
+                onClick={() => void generateManifest()}
+                disabled={busy}
+              >
+                Generate manifest
+              </Button>
+              <Button
+                variant="ghost"
+                icon={<MagnifyingGlass size={18} weight="bold" aria-hidden="true" />}
+                onClick={() => void scanAssets()}
+                disabled={busy}
+              >
+                Scan assets
+              </Button>
+              <Button
+                variant="pill"
+                icon={<Play size={18} weight="fill" aria-hidden="true" />}
+                onClick={() => void queueRunLocally()}
+                disabled={busy}
+              >
+                Run locally
+              </Button>
+            </Group>
+          </Stack>
         </CardContent>
       </Card>
 
-      <ContentSection as="section" className="project-detail-tabs">
+      <ContentSection as="section" padding="xl">
         <Tabs defaultValue="overview">
-          <TabList>
-            <TabTrigger value="overview">Overview</TabTrigger>
-            <TabTrigger value="profile">Profile</TabTrigger>
-            <TabTrigger value="plugins">Plugins</TabTrigger>
-            <TabTrigger value="configs">Config Files</TabTrigger>
-            <TabTrigger value="builds">Builds</TabTrigger>
-            <TabTrigger value="runs">Runs</TabTrigger>
-            <TabTrigger value="settings">Settings</TabTrigger>
-          </TabList>
-          <TabPanels>
-            <TabPanel value="overview">
-              <div className="layout-grid">
-                <ContentSection as="article">
-                  <header>
-                    <h3>Repository</h3>
-                  </header>
-                  {project.repo ? (
-                    <>
-                      <p className="muted">
-                        Linked repo:{' '}
-                        <a href={project.repo.htmlUrl} target="_blank" rel="noreferrer">
-                          {project.repo.fullName}
-                        </a>
-                      </p>
-                      <p className="muted">Default branch: {project.repo.defaultBranch}</p>
-                    </>
-                  ) : (
-                    <p className="muted">No GitHub repository linked.</p>
-                  )}
-                  {project.manifest && (
-                    <p className="muted">
-                      Last build: {project.manifest.lastBuildId}{' '}
-                      {project.manifest.commitSha && project.repo ? (
-                        <a
-                          href={`${project.repo.htmlUrl.replace(/\.git$/, '')}/commit/${project.manifest.commitSha}`}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          ({project.manifest.commitSha.slice(0, 7)})
-                        </a>
-                      ) : null}
-                    </p>
-                  )}
-                </ContentSection>
-              </div>
-            </TabPanel>
+          <Tabs.List>
+            <Tabs.Tab value="overview">Overview</Tabs.Tab>
+            <Tabs.Tab value="profile">Profile</Tabs.Tab>
+            <Tabs.Tab value="plugins">Plugins</Tabs.Tab>
+            <Tabs.Tab value="configs">Config Files</Tabs.Tab>
+            <Tabs.Tab value="builds">Builds</Tabs.Tab>
+            <Tabs.Tab value="runs">Runs</Tabs.Tab>
+            <Tabs.Tab value="settings">Settings</Tabs.Tab>
+          </Tabs.List>
+            <Tabs.Panel value="overview">
+              <Stack gap="lg" pt="lg">
+                <Card>
+                  <CardContent>
+                    <Stack gap="sm">
+                    <Group justify="space-between" align="flex-start">
+                      <Title order={3}>Repository</Title>
+                      {project.repo && (
+                        <Anchor href={project.repo.htmlUrl} target="_blank" rel="noreferrer" size="sm">
+                          View on GitHub
+                        </Anchor>
+                      )}
+                    </Group>
 
-            <TabPanel value="profile">
-              <ContentSection as="article">
-                <header>
-                  <h3>Profile YAML</h3>
-                  <div className="dev-buttons">
-                    <Button
-                      type="button"
-                      variant="primary"
-                      onClick={() => navigate(`/projects/${project.id}/profile`)}
-                      disabled={busy}
-                    >
-                      Edit profile
-                    </Button>
-                  </div>
-                </header>
-                <p className="muted">
-                  The server profile keeps your build definition in sync. Save updates to{' '}
-                  <code>profiles/base.yml</code> to control plugins, config templates, and overrides used in builds.
-                </p>
-                <p className="muted">
-                  Editing the profile will rescan assets automatically so manifests and builds stay aligned with your latest configuration.
-                </p>
-              </ContentSection>
-            </TabPanel>
+                    {project.repo ? (
+                      <Stack gap={4}>
+                        <Text size="sm" c="dimmed">
+                          Linked repo:
+                        </Text>
+                        <Text fw={600}>{project.repo.fullName}</Text>
+                        <Text size="sm" c="dimmed">
+                          Default branch: {project.repo.defaultBranch}
+                        </Text>
+                      </Stack>
+                    ) : (
+                      <Text size="sm" c="dimmed">
+                        No GitHub repository linked.
+                      </Text>
+                    )}
 
-            <TabPanel value="builds">
-              <ContentSection as="article">
-                <header>
-                  <h3>Build History</h3>
-                  {latestBuild?.artifactPath && (
-                    <a
-                      className="link"
-                      href={`${API_BASE}/builds/${latestBuild.id}/artifact`}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      Download latest artifact
-                    </a>
-                  )}
-                </header>
-                {builds.length === 0 && <p className="muted">No builds yet.</p>}
-                {builds.length > 0 && (
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>Build</th>
-                        <th>Status</th>
-                        <th>Created</th>
-                        <th>Finished</th>
-                        <th>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {builds.map((build) => (
-                        <tr key={build.id}>
-                          <td>{build.manifestBuildId ?? build.id}</td>
-                          <td>{build.status.toUpperCase()}</td>
-                          <td>{new Date(build.createdAt).toLocaleString()}</td>
-                          <td>{build.finishedAt ? new Date(build.finishedAt).toLocaleString() : '—'}</td>
-                          <td className="dev-buttons">
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              onClick={async () => {
-                                try {
-                                  const manifest = await fetchBuildManifest(build.id)
-                                  setManifestPreview({
-                                    buildId: build.manifestBuildId ?? build.id,
-                                    content: manifest,
-                                  })
-                                } catch (err) {
-                                  toast({
-                                    title: 'Failed to load manifest',
-                                    description: err instanceof Error
-                                      ? err.message
-                                      : 'Failed to load manifest',
-                                    variant: 'danger',
-                                  })
-                                }
-                              }}
+                    {project.manifest && (
+                      <Stack gap={2}>
+                        <Text size="sm" c="dimmed">
+                          Last build
+                        </Text>
+                        <Group gap="xs">
+                          <Text fw={600}>{project.manifest.lastBuildId ?? '—'}</Text>
+                          {project.manifest.commitSha && project.repo ? (
+                            <Anchor
+                              href={`${project.repo.htmlUrl.replace(/\.git$/, '')}/commit/${project.manifest.commitSha}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              size="sm"
                             >
-                              View Manifest
-                            </Button>
-                            {build.artifactPath && (
-                              <a
-                                className="ghost"
-                                href={`${API_BASE}/builds/${build.id}/artifact`}
-                                target="_blank"
-                                rel="noreferrer"
-                              >
-                                Download Artifact
-                              </a>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </ContentSection>
-
-              {manifestPreview && (
-                <ContentSection as="article">
-                  <header>
-                    <h3>Manifest: {manifestPreview.buildId}</h3>
-                    <Button variant="ghost" onClick={() => setManifestPreview(null)}>
-                      Close
-                    </Button>
-                  </header>
-                  <pre className="log-box">
-                    {JSON.stringify(manifestPreview.content, null, 2)}
-                  </pre>
-                </ContentSection>
-              )}
-            </TabPanel>
-
-            <TabPanel value="runs">
-              <ContentSection as="article">
-                <header>
-                  <h3>Local Runs</h3>
-                  <div className="dev-buttons">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      onClick={() => void resetWorkspaceAction()}
-                      disabled={resetWorkspaceBusy}
-                    >
-                      Reset workspace
-                    </Button>
-                  </div>
-                </header>
-                {runsError && <p className="muted">Run controls: {runsError}</p>}
-                {runs.length === 0 && <p className="muted">No local run activity yet.</p>}
-                {runs.length > 0 && (
-                  <ul className="project-list">
-                    {runs.map((run) => (
-                      <li key={run.id}>
-                        <div>
-                          <strong>{run.id}</strong>
-                          <p className="muted">
-                            <Badge variant="outline">{runStatusLabel[run.status]}</Badge> · Started{' '}
-                            {new Date(run.createdAt).toLocaleString()}
-                            {run.finishedAt && (
-                              <>
-                                {' '}
-                                · Finished {new Date(run.finishedAt).toLocaleString()}
-                              </>
-                            )}
-                          </p>
-                          {run.port && <p className="muted">Port: {run.port} (local)</p>}
-                          {run.containerName && <p className="muted">Container: {run.containerName}</p>}
-                          {run.workspacePath && (
-                            <p className="muted">
-                              Workspace: <code>{run.workspacePath}</code>
-                            </p>
+                              {project.manifest.commitSha.slice(0, 7)}
+                            </Anchor>
+                          ) : (
+                            <Text size="sm" c="dimmed">
+                              No commit recorded
+                            </Text>
                           )}
-                          {run.workspaceStatus && (
-                            <p className="muted">
-                              Workspace build {run.workspaceStatus.lastBuildId ?? 'unknown'} · Last sync{' '}
-                              {run.workspaceStatus.lastSyncedAt
-                                ? new Date(run.workspaceStatus.lastSyncedAt).toLocaleString()
-                                : 'unknown'}
-                              {run.workspaceStatus.dirtyPaths.length > 0
-                                ? ` · ${run.workspaceStatus.dirtyPaths.length} local change${
-                                    run.workspaceStatus.dirtyPaths.length === 1 ? '' : 's'
-                                  }`
-                                : ' · In sync'}
-                            </p>
-                          )}
-                          {run.workspaceStatus?.dirtyPaths?.length ? (
-                            <details>
-                              <summary>Local changes ({run.workspaceStatus.dirtyPaths.length})</summary>
-                              <ul className="muted">
-                                {run.workspaceStatus.dirtyPaths.slice(0, 10).map((path) => (
-                                  <li key={path}>{path}</li>
-                                ))}
-                                {run.workspaceStatus.dirtyPaths.length > 10 && (
-                                  <li>...and {run.workspaceStatus.dirtyPaths.length - 10} more</li>
-                                )}
-                              </ul>
-                            </details>
-                          ) : null}
-                          {run.logs.length > 0 && (
-                            <details>
-                              <summary>View logs</summary>
-                              <pre
-                                className="log-box"
-                                ref={(element) => {
-                                  logRefs.current[run.id] = element
-                                }}
-                              >
-                                {run.logs
-                                  .map(
-                                    (entry) =>
-                                      `[${new Date(entry.timestamp).toLocaleTimeString()}][${
-                                        entry.stream
-                                      }] ${entry.message}`,
-                                  )
-                                  .join('\n')}
-                              </pre>
-                            </details>
-                          )}
-                          {run.status === 'running' && (
-                            <div>
-                              {run.consoleAvailable ? (
-                                <form
-                                  style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}
-                                  onSubmit={(event) => {
-                                    event.preventDefault()
-                                    const command = commandInputs[run.id]?.trim() ?? ''
-                                    if (!command) {
-                                      return
-                                    }
-                                    void dispatchRunCommand(run, command)
-                                  }}
-                                >
-                                  <input
-                                    type="text"
-                                    aria-label="Console command"
-                                    placeholder="/say Hello"
-                                    value={commandInputs[run.id] ?? ''}
-                                    onChange={(event) =>
-                                      handleCommandChange(run.id, event.target.value)
-                                    }
-                                    disabled={Boolean(commandBusy[run.id])}
-                                    style={{ flex: 1 }}
-                                  />
-                                  <Button
-                                    type="submit"
-                                    disabled={
-                                      Boolean(commandBusy[run.id]) ||
-                                      !commandInputs[run.id] ||
-                                      commandInputs[run.id].trim().length === 0
-                                    }
-                                  >
-                                    Send
-                                  </Button>
-                                </form>
-                              ) : (
-                                <p className="muted">Console not available yet.</p>
-                              )}
-                            </div>
-                          )}
-                          {run.error && <p className="error-text">{run.error}</p>}
-                        </div>
-                        {(run.status === 'running' ||
-                          run.status === 'pending' ||
-                          run.status === 'stopping') && (
-                          <div className="dev-buttons">
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              disabled={run.status === 'stopping' || runBusy[run.id]}
-                              onClick={() => void requestStopRun(run)}
-                            >
-                              {run.status === 'stopping' || runBusy[run.id] ? 'Stopping…' : 'Stop'}
-                            </Button>
-                          </div>
+                        </Group>
+                        {project.manifest.generatedAt && (
+                          <Text size="sm" c="dimmed">
+                            Generated {new Date(project.manifest.generatedAt).toLocaleString()}
+                          </Text>
                         )}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </ContentSection>
-            </TabPanel>
+                      </Stack>
+                    )}
+                    </Stack>
+                  </CardContent>
+                </Card>
 
-            <TabPanel value="plugins">
-              <div className="assets-grid">
-                <ContentSection as="article">
-                  <header>
-                    <div
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        gap: '1rem',
-                      }}
-                    >
-                      <h3>Configured Plugins</h3>
-                      <div className="dev-buttons">
+                <Card>
+                  <CardContent>
+                    <Stack gap="md">
+                    <Title order={3}>Quick actions</Title>
+                    <Text size="sm" c="dimmed">
+                      Use these shortcuts to keep the project in sync.
+                    </Text>
+                    <Group gap="sm" wrap="wrap">
+                      <Button
+                        variant="ghost"
+                        onClick={() => void scanAssets()}
+                        disabled={busy}
+                      >
+                        Rescan assets
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        onClick={() => void queueBuild()}
+                        disabled={busy}
+                      >
+                        Trigger build
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        onClick={() => void generateManifest()}
+                        disabled={busy}
+                      >
+                        Generate manifest
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        onClick={() => void queueRunLocally()}
+                        disabled={busy}
+                      >
+                        Run locally
+                      </Button>
+                    </Group>
+                    </Stack>
+                  </CardContent>
+                </Card>
+              </Stack>
+            </Tabs.Panel>
+
+            <Tabs.Panel value="profile">
+              <Stack gap="lg" pt="lg">
+                <Card>
+                  <CardContent>
+                    <Stack gap="md">
+                      <Group justify="space-between" align="flex-start">
+                        <Title order={3}>Profile YAML</Title>
+                        <Button
+                          type="button"
+                          variant="primary"
+                          onClick={() => navigate(`/projects/${project.id}/profile`)}
+                          disabled={busy}
+                        >
+                          Edit profile
+                        </Button>
+                      </Group>
+                      <Text size="sm" c="dimmed">
+                        The server profile keeps your build definition in sync. Save updates to{' '}
+                        <Code>profiles/base.yml</Code> to control plugins, config templates, and overrides used in builds.
+                      </Text>
+                      <Text size="sm" c="dimmed">
+                        Editing the profile will rescan assets automatically so manifests and builds stay aligned with your latest configuration.
+                      </Text>
+                    </Stack>
+                  </CardContent>
+                </Card>
+              </Stack>
+            </Tabs.Panel>
+
+            <Tabs.Panel value="builds">
+              <Stack gap="lg" pt="lg">
+                <Card>
+                  <CardContent>
+                    <Stack gap="md">
+                      <Group justify="space-between" align="flex-start">
+                        <Title order={3}>Build History</Title>
+                        {latestBuild?.artifactPath && (
+                          <Anchor
+                            href={`${API_BASE}/builds/${latestBuild.id}/artifact`}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            Download latest artifact
+                          </Anchor>
+                        )}
+                      </Group>
+                      {builds.length === 0 && (
+                        <Text size="sm" c="dimmed">No builds yet.</Text>
+                      )}
+                      {builds.length > 0 && (
+                        <ScrollArea>
+                          <Table>
+                            <Table.Thead>
+                              <Table.Tr>
+                                <Table.Th>Build</Table.Th>
+                                <Table.Th>Status</Table.Th>
+                                <Table.Th>Created</Table.Th>
+                                <Table.Th>Finished</Table.Th>
+                                <Table.Th>Actions</Table.Th>
+                              </Table.Tr>
+                            </Table.Thead>
+                            <Table.Tbody>
+                              {builds.map((build) => (
+                                <Table.Tr key={build.id}>
+                                  <Table.Td>{build.manifestBuildId ?? build.id}</Table.Td>
+                                  <Table.Td>{build.status.toUpperCase()}</Table.Td>
+                                  <Table.Td>{new Date(build.createdAt).toLocaleString()}</Table.Td>
+                                  <Table.Td>{build.finishedAt ? new Date(build.finishedAt).toLocaleString() : '—'}</Table.Td>
+                                  <Table.Td>
+                                    <Group gap="xs">
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        onClick={async () => {
+                                          try {
+                                            const manifest = await fetchBuildManifest(build.id)
+                                            setManifestPreview({
+                                              buildId: build.manifestBuildId ?? build.id,
+                                              content: manifest,
+                                            })
+                                          } catch (err) {
+                                            toast({
+                                              title: 'Failed to load manifest',
+                                              description: err instanceof Error
+                                                ? err.message
+                                                : 'Failed to load manifest',
+                                              variant: 'danger',
+                                            })
+                                          }
+                                        }}
+                                      >
+                                        View Manifest
+                                      </Button>
+                                      {build.artifactPath && (
+                                        <Anchor
+                                          href={`${API_BASE}/builds/${build.id}/artifact`}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                        >
+                                          Download Artifact
+                                        </Anchor>
+                                      )}
+                                    </Group>
+                                  </Table.Td>
+                                </Table.Tr>
+                              ))}
+                            </Table.Tbody>
+                          </Table>
+                        </ScrollArea>
+                      )}
+                    </Stack>
+                  </CardContent>
+                </Card>
+
+                {manifestPreview && (
+                  <Card>
+                    <CardContent>
+                      <Stack gap="md">
+                        <Group justify="space-between" align="flex-start">
+                          <Title order={3}>Manifest: {manifestPreview.buildId}</Title>
+                          <Button variant="ghost" onClick={() => setManifestPreview(null)}>
+                            Close
+                          </Button>
+                        </Group>
+                        <ScrollArea>
+                          <Code block style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                            {JSON.stringify(manifestPreview.content, null, 2)}
+                          </Code>
+                        </ScrollArea>
+                      </Stack>
+                    </CardContent>
+                  </Card>
+                )}
+              </Stack>
+            </Tabs.Panel>
+
+            <Tabs.Panel value="runs">
+              <Stack gap="lg" pt="lg">
+                <Card>
+                  <CardContent>
+                    <Stack gap="md">
+                      <Group justify="space-between" align="flex-start">
+                        <Title order={3}>Local Runs</Title>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          onClick={() => void resetWorkspaceAction()}
+                          disabled={resetWorkspaceBusy}
+                        >
+                          Reset workspace
+                        </Button>
+                      </Group>
+                      {runsError && (
+                        <Text size="sm" c="dimmed">Run controls: {runsError}</Text>
+                      )}
+                      {runs.length === 0 && (
+                        <Text size="sm" c="dimmed">No local run activity yet.</Text>
+                      )}
+                      {runs.length > 0 && (
+                        <Stack gap="md">
+                          {runs.map((run) => (
+                            <Card key={run.id}>
+                              <CardContent>
+                                <Stack gap="sm">
+                                  <Group justify="space-between" align="flex-start">
+                                    <Stack gap={4}>
+                                      <Text fw={600}>{run.id}</Text>
+                                      <Group gap="xs" wrap="wrap">
+                                        <Badge variant="outline">{runStatusLabel[run.status]}</Badge>
+                                        <Text size="sm" c="dimmed">
+                                          Started {new Date(run.createdAt).toLocaleString()}
+                                          {run.finishedAt && (
+                                            <> · Finished {new Date(run.finishedAt).toLocaleString()}</>
+                                          )}
+                                        </Text>
+                                      </Group>
+                                      {run.port && (
+                                        <Text size="sm" c="dimmed">Port: {run.port} (local)</Text>
+                                      )}
+                                      {run.containerName && (
+                                        <Text size="sm" c="dimmed">Container: {run.containerName}</Text>
+                                      )}
+                                      {run.workspacePath && (
+                                        <Text size="sm" c="dimmed">
+                                          Workspace: <Code>{run.workspacePath}</Code>
+                                        </Text>
+                                      )}
+                                      {run.workspaceStatus && (
+                                        <Text size="sm" c="dimmed">
+                                          Workspace build {run.workspaceStatus.lastBuildId ?? 'unknown'} · Last sync{' '}
+                                          {run.workspaceStatus.lastSyncedAt
+                                            ? new Date(run.workspaceStatus.lastSyncedAt).toLocaleString()
+                                            : 'unknown'}
+                                          {run.workspaceStatus.dirtyPaths.length > 0
+                                            ? ` · ${run.workspaceStatus.dirtyPaths.length} local change${
+                                                run.workspaceStatus.dirtyPaths.length === 1 ? '' : 's'
+                                              }`
+                                            : ' · In sync'}
+                                        </Text>
+                                      )}
+                                    </Stack>
+                                    {(run.status === 'running' ||
+                                      run.status === 'pending' ||
+                                      run.status === 'stopping') && (
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        disabled={run.status === 'stopping' || runBusy[run.id]}
+                                        onClick={() => void requestStopRun(run)}
+                                      >
+                                        {run.status === 'stopping' || runBusy[run.id] ? 'Stopping…' : 'Stop'}
+                                      </Button>
+                                    )}
+                                  </Group>
+
+                                  {run.workspaceStatus?.dirtyPaths?.length ? (
+                                    <Accordion>
+                                      <Accordion.Item value="dirty-paths">
+                                        <Accordion.Control>
+                                          Local changes ({run.workspaceStatus.dirtyPaths.length})
+                                        </Accordion.Control>
+                                        <Accordion.Panel>
+                                          <Stack gap={4}>
+                                            {run.workspaceStatus.dirtyPaths.slice(0, 10).map((path) => (
+                                              <Text key={path} size="sm" c="dimmed">
+                                                {path}
+                                              </Text>
+                                            ))}
+                                            {run.workspaceStatus.dirtyPaths.length > 10 && (
+                                              <Text size="sm" c="dimmed">
+                                                ...and {run.workspaceStatus.dirtyPaths.length - 10} more
+                                              </Text>
+                                            )}
+                                          </Stack>
+                                        </Accordion.Panel>
+                                      </Accordion.Item>
+                                    </Accordion>
+                                  ) : null}
+
+                                  {run.logs.length > 0 && (
+                                    <Accordion>
+                                      <Accordion.Item value="logs">
+                                        <Accordion.Control>View logs</Accordion.Control>
+                                        <Accordion.Panel>
+                                          <ScrollArea>
+                                            <Code
+                                              block
+                                              ref={(element) => {
+                                                logRefs.current[run.id] = element as HTMLPreElement | null
+                                              }}
+                                              style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}
+                                            >
+                                              {run.logs
+                                                .map(
+                                                  (entry) =>
+                                                    `[${new Date(entry.timestamp).toLocaleTimeString()}][${
+                                                      entry.stream
+                                                    }] ${entry.message}`,
+                                                )
+                                                .join('\n')}
+                                            </Code>
+                                          </ScrollArea>
+                                        </Accordion.Panel>
+                                      </Accordion.Item>
+                                    </Accordion>
+                                  )}
+
+                                  {run.status === 'running' && (
+                                    <Stack gap="xs">
+                                      {run.consoleAvailable ? (
+                                        <form
+                                          onSubmit={(event) => {
+                                            event.preventDefault()
+                                            const command = commandInputs[run.id]?.trim() ?? ''
+                                            if (!command) {
+                                              return
+                                            }
+                                            void dispatchRunCommand(run, command)
+                                          }}
+                                        >
+                                          <Group gap="xs">
+                                            <TextInput
+                                              type="text"
+                                              aria-label="Console command"
+                                              placeholder="/say Hello"
+                                              value={commandInputs[run.id] ?? ''}
+                                              onChange={(event) =>
+                                                handleCommandChange(run.id, event.target.value)
+                                              }
+                                              disabled={Boolean(commandBusy[run.id])}
+                                              style={{ flex: 1 }}
+                                            />
+                                            <Button
+                                              type="submit"
+                                              disabled={
+                                                Boolean(commandBusy[run.id]) ||
+                                                !commandInputs[run.id] ||
+                                                commandInputs[run.id].trim().length === 0
+                                              }
+                                            >
+                                              Send
+                                            </Button>
+                                          </Group>
+                                        </form>
+                                      ) : (
+                                        <Text size="sm" c="dimmed">Console not available yet.</Text>
+                                      )}
+                                    </Stack>
+                                  )}
+
+                                  {run.error && (
+                                    <Alert color="red" title="Error">
+                                      {run.error}
+                                    </Alert>
+                                  )}
+                                </Stack>
+                              </CardContent>
+                            </Card>
+                          ))}
+                        </Stack>
+                      )}
+                    </Stack>
+                  </CardContent>
+                </Card>
+              </Stack>
+            </Tabs.Panel>
+
+            <Tabs.Panel value="plugins">
+              <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="lg" pt="lg">
+                <Card>
+                  <CardContent>
+                    <Stack gap="md">
+                      <Group justify="space-between" align="flex-start">
+                        <Title order={3}>Configured Plugins</Title>
                         <Button
                           type="button"
                           variant="primary"
@@ -1810,375 +1931,697 @@ useEffect(() => {
                         >
                           {addPluginOpen ? 'Close' : 'Add plugin'}
                         </Button>
-                      </div>
-                    </div>
-                  </header>
-                  {project.plugins && project.plugins.length > 0 ? (
-                    <ul className="project-list">
-                      {project.plugins.map((plugin) => {
-                        const supportRange = formatMinecraftRange(
-                          plugin.minecraftVersionMin ?? plugin.source?.minecraftVersionMin,
-                          plugin.minecraftVersionMax ?? plugin.source?.minecraftVersionMax,
-                        )
-                        const sourceKind = getStoredPluginSourceKind(plugin)
-                        return (
-                          <li key={`${plugin.id}:${plugin.version}`}>
-                            <div>
-                              <strong>{plugin.id}</strong>{' '}
-                              <Badge variant="outline">{sourceBadgeLabel[sourceKind]}</Badge>{' '}
-                              {plugin.provider && plugin.provider !== 'custom' && (
-                                <Badge variant="accent">{plugin.provider}</Badge>
-                              )}{' '}
-                              <span className="muted">v{plugin.version}</span>
-                              {supportRange && <p className="muted">Supports: {supportRange}</p>}
-                              {plugin.source?.projectUrl && (
-                                <p className="muted">
-                                  <a href={plugin.source.projectUrl} target="_blank" rel="noreferrer">
-                                    View project
-                                  </a>
-                                </p>
-                              )}
-                              {plugin.source?.downloadUrl && (
-                                <p className="muted">
-                                  <a href={plugin.source.downloadUrl} target="_blank" rel="noreferrer">
-                                    Download URL
-                                  </a>
-                                </p>
-                              )}
-                              {plugin.source?.uploadPath && (
-                                <p className="muted">Uploaded jar: {plugin.source.uploadPath}</p>
-                              )}
-                              {(plugin.cachePath ?? plugin.source?.cachePath) && (
-                                <p className="muted">
-                                  Cache: {plugin.cachePath ?? plugin.source?.cachePath}
-                                </p>
-                              )}
-                            </div>
-                            <div className="dev-buttons">
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                onClick={() => handleRemovePlugin(plugin.id)}
-                              >
-                                Remove
-                              </Button>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              onClick={() => void openPluginConfigManager(plugin.id)}
-                            >
-                              Manage config paths
-                            </Button>
-                            </div>
-                          </li>
-                        )
-                      })}
-                    </ul>
-                  ) : (
-                    <p className="muted">No plugins configured yet.</p>
-                  )}
-                </ContentSection>
+                      </Group>
+                      {project.plugins && project.plugins.length > 0 ? (
+                        <Stack gap="md">
+                          {project.plugins.map((plugin) => {
+                            const supportRange = formatMinecraftRange(
+                              plugin.minecraftVersionMin ?? plugin.source?.minecraftVersionMin,
+                              plugin.minecraftVersionMax ?? plugin.source?.minecraftVersionMax,
+                            )
+                            const sourceKind = getStoredPluginSourceKind(plugin)
+                            return (
+                              <Card key={`${plugin.id}:${plugin.version}`}>
+                                <CardContent>
+                                  <Stack gap="sm">
+                                    <Group justify="space-between" align="flex-start">
+                                      <Stack gap={4}>
+                                        <Group gap="xs" wrap="wrap">
+                                          <Text fw={600}>{plugin.id}</Text>
+                                          <Badge variant="outline">{sourceBadgeLabel[sourceKind]}</Badge>
+                                          {plugin.provider && plugin.provider !== 'custom' && (
+                                            <Badge variant="accent">{plugin.provider}</Badge>
+                                          )}
+                                          <Text size="sm" c="dimmed">v{plugin.version}</Text>
+                                        </Group>
+                                        {supportRange && (
+                                          <Text size="sm" c="dimmed">Supports: {supportRange}</Text>
+                                        )}
+                                        {plugin.source?.projectUrl && (
+                                          <Anchor href={plugin.source.projectUrl} target="_blank" rel="noreferrer" size="sm">
+                                            View project
+                                          </Anchor>
+                                        )}
+                                        {plugin.source?.downloadUrl && (
+                                          <Anchor href={plugin.source.downloadUrl} target="_blank" rel="noreferrer" size="sm">
+                                            Download URL
+                                          </Anchor>
+                                        )}
+                                        {plugin.source?.uploadPath && (
+                                          <Text size="sm" c="dimmed">Uploaded jar: {plugin.source.uploadPath}</Text>
+                                        )}
+                                        {(plugin.cachePath ?? plugin.source?.cachePath) && (
+                                          <Text size="sm" c="dimmed">
+                                            Cache: {plugin.cachePath ?? plugin.source?.cachePath}
+                                          </Text>
+                                        )}
+                                      </Stack>
+                                      <Group gap="xs">
+                                        <Button
+                                          type="button"
+                                          variant="ghost"
+                                          onClick={() => handleRemovePlugin(plugin.id)}
+                                        >
+                                          Remove
+                                        </Button>
+                                        <Button
+                                          type="button"
+                                          variant="ghost"
+                                          onClick={() => void openPluginConfigManager(plugin.id)}
+                                        >
+                                          Manage config paths
+                                        </Button>
+                                      </Group>
+                                    </Group>
+                                  </Stack>
+                                </CardContent>
+                              </Card>
+                            )
+                          })}
+                        </Stack>
+                      ) : (
+                        <Text size="sm" c="dimmed">No plugins configured yet.</Text>
+                      )}
+                    </Stack>
+                  </CardContent>
+                </Card>
 
                 {addPluginOpen && (
-                  <ContentSection as="article">
-                    <header>
-                      <h3>Add Plugin to Project</h3>
-                    </header>
+                  <Card>
+                    <CardContent>
+                      <Stack gap="md">
+                        <Title order={3}>Add Plugin to Project</Title>
 
-                    <div
-                      className="dev-buttons"
-                      style={{ marginBottom: '1rem', flexWrap: 'wrap', rowGap: '0.5rem' }}
-                    >
-                      <Button
-                        type="button"
-                        variant={addPluginMode === 'library' ? 'primary' : 'ghost'}
-                        onClick={() => handleSelectAddPluginMode('library')}
-                        disabled={addPluginBusy}
-                      >
-                        From library
-                      </Button>
-                      <Button
-                        type="button"
-                        variant={addPluginMode === 'upload' ? 'primary' : 'ghost'}
-                        onClick={() => handleSelectAddPluginMode('upload')}
-                        disabled={addPluginBusy}
-                      >
-                        Upload jar
-                      </Button>
-                    </div>
-
-                    {addPluginError && <p className="error-text">{addPluginError}</p>}
-
-                    {addPluginMode === 'library' && (
-                      <>
-                        {libraryLoading && <p className="muted">Loading plugin library…</p>}
-                        {libraryError && (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                            <p className="error-text">{libraryError}</p>
-                            <div className="dev-buttons">
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                onClick={() => void handleRefreshLibrary()}
-                                disabled={libraryLoading}
-                              >
-                                Retry
-                              </Button>
-                            </div>
-                          </div>
-                        )}
-                        {!libraryLoading && !libraryError && libraryPlugins.length === 0 && (
-                          <p className="muted">
-                            No saved plugins yet. Add plugins from the Plugin Library page first.
-                          </p>
-                        )}
-                        {!libraryLoading && !libraryError && libraryPlugins.length > 0 && (
-                          <form onSubmit={handleAddLibraryPlugin} className="form-grid">
-                            <div className="field">
-                              <label htmlFor="library-plugin-select">Library plugin</label>
-                              <select
-                                id="library-plugin-select"
-                                value={selectedLibraryPlugin}
-                                onChange={(event) => setSelectedLibraryPlugin(event.target.value)}
-                                required
-                              >
-                                <option value="">Select a plugin</option>
-                                {libraryPlugins.map((plugin) => {
-                                  const key = `${plugin.id}:${plugin.version}`
-                                  const providerLabel =
-                                    plugin.provider && plugin.provider !== 'custom'
-                                      ? ` (${plugin.provider})`
-                                      : ''
-                                  const isAlreadyAdded = existingProjectPlugins.has(key)
-                                  return (
-                                    <option key={key} value={key} disabled={isAlreadyAdded}>
-                                      {plugin.id} v{plugin.version}
-                                      {providerLabel}
-                                      {isAlreadyAdded ? ' · already added' : ''}
-                                    </option>
-                                  )
-                                })}
-                              </select>
-                            </div>
-                            <div className="dev-buttons" style={{ gridColumn: '1 / -1' }}>
-                              <Button
-                                type="submit"
-                                disabled={!selectedLibraryPlugin || addPluginBusy}
-                              >
-                                {addPluginBusy ? 'Adding…' : 'Add plugin'}
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                onClick={() => void handleRefreshLibrary()}
-                                disabled={libraryLoading}
-                              >
-                                Refresh
-                              </Button>
-                            </div>
-                          </form>
-                        )}
-                      </>
-                    )}
-
-                    {addPluginMode === 'upload' && (
-                      <form onSubmit={handleUploadPlugin} className="form-grid">
-                        <div className="field">
-                          <label htmlFor="upload-plugin-id">Plugin id</label>
-                          <input
-                            id="upload-plugin-id"
-                            value={uploadPluginId}
-                            onChange={(event) => setUploadPluginId(event.target.value)}
-                            placeholder="WorldGuard"
-                            required
-                            disabled={addPluginBusy}
-                          />
-                        </div>
-                        <div className="field">
-                          <label htmlFor="upload-plugin-version">Version</label>
-                          <input
-                            id="upload-plugin-version"
-                            value={uploadPluginVersion}
-                            onChange={(event) => setUploadPluginVersion(event.target.value)}
-                            placeholder="7.0.9"
-                            required
-                            disabled={addPluginBusy}
-                          />
-                        </div>
-                        <div className="field">
-                          <label htmlFor="upload-plugin-file">Plugin jar</label>
-                          <input
-                            id="upload-plugin-file"
-                            type="file"
-                            accept=".jar,.zip"
-                            onChange={(event) => setUploadPluginFile(event.target.files?.[0] ?? null)}
-                            required
-                            disabled={addPluginBusy}
-                          />
-                          {uploadPluginFile && (
-                            <p className="muted">Selected file: {uploadPluginFile.name}</p>
-                          )}
-                        </div>
-                        <div className="field">
-                          <label htmlFor="upload-plugin-min">Minecraft version min</label>
-                          <input
-                            id="upload-plugin-min"
-                            value={uploadPluginMin}
-                            onChange={(event) => setUploadPluginMin(event.target.value)}
-                            placeholder="1.20"
-                            disabled={addPluginBusy}
-                          />
-                        </div>
-                        <div className="field">
-                          <label htmlFor="upload-plugin-max">Minecraft version max</label>
-                          <input
-                            id="upload-plugin-max"
-                            value={uploadPluginMax}
-                            onChange={(event) => setUploadPluginMax(event.target.value)}
-                            placeholder="1.20.1"
-                            disabled={addPluginBusy}
-                          />
-                        </div>
-                        <div className="dev-buttons" style={{ gridColumn: '1 / -1' }}>
-                          <Button
-                            type="submit"
-                            disabled={
-                              addPluginBusy ||
-                              !uploadPluginId.trim() ||
-                              !uploadPluginVersion.trim() ||
-                              !uploadPluginFile
-                            }
-                          >
-                            {addPluginBusy ? 'Uploading…' : 'Upload plugin'}
-                          </Button>
-                          <Button type="button" variant="ghost" onClick={closeAddPluginPanel}>
-                            Cancel
-                          </Button>
-                        </div>
-                      </form>
-                    )}
-                  </ContentSection>
-                )}
-
-                <ContentSection as="article">
-                  <header>
-                    <h3>Plugin Library</h3>
-                  </header>
-                  <p className="muted">
-                    Manage saved plugins and add new ones from the{' '}
-                    <Link to="/plugins" className="link">
-                      Plugin Library
-                    </Link>{' '}
-                    page.
-                  </p>
-                </ContentSection>
-
-                {pluginConfigManager && (
-                  <ContentSection as="article" className="plugin-config-manager">
-                    <header>
-                      <div
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          gap: '1rem',
-                        }}
-                      >
-                        <div>
-                          <h3>
-                            Manage Config Paths · {pluginConfigManager.pluginId}{' '}
-                            <span className="muted">v{pluginConfigManager.pluginVersion ?? 'latest'}</span>
-                          </h3>
-                          <p className="muted">
-                            Define per-project config file paths and requirements. These mappings drive uploads,
-                            manifests, and status indicators.
-                          </p>
-                        </div>
-                        <div className="dev-buttons">
+                        <Group gap="xs" wrap="wrap">
                           <Button
                             type="button"
-                            variant="ghost"
-                            onClick={() => void refreshPluginConfigManager()}
-                            disabled={pluginConfigManager.busy || pluginConfigManager.saving}
+                            variant={addPluginMode === 'library' ? 'primary' : 'ghost'}
+                            onClick={() => handleSelectAddPluginMode('library')}
+                            disabled={addPluginBusy}
                           >
-                            Refresh
+                            From library
                           </Button>
                           <Button
                             type="button"
-                            variant="ghost"
-                            onClick={closePluginConfigManager}
-                            disabled={pluginConfigManager.saving}
+                            variant={addPluginMode === 'upload' ? 'primary' : 'ghost'}
+                            onClick={() => handleSelectAddPluginMode('upload')}
+                            disabled={addPluginBusy}
                           >
-                            Close
+                            Upload jar
                           </Button>
-                        </div>
-                      </div>
-                    </header>
+                        </Group>
 
-                    {pluginConfigManager.error && <p className="error-text">{pluginConfigManager.error}</p>}
-                    {pluginConfigManager.busy && <p className="muted">Loading plugin config paths…</p>}
+                        {addPluginError && (
+                          <Alert color="red" title="Error">
+                            {addPluginError}
+                          </Alert>
+                        )}
 
-                    {!pluginConfigManager.busy && (
-                      <>
-                        <div className="config-definition-list">
-                          {pluginConfigManager.drafts.length === 0 && (
-                            <p className="muted">No config mappings yet. Add a custom entry or define paths in the library.</p>
-                          )}
-                          {pluginConfigManager.drafts.map((draft, index) => (
-                            <div key={draft.key} className="config-definition-card">
-                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <div>
-                                  <strong>{draft.label || draft.definitionId}</strong>{' '}
-                                  {draft.source === 'custom' && <Badge variant="accent">Custom</Badge>}{' '}
-                                  <span className="muted">#{index + 1}</span>
-                                </div>
-                                <div className="dev-buttons">
+                        {addPluginMode === 'library' && (
+                          <>
+                            {libraryLoading && <Loader size="sm" />}
+                            {libraryError && (
+                              <Stack gap="sm">
+                                <Alert color="red" title="Error">
+                                  {libraryError}
+                                </Alert>
+                                <Group>
                                   <Button
                                     type="button"
                                     variant="ghost"
-                                    onClick={() =>
-                                      prepareConfigUpload(
-                                        pluginConfigManager.pluginId,
-                                        draft.definitionId,
-                                        draft.path || draft.defaultPath,
-                                      )
-                                    }
+                                    onClick={() => void handleRefreshLibrary()}
+                                    disabled={libraryLoading}
                                   >
-                                    Upload file
+                                    Retry
                                   </Button>
-                                  {draft.source === 'custom' && (
+                                </Group>
+                              </Stack>
+                            )}
+                            {!libraryLoading && !libraryError && libraryPlugins.length === 0 && (
+                              <Text size="sm" c="dimmed">
+                                No saved plugins yet. Add plugins from the Plugin Library page first.
+                              </Text>
+                            )}
+                            {!libraryLoading && !libraryError && libraryPlugins.length > 0 && (
+                              <form onSubmit={handleAddLibraryPlugin}>
+                                <Stack gap="md">
+                                  <NativeSelect
+                                    label="Library plugin"
+                                    id="library-plugin-select"
+                                    value={selectedLibraryPlugin}
+                                    onChange={(event) => setSelectedLibraryPlugin(event.target.value)}
+                                    required
+                                    data={[
+                                      { value: '', label: 'Select a plugin' },
+                                      ...libraryPlugins.map((plugin) => {
+                                        const key = `${plugin.id}:${plugin.version}`
+                                        const providerLabel =
+                                          plugin.provider && plugin.provider !== 'custom'
+                                            ? ` (${plugin.provider})`
+                                            : ''
+                                        const isAlreadyAdded = existingProjectPlugins.has(key)
+                                        return {
+                                          value: key,
+                                          label: `${plugin.id} v${plugin.version}${providerLabel}${isAlreadyAdded ? ' · already added' : ''}`,
+                                          disabled: isAlreadyAdded,
+                                        }
+                                      }),
+                                    ]}
+                                  />
+                                  <Group>
+                                    <Button
+                                      type="submit"
+                                      disabled={!selectedLibraryPlugin || addPluginBusy}
+                                    >
+                                      {addPluginBusy ? 'Adding…' : 'Add plugin'}
+                                    </Button>
                                     <Button
                                       type="button"
                                       variant="ghost"
-                                      onClick={() => removePluginConfigDraft(draft.key)}
-                                      disabled={pluginConfigManager.saving}
+                                      onClick={() => void handleRefreshLibrary()}
+                                      disabled={libraryLoading}
                                     >
-                                      Remove
+                                      Refresh
                                     </Button>
-                                  )}
-                                  {draft.uploaded && (
+                                  </Group>
+                                </Stack>
+                              </form>
+                            )}
+                          </>
+                        )}
+
+                        {addPluginMode === 'upload' && (
+                          <form onSubmit={handleUploadPlugin}>
+                            <Stack gap="md">
+                              <Grid>
+                                <Grid.Col span={{ base: 12, sm: 6 }}>
+                                  <TextInput
+                                    label="Plugin id"
+                                    id="upload-plugin-id"
+                                    value={uploadPluginId}
+                                    onChange={(event) => setUploadPluginId(event.target.value)}
+                                    placeholder="WorldGuard"
+                                    required
+                                    disabled={addPluginBusy}
+                                  />
+                                </Grid.Col>
+                                <Grid.Col span={{ base: 12, sm: 6 }}>
+                                  <TextInput
+                                    label="Version"
+                                    id="upload-plugin-version"
+                                    value={uploadPluginVersion}
+                                    onChange={(event) => setUploadPluginVersion(event.target.value)}
+                                    placeholder="7.0.9"
+                                    required
+                                    disabled={addPluginBusy}
+                                  />
+                                </Grid.Col>
+                                <Grid.Col span={12}>
+                                  <div>
+                                    <label htmlFor="upload-plugin-file" style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem' }}>
+                                      Plugin jar
+                                    </label>
+                                    <input
+                                      id="upload-plugin-file"
+                                      type="file"
+                                      accept=".jar,.zip"
+                                      onChange={(event) => setUploadPluginFile(event.target.files?.[0] ?? null)}
+                                      required
+                                      disabled={addPluginBusy}
+                                    />
+                                    {uploadPluginFile && (
+                                      <Text size="sm" c="dimmed" mt="xs">
+                                        Selected file: {uploadPluginFile.name}
+                                      </Text>
+                                    )}
+                                  </div>
+                                </Grid.Col>
+                                <Grid.Col span={{ base: 12, sm: 6 }}>
+                                  <TextInput
+                                    label="Minecraft version min"
+                                    id="upload-plugin-min"
+                                    value={uploadPluginMin}
+                                    onChange={(event) => setUploadPluginMin(event.target.value)}
+                                    placeholder="1.20"
+                                    disabled={addPluginBusy}
+                                  />
+                                </Grid.Col>
+                                <Grid.Col span={{ base: 12, sm: 6 }}>
+                                  <TextInput
+                                    label="Minecraft version max"
+                                    id="upload-plugin-max"
+                                    value={uploadPluginMax}
+                                    onChange={(event) => setUploadPluginMax(event.target.value)}
+                                    placeholder="1.20.1"
+                                    disabled={addPluginBusy}
+                                  />
+                                </Grid.Col>
+                              </Grid>
+                              <Group>
+                                <Button
+                                  type="submit"
+                                  disabled={
+                                    addPluginBusy ||
+                                    !uploadPluginId.trim() ||
+                                    !uploadPluginVersion.trim() ||
+                                    !uploadPluginFile
+                                  }
+                                >
+                                  {addPluginBusy ? 'Uploading…' : 'Upload plugin'}
+                                </Button>
+                                <Button type="button" variant="ghost" onClick={closeAddPluginPanel}>
+                                  Cancel
+                                </Button>
+                              </Group>
+                            </Stack>
+                          </form>
+                        )}
+                      </Stack>
+                    </CardContent>
+                  </Card>
+                )}
+
+                <Card>
+                  <CardContent>
+                    <Stack gap="sm">
+                      <Title order={3}>Plugin Library</Title>
+                      <Text size="sm" c="dimmed">
+                        Manage saved plugins and add new ones from the{' '}
+                        <Anchor component={Link} to="/plugins">
+                          Plugin Library
+                        </Anchor>{' '}
+                        page.
+                      </Text>
+                    </Stack>
+                  </CardContent>
+                </Card>
+
+                {pluginConfigManager && (
+                  <Card>
+                    <CardContent>
+                      <Stack gap="md">
+                        <Group justify="space-between" align="flex-start">
+                          <Stack gap={4}>
+                            <Title order={3}>
+                              Manage Config Paths · {pluginConfigManager.pluginId}{' '}
+                              <Text component="span" size="sm" c="dimmed" fw={400}>
+                                v{pluginConfigManager.pluginVersion ?? 'latest'}
+                              </Text>
+                            </Title>
+                            <Text size="sm" c="dimmed">
+                              Define per-project config file paths and requirements. These mappings drive uploads,
+                              manifests, and status indicators.
+                            </Text>
+                          </Stack>
+                          <Group gap="xs">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              onClick={() => void refreshPluginConfigManager()}
+                              disabled={pluginConfigManager.busy || pluginConfigManager.saving}
+                            >
+                              Refresh
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              onClick={closePluginConfigManager}
+                              disabled={pluginConfigManager.saving}
+                            >
+                              Close
+                            </Button>
+                          </Group>
+                        </Group>
+
+                        {pluginConfigManager.error && (
+                          <Alert color="red" title="Error">
+                            {pluginConfigManager.error}
+                          </Alert>
+                        )}
+                        {pluginConfigManager.busy && (
+                          <Group>
+                            <Loader size="sm" />
+                            <Text size="sm" c="dimmed">Loading plugin config paths…</Text>
+                          </Group>
+                        )}
+
+                        {!pluginConfigManager.busy && (
+                          <>
+                            <Stack gap="md">
+                              {pluginConfigManager.drafts.length === 0 && (
+                                <Text size="sm" c="dimmed">
+                                  No config mappings yet. Add a custom entry or define paths in the library.
+                                </Text>
+                              )}
+                              {pluginConfigManager.drafts.map((draft, index) => (
+                                <Card key={draft.key}>
+                                  <CardContent>
+                                    <Stack gap="md">
+                                      <Group justify="space-between" align="flex-start">
+                                        <Group gap="xs" wrap="wrap">
+                                          <Text fw={600}>{draft.label || draft.definitionId}</Text>
+                                          {draft.source === 'custom' && <Badge variant="accent">Custom</Badge>}
+                                          <Text size="sm" c="dimmed">#{index + 1}</Text>
+                                        </Group>
+                                        <Group gap="xs">
+                                          <Button
+                                            type="button"
+                                            variant="ghost"
+                                            onClick={() =>
+                                              prepareConfigUpload(
+                                                pluginConfigManager.pluginId,
+                                                draft.definitionId,
+                                                draft.path || draft.defaultPath,
+                                              )
+                                            }
+                                          >
+                                            Upload file
+                                          </Button>
+                                          {draft.source === 'custom' && (
+                                            <Button
+                                              type="button"
+                                              variant="ghost"
+                                              onClick={() => removePluginConfigDraft(draft.key)}
+                                              disabled={pluginConfigManager.saving}
+                                            >
+                                              Remove
+                                            </Button>
+                                          )}
+                                          {draft.uploaded && (
+                                            <Button
+                                              type="button"
+                                              variant="ghost"
+                                              onClick={async () => {
+                                                if (!id) return
+                                                if (
+                                                  !window.confirm(
+                                                    `Delete config file ${draft.uploaded?.path ?? draft.path}? This cannot be undone.`,
+                                                  )
+                                                ) {
+                                                  return
+                                                }
+                                                try {
+                                                  const next = await deleteProjectConfigFile(
+                                                    id,
+                                                    draft.uploaded?.path ?? draft.path,
+                                                  )
+                                                  setConfigFiles(next)
+                                                  void refreshPluginConfigManager()
+                                                  toast({
+                                                    title: 'Config deleted',
+                                                    description: `${draft.uploaded?.path ?? draft.path} removed from project.`,
+                                                    variant: 'warning',
+                                                  })
+                                                } catch (err) {
+                                                  toast({
+                                                    title: 'Delete failed',
+                                                    description:
+                                                      err instanceof Error ? err.message : 'Failed to delete config file.',
+                                                    variant: 'danger',
+                                                  })
+                                                }
+                                              }}
+                                              disabled={pluginConfigManager.saving}
+                                            >
+                                              Delete file
+                                            </Button>
+                                          )}
+                                        </Group>
+                                      </Group>
+
+                                      <Grid>
+                                        <Grid.Col span={{ base: 12, md: 6 }}>
+                                          <TextInput
+                                            label="Resolved path"
+                                            id={`plugin-config-path-${draft.key}`}
+                                            value={draft.path}
+                                            onChange={(event) =>
+                                              updatePluginConfigDraft(draft.key, { path: event.target.value })
+                                            }
+                                            placeholder={draft.defaultPath || 'plugins/example/config.yml'}
+                                            disabled={pluginConfigManager.saving}
+                                          />
+                                          {draft.defaultPath && draft.defaultPath !== draft.path && (
+                                            <Text size="xs" c="dimmed" mt={4}>
+                                              Default: {draft.defaultPath}
+                                            </Text>
+                                          )}
+                                        </Grid.Col>
+                                        <Grid.Col span={{ base: 12, md: 3 }}>
+                                          <NativeSelect
+                                            label="Requirement"
+                                            id={`plugin-config-requirement-${draft.key}`}
+                                            value={draft.requirement}
+                                            onChange={(event) =>
+                                              updatePluginConfigDraft(draft.key, {
+                                                requirement: event.target.value as PluginConfigRequirement,
+                                              })
+                                            }
+                                            disabled={pluginConfigManager.saving}
+                                            data={[
+                                              { value: 'required', label: 'Required' },
+                                              { value: 'optional', label: 'Optional' },
+                                              { value: 'generated', label: 'Generated' },
+                                            ]}
+                                          />
+                                        </Grid.Col>
+                                        <Grid.Col span={{ base: 12, md: 3 }}>
+                                          <TextInput
+                                            label="Notes"
+                                            id={`plugin-config-notes-${draft.key}`}
+                                            value={draft.notes}
+                                            onChange={(event) =>
+                                              updatePluginConfigDraft(draft.key, { notes: event.target.value })
+                                            }
+                                            placeholder="Optional guidance"
+                                            disabled={pluginConfigManager.saving}
+                                          />
+                                        </Grid.Col>
+                                      </Grid>
+
+                                      {draft.uploaded ? (
+                                        <Text size="sm" c="dimmed">
+                                          Uploaded {formatBytes(draft.uploaded.size)} ·{' '}
+                                          {new Date(draft.uploaded.modifiedAt).toLocaleString()}
+                                        </Text>
+                                      ) : draft.missing ? (
+                                        <Text size="sm" c="dimmed">Not uploaded yet</Text>
+                                      ) : null}
+                                    </Stack>
+                                  </CardContent>
+                                </Card>
+                              ))}
+                            </Stack>
+
+                            <Group mt="md">
+                              <Button
+                                type="button"
+                                variant="primary"
+                                disabled={pluginConfigManager.saving}
+                                onClick={() => void handleSavePluginConfigManager()}
+                              >
+                                {pluginConfigManager.saving ? 'Saving…' : 'Save mappings'}
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                onClick={addCustomPluginConfigDraft}
+                                disabled={pluginConfigManager.saving}
+                              >
+                                Add custom config
+                              </Button>
+                            </Group>
+
+                            {pluginConfigManager.uploads.length > 0 && (
+                              <Stack gap="sm" mt="md">
+                                <Title order={4}>Other uploaded files</Title>
+                                <Stack gap="xs">
+                                  {pluginConfigManager.uploads.map((upload) => (
+                                    <Card key={upload.path}>
+                                      <CardContent>
+                                        <Stack gap={4}>
+                                          <Text fw={600}>{upload.path}</Text>
+                                          <Text size="sm" c="dimmed">
+                                            {formatBytes(upload.size)} · Updated {new Date(upload.modifiedAt).toLocaleString()}
+                                          </Text>
+                                        </Stack>
+                                      </CardContent>
+                                    </Card>
+                                  ))}
+                                </Stack>
+                              </Stack>
+                            )}
+                          </>
+                        )}
+                      </Stack>
+                    </CardContent>
+                  </Card>
+                )}
+              </SimpleGrid>
+            </Tabs.Panel>
+
+            <Tabs.Panel value="configs">
+              <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="lg" pt="lg">
+                <Card>
+                  <CardContent>
+                    <Stack gap="md">
+                      <Title order={3}>Plugin Config Files</Title>
+                      <form
+                        ref={configUploadFormRef}
+                        onSubmit={handleUploadConfig}
+                      >
+                        <Stack gap="md">
+                          <NativeSelect
+                            label="Plugin (optional)"
+                            id="config-upload-plugin"
+                            value={configUploadPlugin}
+                            onChange={(event) => {
+                              const value = event.target.value
+                              setConfigUploadPlugin(value)
+                              setConfigUploadPathDirty(false)
+                              if (value) {
+                                const options = pluginDefinitionOptions[value] ?? []
+                                const first = options[0]
+                                setConfigUploadDefinition(first ? first.definitionId : '')
+                                setConfigUploadPath(first ? first.path : '')
+                              } else {
+                                setConfigUploadDefinition('')
+                                setConfigUploadPath('')
+                              }
+                            }}
+                            data={[
+                              { value: '', label: 'No association' },
+                              ...(project?.plugins ?? []).map((plugin) => ({
+                                value: plugin.id,
+                                label: `${plugin.id}${plugin.configMappings && plugin.configMappings.length > 0 ? ` (${plugin.configMappings.length})` : ''}`,
+                              })),
+                            ]}
+                          />
+                          <NativeSelect
+                            label="Config mapping"
+                            id="config-upload-definition"
+                            value={configUploadDefinition}
+                            onChange={(event) => {
+                              const value = event.target.value
+                              setConfigUploadDefinition(value)
+                              setConfigUploadPathDirty(false)
+                              const options = pluginDefinitionOptions[configUploadPlugin] ?? []
+                              const selected = options.find((option) => option.definitionId === value)
+                              if (selected) {
+                                setConfigUploadPath(selected.path)
+                              } else if (!value) {
+                                setConfigUploadPath('')
+                              }
+                            }}
+                            disabled={!configUploadPlugin || (pluginDefinitionOptions[configUploadPlugin] ?? []).length === 0}
+                            data={[
+                              { value: '', label: 'None' },
+                              ...(pluginDefinitionOptions[configUploadPlugin] ?? []).map((option) => ({
+                                value: option.definitionId,
+                                label: option.label,
+                              })),
+                            ]}
+                          />
+                          {selectedDefinition?.path && (
+                            <Text size="sm" c="dimmed">
+                              Suggested path: {selectedDefinition.path}
+                            </Text>
+                          )}
+                          <TextInput
+                            label="Relative path"
+                            id="config-upload-path"
+                            value={configUploadPath}
+                            onChange={(event) => {
+                              setConfigUploadPath(event.target.value)
+                              setConfigUploadPathDirty(true)
+                            }}
+                            placeholder="plugins/WorldGuard/worlds/world/regions.yml"
+                          />
+                          <div>
+                            <label htmlFor="config-upload-file" style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem' }}>
+                              Config file
+                            </label>
+                            <input
+                              id="config-upload-file"
+                              type="file"
+                              ref={configUploadFileInputRef}
+                              onChange={(event) => setConfigUploadFile(event.target.files?.[0] ?? null)}
+                            />
+                          </div>
+                          <Group>
+                            <Button type="submit" variant="ghost" disabled={configUploadBusy}>
+                              {configUploadBusy ? 'Uploading…' : 'Upload config'}
+                            </Button>
+                          </Group>
+                        </Stack>
+                      </form>
+                      {configsError && (
+                        <Alert color="red" title="Error">
+                          {configsError}
+                        </Alert>
+                      )}
+                      {configsLoading && (
+                        <Stack gap="md">
+                          {[0, 1, 2].map((index) => (
+                            <Card key={index}>
+                              <CardContent>
+                                <Stack gap="xs">
+                                  <Skeleton style={{ width: '70%', height: '18px' }} />
+                                  <Skeleton style={{ width: '50%', height: '14px' }} />
+                                </Stack>
+                              </CardContent>
+                            </Card>
+                          ))}
+                        </Stack>
+                      )}
+                      {!configsLoading && configFiles.length === 0 && (
+                        <Text size="sm" c="dimmed">
+                          No plugin configs uploaded yet. Upload files to be included in your builds.
+                        </Text>
+                      )}
+                      {!configsLoading && configFiles.length > 0 && (
+                        <Stack gap="md">
+                          {configFiles.map((file) => (
+                            <Card key={file.path}>
+                              <CardContent>
+                                <Group justify="space-between" align="flex-start">
+                                  <Stack gap={4}>
+                                    <Text fw={600}>{file.path}</Text>
+                                    <Text size="sm" c="dimmed">
+                                      {formatBytes(file.size)} · Updated {new Date(file.modifiedAt).toLocaleString()}
+                                    </Text>
+                                    {file.pluginId && (
+                                      <Text size="sm" c="dimmed">
+                                        Plugin: {file.pluginId}
+                                        {file.definitionId ? ` · ${file.definitionId}` : ''}
+                                      </Text>
+                                    )}
+                                  </Stack>
+                                  <Group gap="xs">
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      onClick={() => void handleEditConfig(file.path)}
+                                    >
+                                      Edit
+                                    </Button>
                                     <Button
                                       type="button"
                                       variant="ghost"
                                       onClick={async () => {
                                         if (!id) return
-                                        if (
-                                          !window.confirm(
-                                            `Delete config file ${draft.uploaded?.path ?? draft.path}? This cannot be undone.`,
-                                          )
-                                        ) {
+                                        if (!window.confirm(`Delete config file ${file.path}? This cannot be undone.`)) {
                                           return
                                         }
                                         try {
-                                          const next = await deleteProjectConfigFile(
-                                            id,
-                                            draft.uploaded?.path ?? draft.path,
-                                          )
+                                          const next = await deleteProjectConfigFile(id, file.path)
                                           setConfigFiles(next)
-                                          void refreshPluginConfigManager()
+                                          if (pluginConfigManager) {
+                                            void refreshPluginConfigManager()
+                                          }
                                           toast({
                                             title: 'Config deleted',
-                                            description: `${draft.uploaded?.path ?? draft.path} removed from project.`,
+                                            description: `${file.path} removed from project.`,
                                             variant: 'warning',
                                           })
                                         } catch (err) {
@@ -2190,389 +2633,116 @@ useEffect(() => {
                                           })
                                         }
                                       }}
-                                      disabled={pluginConfigManager.saving}
                                     >
-                                      Delete file
+                                      Delete
                                     </Button>
-                                  )}
-                                </div>
-                              </div>
-
-                              <div className="form-grid" style={{ marginTop: '0.75rem' }}>
-                                <div className="field">
-                                  <label htmlFor={`plugin-config-path-${draft.key}`}>Resolved path</label>
-                                  <input
-                                    id={`plugin-config-path-${draft.key}`}
-                                    value={draft.path}
-                                    onChange={(event) =>
-                                      updatePluginConfigDraft(draft.key, { path: event.target.value })
-                                    }
-                                    placeholder={draft.defaultPath || 'plugins/example/config.yml'}
-                                    disabled={pluginConfigManager.saving}
-                                  />
-                                  {draft.defaultPath && draft.defaultPath !== draft.path && (
-                                    <p className="muted">Default: {draft.defaultPath}</p>
-                                  )}
-                                </div>
-                                <div className="field">
-                                  <label htmlFor={`plugin-config-requirement-${draft.key}`}>Requirement</label>
-                                  <select
-                                    id={`plugin-config-requirement-${draft.key}`}
-                                    value={draft.requirement}
-                                    onChange={(event) =>
-                                      updatePluginConfigDraft(draft.key, {
-                                        requirement: event.target.value as PluginConfigRequirement,
-                                      })
-                                    }
-                                    disabled={pluginConfigManager.saving}
-                                  >
-                                    <option value="required">Required</option>
-                                    <option value="optional">Optional</option>
-                                    <option value="generated">Generated</option>
-                                  </select>
-                                </div>
-                                <div className="field">
-                                  <label htmlFor={`plugin-config-notes-${draft.key}`}>Notes</label>
-                                  <input
-                                    id={`plugin-config-notes-${draft.key}`}
-                                    value={draft.notes}
-                                    onChange={(event) =>
-                                      updatePluginConfigDraft(draft.key, { notes: event.target.value })
-                                    }
-                                    placeholder="Optional guidance"
-                                    disabled={pluginConfigManager.saving}
-                                  />
-                                </div>
-                              </div>
-
-                              <div className="config-definition-actions">
-                                {draft.uploaded ? (
-                                  <span className="muted">
-                                    Uploaded {formatBytes(draft.uploaded.size)} ·{' '}
-                                    {new Date(draft.uploaded.modifiedAt).toLocaleString()}
-                                  </span>
-                                ) : draft.missing ? (
-                                  <span className="muted">Not uploaded yet</span>
-                                ) : (
-                                  <span className="muted">&nbsp;</span>
-                                )}
-                              </div>
-                            </div>
+                                  </Group>
+                                </Group>
+                              </CardContent>
+                            </Card>
                           ))}
-                        </div>
+                        </Stack>
+                      )}
+                    </Stack>
+                  </CardContent>
+                </Card>
 
-                        <div className="form-actions" style={{ marginTop: '1.5rem', display: 'flex', gap: '1rem' }}>
+                {configEditor && (
+                  <Card>
+                    <CardContent>
+                      <Stack gap="md">
+                        <Group justify="space-between" align="flex-start">
+                          <Title order={3}>Edit Config: {configEditor.path}</Title>
+                          <Button
+                            variant="ghost"
+                            onClick={() => {
+                              setConfigEditor(null)
+                              setConfigEditorError(null)
+                            }}
+                          >
+                            Close
+                          </Button>
+                        </Group>
+                        {configEditorError && (
+                          <Alert color="red" title="Error">
+                            {configEditorError}
+                          </Alert>
+                        )}
+                        <Textarea
+                          value={configEditor.content}
+                          onChange={(event) =>
+                            setConfigEditor((prev) => (prev ? { ...prev, content: event.target.value } : prev))
+                          }
+                          rows={18}
+                          spellCheck={false}
+                        />
+                        <Group>
                           <Button
                             type="button"
                             variant="primary"
-                            disabled={pluginConfigManager.saving}
-                            onClick={() => void handleSavePluginConfigManager()}
+                            onClick={() => void handleSaveConfig()}
+                            disabled={configEditorBusy}
                           >
-                            {pluginConfigManager.saving ? 'Saving…' : 'Save mappings'}
+                            {configEditorBusy ? 'Saving…' : 'Save changes'}
                           </Button>
                           <Button
                             type="button"
                             variant="ghost"
-                            onClick={addCustomPluginConfigDraft}
-                            disabled={pluginConfigManager.saving}
+                            onClick={() => {
+                              setConfigEditor(null)
+                              setConfigEditorError(null)
+                            }}
+                            disabled={configEditorBusy}
                           >
-                            Add custom config
+                            Cancel
                           </Button>
-                        </div>
-
-                        {pluginConfigManager.uploads.length > 0 && (
-                          <div style={{ marginTop: '1.5rem' }}>
-                            <h4>Other uploaded files</h4>
-                            <ul className="project-list">
-                              {pluginConfigManager.uploads.map((upload) => (
-                                <li key={upload.path}>
-                                  <div>
-                                    <strong>{upload.path}</strong>
-                                    <p className="muted">
-                                      {formatBytes(upload.size)} · Updated {new Date(upload.modifiedAt).toLocaleString()}
-                                    </p>
-                                  </div>
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
-                      </>
-                    )}
-                  </ContentSection>
+                        </Group>
+                      </Stack>
+                    </CardContent>
+                  </Card>
                 )}
-              </div>
-            </TabPanel>
+              </SimpleGrid>
+            </Tabs.Panel>
 
-            <TabPanel value="configs">
-              <div className="assets-grid">
-                <ContentSection as="article">
-                  <header>
-                    <h3>Plugin Config Files</h3>
-                  </header>
-                  <form
-                    ref={configUploadFormRef}
-                    className="page-form config-upload-form"
-                    onSubmit={handleUploadConfig}
-                  >
-                    <div className="stacked-fields">
-                      <div className="field">
-                        <label htmlFor="config-upload-plugin">Plugin (optional)</label>
-                        <select
-                          id="config-upload-plugin"
-                          value={configUploadPlugin}
-                          onChange={(event) => {
-                            const value = event.target.value
-                            setConfigUploadPlugin(value)
-                            setConfigUploadPathDirty(false)
-                            if (value) {
-                              const options = pluginDefinitionOptions[value] ?? []
-                              const first = options[0]
-                              setConfigUploadDefinition(first ? first.definitionId : '')
-                              setConfigUploadPath(first ? first.path : '')
-                            } else {
-                              setConfigUploadDefinition('')
-                              setConfigUploadPath('')
-                            }
-                          }}
-                        >
-                          <option value="">No association</option>
-                          {(project?.plugins ?? []).map((plugin) => (
-                            <option key={plugin.id} value={plugin.id}>
-                              {plugin.id}
-                              {plugin.configMappings && plugin.configMappings.length > 0
-                                ? ` (${plugin.configMappings.length})`
-                                : ''}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="field">
-                        <label htmlFor="config-upload-definition">Config mapping</label>
-                        <select
-                          id="config-upload-definition"
-                          value={configUploadDefinition}
-                          onChange={(event) => {
-                            const value = event.target.value
-                            setConfigUploadDefinition(value)
-                            setConfigUploadPathDirty(false)
-                            const options = pluginDefinitionOptions[configUploadPlugin] ?? []
-                            const selected = options.find((option) => option.definitionId === value)
-                            if (selected) {
-                              setConfigUploadPath(selected.path)
-                            } else if (!value) {
-                              setConfigUploadPath('')
-                            }
-                          }}
-                          disabled={!configUploadPlugin || (pluginDefinitionOptions[configUploadPlugin] ?? []).length === 0}
-                        >
-                          <option value="">None</option>
-                          {(pluginDefinitionOptions[configUploadPlugin] ?? []).map((option) => (
-                            <option key={option.definitionId} value={option.definitionId}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
-                        {selectedDefinition?.path && (
-                          <p className="muted">Suggested path: {selectedDefinition.path}</p>
-                        )}
-                      </div>
-                      <div className="field">
-                        <label htmlFor="config-upload-path">Relative path</label>
-                        <input
-                          id="config-upload-path"
-                          value={configUploadPath}
-                          onChange={(event) => {
-                            setConfigUploadPath(event.target.value)
-                            setConfigUploadPathDirty(true)
-                          }}
-                          placeholder="plugins/WorldGuard/worlds/world/regions.yml"
+            <Tabs.Panel value="settings">
+              <Stack gap="lg" pt="lg">
+                <Card>
+                  <CardContent>
+                    <Stack gap="md">
+                      <Title order={3}>Danger Zone</Title>
+                      {deleteError && (
+                        <Alert color="red" title="Error">
+                          {deleteError}
+                        </Alert>
+                      )}
+                      <Text size="sm" c="dimmed">
+                        Deleting removes this project&apos;s builds, run history, and local workspace. This action
+                        cannot be undone.
+                      </Text>
+                      {project.repo && (
+                        <Checkbox
+                          label={`Also delete GitHub repository ${project.repo.fullName}`}
+                          checked={deleteRepo}
+                          onChange={(event) => setDeleteRepo(event.target.checked)}
                         />
-                      </div>
-                      <div className="field">
-                        <label htmlFor="config-upload-file">Config file</label>
-                        <input
-                          id="config-upload-file"
-                          type="file"
-                          ref={configUploadFileInputRef}
-                          onChange={(event) => setConfigUploadFile(event.target.files?.[0] ?? null)}
-                        />
-                      </div>
-                    </div>
-                    <div className="config-upload-actions">
-                      <Button type="submit" variant="ghost" disabled={configUploadBusy}>
-                        {configUploadBusy ? 'Uploading…' : 'Upload config'}
-                      </Button>
-                    </div>
-                  </form>
-                  {configsError && <p className="error-text">{configsError}</p>}
-                  {configsLoading && (
-                    <ul className="project-list">
-                      {[0, 1, 2].map((index) => (
-                        <li key={index}>
-                          <div>
-                            <Skeleton style={{ width: '70%', height: '18px' }} />
-                            <Skeleton style={{ width: '50%', height: '14px', marginTop: '8px' }} />
-                          </div>
-                          <div className="dev-buttons">
-                            <Skeleton style={{ width: '88px', height: '32px', borderRadius: '999px' }} />
-                          </div>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  {!configsLoading && configFiles.length === 0 && (
-                    <p className="muted">
-                      No plugin configs uploaded yet. Upload files to be included in your builds.
-                    </p>
-                  )}
-                  {!configsLoading && configFiles.length > 0 && (
-                    <ul className="project-list">
-                      {configFiles.map((file) => (
-                        <li key={file.path}>
-                          <div>
-                            <strong>{file.path}</strong>
-                            <p className="muted">
-                              {formatBytes(file.size)} · Updated {new Date(file.modifiedAt).toLocaleString()}
-                            </p>
-                            {file.pluginId && (
-                              <p className="muted">
-                                Plugin: {file.pluginId}
-                                {file.definitionId ? ` · ${file.definitionId}` : ''}
-                              </p>
-                            )}
-                          </div>
-                          <div className="dev-buttons">
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              onClick={() => void handleEditConfig(file.path)}
-                            >
-                              Edit
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              onClick={async () => {
-                                if (!id) return
-                                if (!window.confirm(`Delete config file ${file.path}? This cannot be undone.`)) {
-                                  return
-                                }
-                                try {
-                                  const next = await deleteProjectConfigFile(id, file.path)
-                                  setConfigFiles(next)
-                                  if (pluginConfigManager) {
-                                    void refreshPluginConfigManager()
-                                  }
-                                  toast({
-                                    title: 'Config deleted',
-                                    description: `${file.path} removed from project.`,
-                                    variant: 'warning',
-                                  })
-                                } catch (err) {
-                                  toast({
-                                    title: 'Delete failed',
-                                    description:
-                                      err instanceof Error ? err.message : 'Failed to delete config file.',
-                                    variant: 'danger',
-                                  })
-                                }
-                              }}
-                            >
-                              Delete
-                            </Button>
-                          </div>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </ContentSection>
-
-                {configEditor && (
-                  <ContentSection as="article">
-                    <header>
-                      <h3>Edit Config: {configEditor.path}</h3>
-                      <Button
-                        variant="ghost"
-                        onClick={() => {
-                          setConfigEditor(null)
-                          setConfigEditorError(null)
-                        }}
-                      >
-                        Close
-                      </Button>
-                    </header>
-                    {configEditorError && <p className="error-text">{configEditorError}</p>}
-                    <textarea
-                      value={configEditor.content}
-                      onChange={(event) =>
-                        setConfigEditor((prev) => (prev ? { ...prev, content: event.target.value } : prev))
-                      }
-                      rows={18}
-                      spellCheck={false}
-                      style={{ width: '100%' }}
-                    />
-                    <div className="form-actions">
-                      <Button
-                        type="button"
-                        variant="primary"
-                        onClick={() => void handleSaveConfig()}
-                        disabled={configEditorBusy}
-                      >
-                        {configEditorBusy ? 'Saving…' : 'Save changes'}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        onClick={() => {
-                          setConfigEditor(null)
-                          setConfigEditorError(null)
-                        }}
-                        disabled={configEditorBusy}
-                      >
-                        Cancel
-                      </Button>
-                    </div>
-                  </ContentSection>
-                )}
-              </div>
-            </TabPanel>
-
-            <TabPanel value="settings">
-              <ContentSection as="article">
-                <header>
-                  <h3>Danger Zone</h3>
-                </header>
-                {deleteError && <p className="error-text">{deleteError}</p>}
-                <p className="muted">
-                  Deleting removes this project&apos;s builds, run history, and local workspace. This action
-                  cannot be undone.
-                </p>
-                {project.repo && (
-                  <label className="checkbox">
-                    <input
-                      type="checkbox"
-                      checked={deleteRepo}
-                      onChange={(event) => setDeleteRepo(event.target.checked)}
-                    />
-                    Also delete GitHub repository {project.repo.fullName}
-                  </label>
-                )}
-                <div className="form-actions">
-                  <Button
-                    type="button"
-                    variant="danger"
-                    onClick={() => {
-                      void handleDeleteProject()
-                    }}
-                    disabled={deleteBusy}
-                  >
-                    {deleteBusy ? 'Deleting…' : 'Delete project'}
-                  </Button>
-                </div>
-              </ContentSection>
-            </TabPanel>
-          </TabPanels>
+                      )}
+                      <Group>
+                        <Button
+                          type="button"
+                          variant="danger"
+                          onClick={() => {
+                            void handleDeleteProject()
+                          }}
+                          disabled={deleteBusy}
+                        >
+                          {deleteBusy ? 'Deleting…' : 'Delete project'}
+                        </Button>
+                      </Group>
+                    </Stack>
+                  </CardContent>
+                </Card>
+              </Stack>
+            </Tabs.Panel>
         </Tabs>
       </ContentSection>
   </>

@@ -1,20 +1,25 @@
 import { Link } from 'react-router-dom'
-import { ContentSection } from '../components/layout'
+import { Anchor, Stack, Text, Title } from '@mantine/core'
+import { Card, CardContent } from '../components/ui'
 
 function NotFound() {
   return (
-    <ContentSection as="section">
-      <header>
-        <h2>Page not found</h2>
-      </header>
-      <p className="empty-state">
-        We couldn’t find that route. Head back to the{' '}
-        <Link to="/" className="inline-link">
-          dashboard
-        </Link>{' '}
-        to keep building.
-      </p>
-    </ContentSection>
+    <Stack gap="lg" p="lg" align="center" justify="center" style={{ minHeight: '60vh' }}>
+      <Card>
+        <CardContent>
+          <Stack gap="md" align="center">
+            <Title order={2}>Page not found</Title>
+            <Text size="sm" c="dimmed" ta="center">
+              We couldn't find that route. Head back to the{' '}
+              <Anchor component={Link} to="/">
+                dashboard
+              </Anchor>{' '}
+              to keep building.
+            </Text>
+          </Stack>
+        </CardContent>
+      </Card>
+    </Stack>
   )
 }
 

@@ -11,7 +11,21 @@ import {
   type PluginConfigDefinition,
   type PluginConfigRequirement,
 } from '../lib/api'
-import { Button } from '../components/ui'
+import {
+  Anchor,
+  Badge,
+  Group,
+  Loader,
+  NativeSelect,
+  ScrollArea,
+  SimpleGrid,
+  Stack,
+  Table,
+  Text,
+  TextInput,
+  Title,
+} from '@mantine/core'
+import { Button, Card, CardContent } from '../components/ui'
 import { ContentSection } from '../components/layout'
 
 type SourceFilter = 'all' | 'download' | 'upload'
@@ -173,465 +187,520 @@ function PluginLibrary() {
   }, [plugins, sourceFilter, query, projectFilter, usageMap])
 
   return (
-    <ContentSection as="section">
-      <header>
-        <h2>
-          <span className="title-icon" aria-hidden="true">
-            <Plug size={22} weight="fill" />
-          </span>
-          Plugin Library
-        </h2>
-        <Button
-          variant="primary"
-          icon={<Plus size={18} weight="fill" aria-hidden="true" />}
-          onClick={() => navigate('/plugins/add')}
-        >
-          Add Plugin
-        </Button>
-      </header>
-
-      <div className="form-grid">
-        <div className="field">
-          <label htmlFor="plugin-library-search">Search</label>
-          <input
-            id="plugin-library-search"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search by plugin id, version, or source"
-          />
-        </div>
-        <div className="field">
-          <label htmlFor="plugin-library-source">Source</label>
-          <select
-            id="plugin-library-source"
-            value={sourceFilter}
-            onChange={(event) =>
-              setSourceFilter((event.target.value || 'all') as SourceFilter)
-            }
+    <ContentSection as="section" padding="xl">
+      <Stack gap="xl">
+        <Group justify="space-between" align="flex-start">
+          <Group gap="sm">
+            <Plug size={24} weight="fill" aria-hidden="true" />
+            <Stack gap={2}>
+              <Title order={2}>Plugin Library</Title>
+              <Text size="sm" c="dimmed">
+                Manage saved plugin binaries and config path definitions.
+              </Text>
+            </Stack>
+          </Group>
+          <Button
+            variant="primary"
+            icon={<Plus size={18} weight="fill" aria-hidden="true" />}
+            onClick={() => navigate('/plugins/add')}
           >
-            <option value="all">All sources</option>
-            <option value="download">Download URL</option>
-            <option value="upload">Uploaded jar</option>
-          </select>
-        </div>
-        <div className="field">
-          <label htmlFor="plugin-library-project">Project usage</label>
-          <select
-            id="plugin-library-project"
-            value={projectFilter}
-            onChange={(event) =>
-              setProjectFilter(event.target.value ? event.target.value : 'all')
-            }
-          >
-            <option value="all">All projects</option>
-            {projects.map((project) => (
-              <option key={project.id} value={project.id}>
-                {project.name}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
+            Add plugin
+          </Button>
+        </Group>
 
-      {loading && <p className="muted">Loading library…</p>}
-      {error && <p className="error-text">{error}</p>}
-      {!loading && !error && filteredPlugins.length === 0 && (
-        <p className="empty-state">
-          {query || projectFilter !== 'all' || sourceFilter !== 'all'
-            ? 'No plugins match your filters.'
-            : 'No saved plugins yet. Click "Add Plugin" to add plugins to the library.'}
-        </p>
-      )}
+        <SimpleGrid cols={{ base: 1, md: 3 }} spacing="lg">
+          <Stack gap={4}>
+            <Text size="xs" fw={600} tt="uppercase" c="dimmed">
+              Search
+            </Text>
+            <TextInput
+              id="plugin-library-search"
+              value={query}
+              onChange={(event) => setQuery(event.currentTarget.value)}
+              placeholder="Search by plugin id, version, or source"
+            />
+          </Stack>
+          <Stack gap={4}>
+            <Text size="xs" fw={600} tt="uppercase" c="dimmed">
+              Source
+            </Text>
+            <NativeSelect
+              id="plugin-library-source"
+              value={sourceFilter}
+              onChange={(event) => setSourceFilter((event.currentTarget.value || 'all') as SourceFilter)}
+              data={[
+                { value: 'all', label: 'All sources' },
+                { value: 'download', label: 'Download URL' },
+                { value: 'upload', label: 'Uploaded jar' },
+              ]}
+            />
+          </Stack>
+          <Stack gap={4}>
+            <Text size="xs" fw={600} tt="uppercase" c="dimmed">
+              Project usage
+            </Text>
+            <NativeSelect
+              id="plugin-library-project"
+              value={projectFilter}
+              onChange={(event) =>
+                setProjectFilter(event.currentTarget.value ? event.currentTarget.value : 'all')
+              }
+              data={[
+                { value: 'all', label: 'All projects' },
+                ...projects.map((project) => ({
+                  value: project.id,
+                  label: project.name,
+                })),
+              ]}
+            />
+          </Stack>
+        </SimpleGrid>
 
-      {!loading && !error && filteredPlugins.length > 0 && (
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Plugin</th>
-              <th>Version</th>
-              <th>Source</th>
-              <th>Minecraft</th>
-              <th>Cache</th>
-              <th>Projects</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {filteredPlugins.map((plugin) => {
-              const key = `${plugin.id}:${plugin.version}`
-              const kind = getPluginSourceKind(plugin)
-              const usageIds = usageMap.get(key) ?? []
-              const usages = usageIds
-                .map((projectId) => projectLookup.get(projectId))
-                .filter((project): project is ProjectSummary => Boolean(project))
+        {loading && (
+          <Group gap="xs">
+            <Loader size="sm" />
+            <Text size="sm" c="dimmed">
+              Loading library…
+            </Text>
+          </Group>
+        )}
+        {error && (
+          <Text size="sm" c="red.4">
+            {error}
+          </Text>
+        )}
+        {!loading && !error && filteredPlugins.length === 0 && (
+          <Text size="sm" c="dimmed">
+            {query || projectFilter !== 'all' || sourceFilter !== 'all'
+              ? 'No plugins match your filters.'
+              : 'No saved plugins yet. Click “Add plugin” to capture a plugin for reuse.'}
+          </Text>
+        )}
 
-              const supportRange = (() => {
-                if (plugin.minecraftVersionMin && plugin.minecraftVersionMax) {
-                  return plugin.minecraftVersionMin === plugin.minecraftVersionMax
-                    ? plugin.minecraftVersionMin
-                    : `${plugin.minecraftVersionMin} – ${plugin.minecraftVersionMax}`
-                }
-                if (plugin.minecraftVersionMin) return plugin.minecraftVersionMin
-                if (plugin.minecraftVersionMax) return plugin.minecraftVersionMax
-                return null
-              })()
+        {!loading && !error && filteredPlugins.length > 0 && (
+          <ScrollArea>
+            <Table verticalSpacing="sm" striped highlightOnHover>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>Plugin</Table.Th>
+                  <Table.Th>Version</Table.Th>
+                  <Table.Th>Source</Table.Th>
+                  <Table.Th>Minecraft</Table.Th>
+                  <Table.Th>Cache</Table.Th>
+                  <Table.Th>Projects</Table.Th>
+                  <Table.Th />
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {filteredPlugins.map((plugin) => {
+                  const key = `${plugin.id}:${plugin.version}`
+                  const kind = getPluginSourceKind(plugin)
+                  const usageIds = usageMap.get(key) ?? []
+                  const usages = usageIds
+                    .map((projectId) => projectLookup.get(projectId))
+                    .filter((project): project is ProjectSummary => Boolean(project))
 
-              return (
-                <tr key={key}>
-                  <td>
-                    <strong>{plugin.id}</strong>
-                    {plugin.source?.projectUrl && (
-                      <div>
-                        <a href={plugin.source.projectUrl} target="_blank" rel="noreferrer">
-                          View project
-                        </a>
-                      </div>
-                    )}
-                  </td>
-                  <td>{plugin.version}</td>
-                  <td>{sourceLabel[kind]}</td>
-                  <td>
-                    {supportRange ?? '—'}
-                    {plugin.source?.loader && <span className="muted"> ({plugin.source.loader})</span>}
-                  </td>
-                  <td>
-                    {plugin.cachePath ? (
-                      <>
-                        <code>{plugin.cachePath}</code>
-                        <br />
-                        {plugin.cachedAt && (
-                          <span className="muted">
-                            Cached {new Date(plugin.cachedAt).toLocaleString()}
-                          </span>
-                        )}
-                        {plugin.lastUsedAt && (
-                          <span className="muted">
-                            <br />
-                            Last used {new Date(plugin.lastUsedAt).toLocaleString()}
-                          </span>
-                        )}
-                      </>
-                    ) : (
-                      <span className="muted">Pending</span>
-                    )}
-                  </td>
-                  <td>
-                    {usages.length === 0 && <span className="muted">Unused</span>}
-                    {usages.length > 0 && (
-                      <ul className="inline-list">
-                        {usages.map((project) => (
-                          <li key={project.id}>
-                            <Link to={`/projects/${project.id}`}>{project.name}</Link>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </td>
-                  <td className="dev-buttons">
-                    <button
-                      type="button"
-                      className="ghost"
-                      onClick={async () => {
-                        if (!window.confirm(`Remove ${plugin.id} ${plugin.version} from library?`)) {
-                          return
-                        }
-                        try {
-                          const remaining = await deleteLibraryPlugin(plugin.id, plugin.version)
-                          setPlugins(remaining)
-                        } catch (err) {
-                          setError(err instanceof Error ? err.message : 'Failed to delete plugin.')
-                        }
-                      }}
-                    >
-                      Delete
-                    </button>
-                    <button
-                      type="button"
-                      className="ghost"
-                      onClick={() => {
-                        const drafts: ConfigDefinitionDraft[] = (plugin.configDefinitions ?? []).map(
-                          (definition, index) => definitionToDraft(definition, index),
-                        )
-                        setConfigEditor({
-                          plugin,
-                          drafts,
-                          busy: false,
-                          error: null,
-                          touched: false,
-                        })
-                      }}
-                    >
-                      Manage config paths
-                    </button>
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      )}
-
-      {configEditor && (
-        <div className="library-config-editor">
-          <ContentSection as="article">
-            <header>
-              <div style={{ display: 'flex', gap: '1rem', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                  <h3>
-                    Manage Config Paths · {configEditor.plugin.id} {configEditor.plugin.version}
-                  </h3>
-                  <p className="muted">
-                    Define expected config files for this plugin. Paths are relative to project root.
-                  </p>
-                </div>
-                <div className="dev-buttons">
-                  <Button
-                    variant="ghost"
-                    onClick={() => setConfigEditor(null)}
-                    disabled={configEditor.busy}
-                  >
-                    Close
-                  </Button>
-                </div>
-              </div>
-            </header>
-
-            {configEditor.error && <p className="error-text">{configEditor.error}</p>}
-
-            <div className="config-definition-list">
-              {configEditor.drafts.length === 0 && (
-                <p className="muted">No config paths defined yet. Add one to get started.</p>
-              )}
-              {configEditor.drafts.map((draft, index) => (
-                <div key={draft.key} className="config-definition-card">
-                  <div className="form-grid">
-                    <div className="field">
-                      <label htmlFor={`config-label-${draft.key}`}>Label</label>
-                      <input
-                        id={`config-label-${draft.key}`}
-                        value={draft.label}
-                        onChange={(event) => {
-                          const value = event.target.value
-                          setConfigEditor((prev) =>
-                            prev
-                              ? {
-                                  ...prev,
-                                  touched: true,
-                                  drafts: prev.drafts.map((item) =>
-                                    item.key === draft.key ? { ...item, label: value } : item,
-                                  ),
-                                }
-                              : prev,
-                          )
-                        }}
-                        placeholder="WorldGuard regions"
-                      />
-                    </div>
-                    <div className="field">
-                      <label htmlFor={`config-path-${draft.key}`}>Relative path</label>
-                      <input
-                        id={`config-path-${draft.key}`}
-                        value={draft.path}
-                        onChange={(event) => {
-                          const value = event.target.value
-                          setConfigEditor((prev) =>
-                            prev
-                              ? {
-                                  ...prev,
-                                  touched: true,
-                                  drafts: prev.drafts.map((item) =>
-                                    item.key === draft.key ? { ...item, path: value } : item,
-                                  ),
-                                }
-                              : prev,
-                          )
-                        }}
-                        placeholder="plugins/WorldGuard/worlds/world/regions.yml"
-                        required
-                      />
-                    </div>
-                    <div className="field">
-                      <label htmlFor={`config-requirement-${draft.key}`}>Requirement</label>
-                      <select
-                        id={`config-requirement-${draft.key}`}
-                        value={draft.requirement}
-                        onChange={(event) => {
-                          const value = event.target.value as PluginConfigRequirement
-                          setConfigEditor((prev) =>
-                            prev
-                              ? {
-                                  ...prev,
-                                  touched: true,
-                                  drafts: prev.drafts.map((item) =>
-                                    item.key === draft.key ? { ...item, requirement: value } : item,
-                                  ),
-                                }
-                              : prev,
-                          )
-                        }}
-                      >
-                        {requirementOptions.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="field">
-                      <label htmlFor={`config-description-${draft.key}`}>Description</label>
-                      <input
-                        id={`config-description-${draft.key}`}
-                        value={draft.description}
-                        onChange={(event) => {
-                          const value = event.target.value
-                          setConfigEditor((prev) =>
-                            prev
-                              ? {
-                                  ...prev,
-                                  touched: true,
-                                  drafts: prev.drafts.map((item) =>
-                                    item.key === draft.key ? { ...item, description: value } : item,
-                                  ),
-                                }
-                              : prev,
-                          )
-                        }}
-                        placeholder="Optional details for teammates"
-                      />
-                    </div>
-                  </div>
-                  <div className="config-definition-actions">
-                    <span className="muted">#{index + 1}</span>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      onClick={() =>
-                        setConfigEditor((prev) =>
-                          prev
-                            ? {
-                                ...prev,
-                                touched: true,
-                                drafts: prev.drafts.filter((item) => item.key !== draft.key),
-                              }
-                            : prev,
-                        )
-                      }
-                      disabled={configEditor.busy}
-                    >
-                      Remove
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="form-actions" style={{ marginTop: '1rem' }}>
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={() =>
-                  setConfigEditor((prev) =>
-                    prev
-                      ? {
-                          ...prev,
-                          touched: true,
-                          drafts: [
-                            ...prev.drafts,
-                            createEmptyDraft(),
-                          ],
-                        }
-                      : prev,
-                  )
-                }
-                disabled={configEditor.busy}
-              >
-                Add config path
-              </Button>
-            </div>
-
-            <div className="form-actions" style={{ marginTop: '1.5rem', display: 'flex', gap: '1rem' }}>
-              <Button
-                type="button"
-                variant="primary"
-                disabled={configEditor.busy}
-                onClick={async () => {
-                  if (!configEditor) return
-                  const sanitized: PluginConfigDefinition[] = []
-                  for (const draft of configEditor.drafts) {
-                    const path = draft.path.trim()
-                    if (!path) {
-                      setConfigEditor((prev) =>
-                        prev ? { ...prev, error: 'Each config must include a relative path.' } : prev,
-                      )
-                      return
+                  const supportRange = (() => {
+                    if (plugin.minecraftVersionMin && plugin.minecraftVersionMax) {
+                      return plugin.minecraftVersionMin === plugin.minecraftVersionMax
+                        ? plugin.minecraftVersionMin
+                        : `${plugin.minecraftVersionMin} – ${plugin.minecraftVersionMax}`
                     }
-                    sanitized.push({
-                      id: draft.id.trim(),
-                      path,
-                      label: draft.label.trim() || undefined,
-                      description: draft.description.trim() || undefined,
-                      requirement: draft.requirement,
-                    })
-                  }
-                  try {
-                    setConfigEditor((prev) => (prev ? { ...prev, busy: true, error: null } : prev))
-                    const updated = await updateLibraryPluginConfigs(configEditor.plugin.id, configEditor.plugin.version, {
-                      configDefinitions: sanitized,
-                    })
-                    setPlugins((prev) =>
-                      prev.map((plugin) =>
-                        plugin.id === updated.id && plugin.version === updated.version
-                          ? { ...updated }
-                          : plugin,
-                      ),
+                    if (plugin.minecraftVersionMin) return plugin.minecraftVersionMin
+                    if (plugin.minecraftVersionMax) return plugin.minecraftVersionMax
+                    return null
+                  })()
+
+                  return (
+                    <Table.Tr key={key}>
+                      <Table.Td>
+                        <Stack gap={4}>
+                          <Text fw={600}>{plugin.id}</Text>
+                          {plugin.source?.projectUrl && (
+                            <Anchor href={plugin.source.projectUrl} target="_blank" rel="noreferrer" size="sm">
+                              View project
+                            </Anchor>
+                          )}
+                        </Stack>
+                      </Table.Td>
+                      <Table.Td>{plugin.version}</Table.Td>
+                      <Table.Td>
+                        <Badge variant="light">{sourceLabel[kind]}</Badge>
+                      </Table.Td>
+                      <Table.Td>
+                        <Stack gap={2}>
+                          <Text size="sm">{supportRange ?? '—'}</Text>
+                          {plugin.source?.loader && (
+                            <Text size="xs" c="dimmed">
+                              Loader: {plugin.source.loader}
+                            </Text>
+                          )}
+                        </Stack>
+                      </Table.Td>
+                      <Table.Td>
+                        <Stack gap={4}>
+                          {plugin.cachePath ? (
+                            <>
+                              <Text size="sm">
+                                <code>{plugin.cachePath}</code>
+                              </Text>
+                              {plugin.cachedAt && (
+                                <Text size="xs" c="dimmed">
+                                  Cached {new Date(plugin.cachedAt).toLocaleString()}
+                                </Text>
+                              )}
+                              {plugin.lastUsedAt && (
+                                <Text size="xs" c="dimmed">
+                                  Last used {new Date(plugin.lastUsedAt).toLocaleString()}
+                                </Text>
+                              )}
+                            </>
+                          ) : (
+                            <Text size="sm" c="dimmed">
+                              Pending
+                            </Text>
+                          )}
+                        </Stack>
+                      </Table.Td>
+                      <Table.Td>
+                        {usages.length === 0 ? (
+                          <Text size="sm" c="dimmed">
+                            Unused
+                          </Text>
+                        ) : (
+                          <Stack gap={4}>
+                            {usages.map((project) => (
+                              <Anchor key={project.id} component={Link} to={`/projects/${project.id}`} size="sm">
+                                {project.name}
+                              </Anchor>
+                            ))}
+                          </Stack>
+                        )}
+                      </Table.Td>
+                      <Table.Td>
+                        <Group gap="xs" wrap="wrap" justify="flex-end">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={async () => {
+                              if (
+                                !window.confirm(
+                                  `Remove ${plugin.id} ${plugin.version} from library? This does not affect existing projects.`,
+                                )
+                              ) {
+                                return
+                              }
+                              try {
+                                const remaining = await deleteLibraryPlugin(plugin.id, plugin.version)
+                                setPlugins(remaining)
+                              } catch (err) {
+                                setError(err instanceof Error ? err.message : 'Failed to delete plugin.')
+                              }
+                            }}
+                          >
+                            Delete
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => {
+                              const drafts: ConfigDefinitionDraft[] = (plugin.configDefinitions ?? []).map(
+                                (definition, index) => definitionToDraft(definition, index),
+                              )
+                              setConfigEditor({
+                                plugin,
+                                drafts,
+                                busy: false,
+                                error: null,
+                                touched: false,
+                              })
+                            }}
+                          >
+                            Manage config paths
+                          </Button>
+                        </Group>
+                      </Table.Td>
+                    </Table.Tr>
+                  )
+                })}
+              </Table.Tbody>
+            </Table>
+          </ScrollArea>
+        )}
+
+        {configEditor && (
+          <ContentSection as="article" padding="xl">
+            <Stack gap="lg">
+              <Group justify="space-between" align="flex-start">
+                <Stack gap={4}>
+                  <Title order={3}>
+                    Manage Config Paths · {configEditor.plugin.id} {configEditor.plugin.version}
+                  </Title>
+                  <Text size="sm" c="dimmed">
+                    Define expected config files for this plugin. Paths are relative to the project root.
+                  </Text>
+                </Stack>
+                <Button variant="ghost" onClick={() => setConfigEditor(null)} disabled={configEditor.busy}>
+                  Close
+                </Button>
+              </Group>
+
+              {configEditor.error && (
+                <Text size="sm" c="red.4">
+                  {configEditor.error}
+                </Text>
+              )}
+
+              <Stack gap="md">
+                {configEditor.drafts.length === 0 && (
+                  <Text size="sm" c="dimmed">
+                    No config paths defined yet. Add one to get started.
+                  </Text>
+                )}
+                {configEditor.drafts.map((draft, index) => (
+                  <Card key={draft.key}>
+                    <CardContent>
+                      <Stack gap="md">
+                        <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
+                          <Stack gap={4}>
+                            <Text size="xs" fw={600} c="dimmed">
+                              Label
+                            </Text>
+                            <TextInput
+                              id={`config-label-${draft.key}`}
+                              value={draft.label}
+                              onChange={(event) => {
+                                const value = event.currentTarget.value
+                                setConfigEditor((prev) =>
+                                  prev
+                                    ? {
+                                        ...prev,
+                                        touched: true,
+                                        drafts: prev.drafts.map((item) =>
+                                          item.key === draft.key ? { ...item, label: value } : item,
+                                        ),
+                                      }
+                                    : prev,
+                                )
+                              }}
+                              placeholder="WorldGuard regions"
+                            />
+                          </Stack>
+                          <Stack gap={4}>
+                            <Text size="xs" fw={600} c="dimmed">
+                              Relative path
+                            </Text>
+                            <TextInput
+                              id={`config-path-${draft.key}`}
+                              value={draft.path}
+                              onChange={(event) => {
+                                const value = event.currentTarget.value
+                                setConfigEditor((prev) =>
+                                  prev
+                                    ? {
+                                        ...prev,
+                                        touched: true,
+                                        drafts: prev.drafts.map((item) =>
+                                          item.key === draft.key ? { ...item, path: value } : item,
+                                        ),
+                                      }
+                                    : prev,
+                                )
+                              }}
+                              placeholder="plugins/WorldGuard/worlds/world/regions.yml"
+                              required
+                            />
+                          </Stack>
+                          <Stack gap={4}>
+                            <Text size="xs" fw={600} c="dimmed">
+                              Requirement
+                            </Text>
+                            <NativeSelect
+                              id={`config-requirement-${draft.key}`}
+                              value={draft.requirement}
+                              onChange={(event) => {
+                                const value = event.currentTarget.value as PluginConfigRequirement
+                                setConfigEditor((prev) =>
+                                  prev
+                                    ? {
+                                        ...prev,
+                                        touched: true,
+                                        drafts: prev.drafts.map((item) =>
+                                          item.key === draft.key ? { ...item, requirement: value } : item,
+                                        ),
+                                      }
+                                    : prev,
+                                )
+                              }}
+                              data={requirementOptions.map((option) => ({
+                                value: option.value,
+                                label: option.label,
+                              }))}
+                            />
+                          </Stack>
+                          <Stack gap={4}>
+                            <Text size="xs" fw={600} c="dimmed">
+                              Description
+                            </Text>
+                            <TextInput
+                              id={`config-description-${draft.key}`}
+                              value={draft.description}
+                              onChange={(event) => {
+                                const value = event.currentTarget.value
+                                setConfigEditor((prev) =>
+                                  prev
+                                    ? {
+                                        ...prev,
+                                        touched: true,
+                                        drafts: prev.drafts.map((item) =>
+                                          item.key === draft.key ? { ...item, description: value } : item,
+                                        ),
+                                      }
+                                    : prev,
+                                )
+                              }}
+                              placeholder="Optional details for teammates"
+                            />
+                          </Stack>
+                        </SimpleGrid>
+
+                        <Group justify="space-between" align="center">
+                          <Text size="sm" c="dimmed">
+                            #{index + 1}
+                          </Text>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() =>
+                              setConfigEditor((prev) =>
+                                prev
+                                  ? {
+                                      ...prev,
+                                      touched: true,
+                                      drafts: prev.drafts.filter((item) => item.key !== draft.key),
+                                    }
+                                  : prev,
+                              )
+                            }
+                            disabled={configEditor.busy}
+                          >
+                            Remove
+                          </Button>
+                        </Group>
+                      </Stack>
+                    </CardContent>
+                  </Card>
+                ))}
+              </Stack>
+
+              <Group>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() =>
+                    setConfigEditor((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            touched: true,
+                            drafts: [...prev.drafts, createEmptyDraft()],
+                          }
+                        : prev,
                     )
+                  }
+                  disabled={configEditor.busy}
+                >
+                  Add config path
+                </Button>
+              </Group>
+
+              <Group gap="sm">
+                <Button
+                  type="button"
+                  variant="primary"
+                  disabled={configEditor.busy}
+                  onClick={async () => {
+                    if (!configEditor) return
+                    const sanitized: PluginConfigDefinition[] = []
+                    for (const draft of configEditor.drafts) {
+                      const path = draft.path.trim()
+                      if (!path) {
+                        setConfigEditor((prev) =>
+                          prev ? { ...prev, error: 'Each config must include a relative path.' } : prev,
+                        )
+                        return
+                      }
+                      sanitized.push({
+                        id: draft.id.trim(),
+                        path,
+                        label: draft.label.trim() || undefined,
+                        description: draft.description.trim() || undefined,
+                        requirement: draft.requirement,
+                      })
+                    }
+                    try {
+                      setConfigEditor((prev) => (prev ? { ...prev, busy: true, error: null } : prev))
+                      const updated = await updateLibraryPluginConfigs(
+                        configEditor.plugin.id,
+                        configEditor.plugin.version,
+                        {
+                          configDefinitions: sanitized,
+                        },
+                      )
+                      setPlugins((prev) =>
+                        prev.map((plugin) =>
+                          plugin.id === updated.id && plugin.version === updated.version ? { ...updated } : plugin,
+                        ),
+                      )
+                      setConfigEditor({
+                        plugin: updated,
+                        drafts: (updated.configDefinitions ?? []).map((definition, index) =>
+                          definitionToDraft(definition, index),
+                        ),
+                        busy: false,
+                        error: null,
+                        touched: false,
+                      })
+                    } catch (err) {
+                      setConfigEditor((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              busy: false,
+                              error: err instanceof Error ? err.message : 'Failed to save config paths.',
+                            }
+                          : prev,
+                      )
+                    }
+                  }}
+                >
+                  {configEditor.busy ? 'Saving…' : 'Save changes'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  disabled={configEditor.busy}
+                  onClick={() => {
+                    const plugin = configEditor.plugin
                     setConfigEditor({
-                      plugin: updated,
-                      drafts: (updated.configDefinitions ?? []).map((definition, index) =>
+                      plugin,
+                      drafts: (plugin.configDefinitions ?? []).map((definition, index) =>
                         definitionToDraft(definition, index),
                       ),
                       busy: false,
                       error: null,
                       touched: false,
                     })
-                  } catch (err) {
-                    setConfigEditor((prev) =>
-                      prev
-                        ? {
-                            ...prev,
-                            busy: false,
-                            error: err instanceof Error ? err.message : 'Failed to save config paths.',
-                          }
-                        : prev,
-                    )
-                  }
-                }}
-              >
-                {configEditor.busy ? 'Saving…' : 'Save changes'}
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                disabled={configEditor.busy}
-                onClick={() => {
-                  const plugin = configEditor.plugin
-                  setConfigEditor({
-                    plugin,
-                    drafts: (plugin.configDefinitions ?? []).map((definition, index) =>
-                      definitionToDraft(definition, index),
-                    ),
-                    busy: false,
-                    error: null,
-                    touched: false,
-                  })
-                }}
-              >
-                Reset
-              </Button>
-            </div>
+                  }}
+                >
+                  Reset
+                </Button>
+              </Group>
+            </Stack>
           </ContentSection>
-        </div>
-      )}
+        )}
+      </Stack>
     </ContentSection>
   )
 }

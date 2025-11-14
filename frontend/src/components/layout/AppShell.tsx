@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { cn } from '../../lib/cn'
+import { AppShell as MantineAppShell, ScrollArea, Box } from '@mantine/core'
 
 export interface AppShellProps {
   sidebar: ReactNode
@@ -21,14 +21,32 @@ export function AppShell({
   topbarClassName,
 }: AppShellProps) {
   return (
-    <div className={cn('app-shell', className)}>
-      <aside className={cn('app-shell__sidebar', sidebarClassName)}>{sidebar}</aside>
-      <div className={cn('app-shell__main', mainClassName)}>
-        <header className={cn('app-shell__topbar', topbarClassName)}>{topbar}</header>
-        {children}
-      </div>
-    </div>
+    <MantineAppShell
+      className={className}
+      padding="xl"
+      navbar={{
+        width: 280,
+        breakpoint: 'lg',
+      }}
+      header={{
+        height: 80,
+      }}
+    >
+      <MantineAppShell.Header className={topbarClassName}>
+        <Box h="100%" px="lg" display="flex" align="center">
+          {topbar}
+        </Box>
+      </MantineAppShell.Header>
+      <MantineAppShell.Navbar p="lg" className={sidebarClassName}>
+        <ScrollArea type="auto" h="100%">
+          {sidebar}
+        </ScrollArea>
+      </MantineAppShell.Navbar>
+      <MantineAppShell.Main className={mainClassName}>
+        <ScrollArea type="auto" h="100%">
+          {children}
+        </ScrollArea>
+      </MantineAppShell.Main>
+    </MantineAppShell>
   )
 }
-
-

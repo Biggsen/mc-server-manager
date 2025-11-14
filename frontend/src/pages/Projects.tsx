@@ -16,6 +16,8 @@ import {
 import { subscribeProjectsUpdated } from '../lib/events'
 import { ContentSection } from '../components/layout'
 import { useAsyncAction } from '../lib/useAsyncAction'
+import { Anchor, Group, Loader, Stack, Text, Title } from '@mantine/core'
+import { Button, Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui'
 
 type ProjectMessage = { type: 'success' | 'error'; text: string }
 
@@ -417,136 +419,158 @@ function Projects() {
   }, [])
 
   return (
-    <ContentSection as="section">
-      <header>
-        <h2>
-          <span className="title-icon" aria-hidden="true">
-            <Buildings size={22} weight="fill" />
-          </span>
-          All Projects
-        </h2>
-        <p className="muted">Projects synced with your GitHub account will appear here.</p>
-      </header>
-      {loading && <p className="muted">Loading projects…</p>}
-      {error && <p className="error-text">{error}</p>}
-      {!loading && !error && projects.length === 0 && (
-        <div className="empty-state">Nothing to show yet. Trigger your first build and we’ll track it here.</div>
-      )}
-      {!loading && !error && projects.length > 0 && (
-        <ul className="project-list">
-          {projects.map((project) => {
-            const latestBuild = builds[project.id]
-            const repoUrl = project.repo?.htmlUrl
-            const repoLabel = project.repo?.fullName ?? project.repo?.name
-            const commitSha = project.manifest?.commitSha
-            const buildStatus = latestBuild?.status ?? building[project.id] ?? 'idle'
+    <ContentSection as="section" padding="xl">
+      <Stack gap="lg">
+        <Group gap="sm">
+          <Buildings size={24} weight="fill" aria-hidden="true" />
+          <Stack gap={2}>
+            <Title order={2}>All Projects</Title>
+            <Text c="dimmed" size="sm">
+              Projects synced with your GitHub account will appear here.
+            </Text>
+          </Stack>
+        </Group>
 
-            return (
-              <li key={project.id}>
-                <div>
-                <h4>
-                  <Link to={`/projects/${project.id}`}>{project.name}</Link>
-                </h4>
-                  <p className="muted">
-                    {[
-                      project.minecraftVersion,
-                      project.loader.toUpperCase(),
-                      project.source === 'imported' ? 'Imported' : null,
-                    ]
-                      .filter(Boolean)
-                      .join(' · ')}
-                  </p>
-                  {repoUrl && repoLabel && (
-                    <p className="muted">
-                      Repo:{' '}
-                      <a href={repoUrl} target="_blank" rel="noreferrer">
-                        {repoLabel}
-                      </a>
-                    </p>
-                  )}
-                  <p className="muted">
-                    {latestBuild
-                      ? `Build status: ${latestBuild.status.toUpperCase()}${
-                          latestBuild.finishedAt
-                            ? ` · ${new Date(
-                                latestBuild.finishedAt ?? latestBuild.createdAt,
-                              ).toLocaleTimeString()}`
-                            : ''
-                        }${latestBuild.error ? ` — ${latestBuild.error}` : ''}`
-                      : 'Build status: IDLE'}
-                  </p>
-                  {project.manifest && (
-                    <p className="muted">
-                      Manifest:{' '}
-                      {project.manifest.lastBuildId}{' '}
-                      {commitSha && repoUrl ? (
-                        <a
-                          href={`${repoUrl.replace(/\.git$/, '')}/commit/${commitSha}`}
-                          target="_blank"
-                          rel="noreferrer"
+        {loading && (
+          <Group gap="xs">
+            <Loader size="sm" />
+            <Text size="sm" c="dimmed">
+              Loading projects…
+            </Text>
+          </Group>
+        )}
+        {error && (
+          <Text c="red.4" size="sm">
+            {error}
+          </Text>
+        )}
+        {!loading && !error && projects.length === 0 && (
+          <Card>
+            <CardContent>
+              <Text c="dimmed" size="sm">
+                Nothing to show yet. Trigger your first build and we’ll track it here.
+              </Text>
+            </CardContent>
+          </Card>
+        )}
+        {!loading && !error && projects.length > 0 && (
+          <Stack gap="lg">
+            {projects.map((project) => {
+              const latestBuild = builds[project.id]
+              const repoUrl = project.repo?.htmlUrl
+              const repoLabel = project.repo?.fullName ?? project.repo?.name
+              const commitSha = project.manifest?.commitSha
+              const buildStatus = latestBuild?.status ?? building[project.id] ?? 'idle'
+              const message = messages[project.id]
+
+              return (
+                <Card key={project.id}>
+                  <CardHeader>
+                    <CardTitle>
+                      <Anchor component={Link} to={`/projects/${project.id}`}>
+                        {project.name}
+                      </Anchor>
+                    </CardTitle>
+                    <CardDescription>
+                      {[
+                        project.minecraftVersion,
+                        project.loader.toUpperCase(),
+                        project.source === 'imported' ? 'Imported' : null,
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <Stack gap="md">
+                      <Stack gap={4}>
+                        {repoUrl && repoLabel && (
+                          <Text size="sm" c="dimmed">
+                            Repo:{' '}
+                            <Anchor href={repoUrl} target="_blank" rel="noreferrer">
+                              {repoLabel}
+                            </Anchor>
+                          </Text>
+                        )}
+                        <Text size="sm" c="dimmed">
+                          {latestBuild
+                            ? `Build status: ${latestBuild.status.toUpperCase()}${
+                                latestBuild.finishedAt
+                                  ? ` · ${new Date(
+                                      latestBuild.finishedAt ?? latestBuild.createdAt,
+                                    ).toLocaleTimeString()}`
+                                  : ''
+                              }${latestBuild.error ? ` — ${latestBuild.error}` : ''}`
+                            : 'Build status: IDLE'}
+                        </Text>
+                        {project.manifest && (
+                          <Text size="sm" c="dimmed">
+                            Manifest: {project.manifest.lastBuildId}{' '}
+                            {commitSha && repoUrl ? (
+                              <Anchor
+                                href={`${repoUrl.replace(/\.git$/, '')}/commit/${commitSha}`}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                ({commitSha.slice(0, 7)})
+                              </Anchor>
+                            ) : null}
+                          </Text>
+                        )}
+                      </Stack>
+
+                      <Group gap="sm" wrap="wrap">
+                        <Button
+                          variant="primary"
+                          disabled={busy[project.id] || buildStatus === 'running'}
+                          onClick={() => {
+                            void queueProjectBuild(project).catch(() => null)
+                          }}
                         >
-                          ({commitSha.slice(0, 7)})
-                        </a>
-                      ) : null}
-                    </p>
-                  )}
-                </div>
-                <div className="dev-buttons">
-                  <button
-                    type="button"
-                    className="primary"
-                    disabled={busy[project.id] || buildStatus === 'running'}
-                    onClick={() => {
-                      void queueProjectBuild(project).catch(() => null)
-                    }}
-                  >
-                    {buildStatus === 'running' ? 'Building…' : 'Build'}
-                  </button>
-                  <button
-                    type="button"
-                    className="ghost"
-                    disabled={busy[project.id]}
-                    onClick={() => {
-                      void generateProjectManifest(project).catch(() => null)
-                    }}
-                  >
-                    Generate Manifest
-                  </button>
-                  <button
-                    type="button"
-                    className="ghost"
-                    disabled={busy[project.id]}
-                    onClick={() => {
-                      void scanProjectAssetsAction(project).catch(() => null)
-                    }}
-                  >
-                    Scan Assets
-                  </button>
-                  <button
-                    type="button"
-                    className="ghost"
-                    disabled={busy[project.id]}
-                    onClick={() => {
-                      void runProjectLocallyAction(project).catch(() => null)
-                    }}
-                  >
-                    Run Locally
-                  </button>
-                </div>
-                {(() => {
-                  const message = messages[project.id]
-                  if (!message) return null
-                  return (
-                    <p className={message.type === 'error' ? 'error-text' : 'success-text'}>
-                      {message.text}
-                    </p>
-                  )
-                })()}
-              </li>
-            )
-          })}
-        </ul>
-      )}
+                          {buildStatus === 'running' ? 'Building…' : 'Build'}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          disabled={busy[project.id]}
+                          onClick={() => {
+                            void generateProjectManifest(project).catch(() => null)
+                          }}
+                        >
+                          Generate manifest
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          disabled={busy[project.id]}
+                          onClick={() => {
+                            void scanProjectAssetsAction(project).catch(() => null)
+                          }}
+                        >
+                          Scan assets
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          disabled={busy[project.id]}
+                          onClick={() => {
+                            void runProjectLocallyAction(project).catch(() => null)
+                          }}
+                        >
+                          Run locally
+                        </Button>
+                      </Group>
+
+                      {message && (
+                        <Text size="sm" c={message.type === 'error' ? 'red.4' : 'green.5'}>
+                          {message.text}
+                        </Text>
+                      )}
+                    </Stack>
+                  </CardContent>
+                </Card>
+              )
+            })}
+          </Stack>
+        )}
+      </Stack>
     </ContentSection>
   )
 }

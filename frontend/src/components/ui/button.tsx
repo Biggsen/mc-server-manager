@@ -1,5 +1,5 @@
 import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from 'react'
-import { cn } from '../../lib/cn'
+import { Button as MantineButton } from '@mantine/core'
 
 type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'pill' | 'link' | 'danger'
 type ButtonSize = 'sm' | 'md' | 'lg'
@@ -10,6 +10,24 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   icon?: ReactNode
   iconPosition?: 'left' | 'right'
   loading?: boolean
+}
+
+const sizeMap: Record<ButtonSize, 'xs' | 'sm' | 'md'> = {
+  sm: 'xs',
+  md: 'sm',
+  lg: 'md',
+}
+
+const variantMap: Record<
+  ButtonVariant,
+  { variant: 'filled' | 'light' | 'subtle' | 'white' | 'outline'; color?: string; radius?: 'md' | 'lg' | 'xl'; underline?: boolean }
+> = {
+  primary: { variant: 'filled', color: 'blue' },
+  secondary: { variant: 'light', color: 'blue' },
+  ghost: { variant: 'subtle', color: 'gray' },
+  pill: { variant: 'filled', color: 'blue', radius: 'xl' },
+  link: { variant: 'subtle', color: 'blue', underline: true },
+  danger: { variant: 'filled', color: 'red' },
 }
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
@@ -23,32 +41,37 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       loading = false,
       disabled,
       children,
+      style: inlineStyle,
       ...props
     },
     ref,
   ) => {
-    const hasIcon = Boolean(icon)
-    const iconElement = hasIcon ? (
-      <span className="ui-btn__icon" aria-hidden="true">
-        {icon}
-      </span>
-    ) : null
-
+    const settings = variantMap[variant]
+    const combinedStyle =
+      settings.underline && inlineStyle
+        ? { ...inlineStyle, textDecoration: 'underline' }
+        : settings.underline
+          ? { textDecoration: 'underline' }
+          : inlineStyle
     return (
-      <button
+      <MantineButton
         ref={ref}
-        className={cn('ui-btn', `ui-btn--${variant}`, `ui-btn--${size}`, { 'is-loading': loading }, className)}
+        className={className}
+        variant={settings.variant}
+        color={settings.color}
+        radius={settings.radius ?? 'md'}
+        size={sizeMap[size]}
+        leftSection={icon && iconPosition === 'left' ? icon : undefined}
+        rightSection={icon && iconPosition === 'right' ? icon : undefined}
+        loading={loading}
         disabled={loading || disabled}
+        style={combinedStyle}
         {...props}
       >
-        {hasIcon && iconPosition === 'left' && iconElement}
-        <span className="ui-btn__label">{children}</span>
-        {hasIcon && iconPosition === 'right' && iconElement}
-      </button>
+        {children}
+      </MantineButton>
     )
   },
 )
 
 Button.displayName = 'Button'
-
-

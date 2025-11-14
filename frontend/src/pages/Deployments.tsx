@@ -6,7 +6,8 @@ import {
   type DeploymentTarget,
   type DeploymentType,
 } from '../lib/api'
-import { ContentSection } from '../components/layout'
+import { Alert, Grid, Group, Loader, NativeSelect, Stack, Text, Textarea, TextInput, Title } from '@mantine/core'
+import { Button, Card, CardContent } from '../components/ui'
 
 type FormState = {
   name: string
@@ -126,179 +127,226 @@ function Deployments() {
   }
 
   return (
-    <ContentSection as="section">
-      <header>
-        <h2>Deployment Targets</h2>
-        <p className="muted">
-          Configure destinations for build artifacts. Publish support is stubbed for now.
-        </p>
-      </header>
+    <Stack gap="lg" p="lg">
+      <Card>
+        <CardContent>
+          <Stack gap="md">
+            <Stack gap={4}>
+              <Title order={2}>Deployment Targets</Title>
+              <Text size="sm" c="dimmed">
+                Configure destinations for build artifacts. Publish support is stubbed for now.
+              </Text>
+            </Stack>
 
-      {loading && <p className="muted">Loading deployment targets…</p>}
-      {error && <p className="error-text">{error}</p>}
+            {loading && (
+              <Group>
+                <Loader size="sm" />
+                <Text size="sm" c="dimmed">Loading deployment targets…</Text>
+              </Group>
+            )}
+            {error && (
+              <Alert color="red" title="Error">
+                {error}
+              </Alert>
+            )}
 
-      <form className="page-form" onSubmit={handleSubmit}>
-        <div className="form-grid">
-          <div className="field">
-            <label htmlFor="deployment-name">Name</label>
-            <input
-              id="deployment-name"
-              value={form.name}
-              onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
-              placeholder="Production server"
-            />
-          </div>
+            <form onSubmit={handleSubmit}>
+              <Stack gap="md">
+                <Grid>
+                  <Grid.Col span={{ base: 12, sm: 6 }}>
+                    <TextInput
+                      label="Name"
+                      id="deployment-name"
+                      value={form.name}
+                      onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
+                      placeholder="Production server"
+                    />
+                  </Grid.Col>
 
-          <div className="field">
-            <label htmlFor="deployment-type">Type</label>
-            <select
-              id="deployment-type"
-              value={form.type}
-              onChange={(event) =>
-                setForm((prev) => ({ ...prev, type: event.target.value as DeploymentType }))
-              }
-            >
-              <option value="folder">Local folder</option>
-              <option value="sftp">SFTP server</option>
-            </select>
-          </div>
+                  <Grid.Col span={{ base: 12, sm: 6 }}>
+                    <NativeSelect
+                      label="Type"
+                      id="deployment-type"
+                      value={form.type}
+                      onChange={(event) =>
+                        setForm((prev) => ({ ...prev, type: event.target.value as DeploymentType }))
+                      }
+                      data={[
+                        { value: 'folder', label: 'Local folder' },
+                        { value: 'sftp', label: 'SFTP server' },
+                      ]}
+                    />
+                  </Grid.Col>
 
-          <div className="field span-2">
-            <label htmlFor="deployment-notes">Notes</label>
-            <textarea
-              id="deployment-notes"
-              rows={2}
-              value={form.notes}
-              onChange={(event) => setForm((prev) => ({ ...prev, notes: event.target.value }))}
-              placeholder="Optional description or credentials hint"
-            />
-          </div>
+                  <Grid.Col span={12}>
+                    <Textarea
+                      label="Notes"
+                      id="deployment-notes"
+                      rows={2}
+                      value={form.notes}
+                      onChange={(event) => setForm((prev) => ({ ...prev, notes: event.target.value }))}
+                      placeholder="Optional description or credentials hint"
+                    />
+                  </Grid.Col>
 
-          {form.type === 'folder' && (
-            <div className="field span-2">
-              <label htmlFor="deployment-path">Folder path</label>
-              <input
-                id="deployment-path"
-                value={form.path}
-                onChange={(event) => setForm((prev) => ({ ...prev, path: event.target.value }))}
-                placeholder="D:/minecraft/releases"
-              />
-            </div>
-          )}
+                  {form.type === 'folder' && (
+                    <Grid.Col span={12}>
+                      <TextInput
+                        label="Folder path"
+                        id="deployment-path"
+                        value={form.path}
+                        onChange={(event) => setForm((prev) => ({ ...prev, path: event.target.value }))}
+                        placeholder="D:/minecraft/releases"
+                      />
+                    </Grid.Col>
+                  )}
 
-          {form.type === 'sftp' && (
-            <>
-              <div className="field">
-                <label htmlFor="deployment-host">Host</label>
-                <input
-                  id="deployment-host"
-                  value={form.host}
-                  onChange={(event) => setForm((prev) => ({ ...prev, host: event.target.value }))}
-                  placeholder="sftp.example.com"
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="deployment-port">Port</label>
-                <input
-                  id="deployment-port"
-                  value={form.port}
-                  onChange={(event) => setForm((prev) => ({ ...prev, port: event.target.value }))}
-                  placeholder="22"
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="deployment-username">Username</label>
-                <input
-                  id="deployment-username"
-                  value={form.username}
-                  onChange={(event) =>
-                    setForm((prev) => ({ ...prev, username: event.target.value }))
-                  }
-                  placeholder="deploy"
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="deployment-remote">Remote path</label>
-                <input
-                  id="deployment-remote"
-                  value={form.remotePath}
-                  onChange={(event) =>
-                    setForm((prev) => ({ ...prev, remotePath: event.target.value }))
-                  }
-                  placeholder="/srv/minecraft/releases"
-                />
-              </div>
-            </>
-          )}
-        </div>
-        <div className="form-actions">
-          <button
-            type="submit"
-            className="primary"
-            disabled={saving}
-          >
-            {saving ? 'Saving…' : 'Save Target'}
-          </button>
-          <button
-            type="button"
-            className="ghost"
-            onClick={resetForm}
-            disabled={saving}
-          >
-            Reset
-          </button>
-        </div>
-        {message && <p className={message.startsWith('Error') ? 'error-text' : 'success-text'}>{message}</p>}
-      </form>
+                  {form.type === 'sftp' && (
+                    <>
+                      <Grid.Col span={{ base: 12, sm: 6 }}>
+                        <TextInput
+                          label="Host"
+                          id="deployment-host"
+                          value={form.host}
+                          onChange={(event) => setForm((prev) => ({ ...prev, host: event.target.value }))}
+                          placeholder="sftp.example.com"
+                        />
+                      </Grid.Col>
+                      <Grid.Col span={{ base: 12, sm: 6 }}>
+                        <TextInput
+                          label="Port"
+                          id="deployment-port"
+                          value={form.port}
+                          onChange={(event) => setForm((prev) => ({ ...prev, port: event.target.value }))}
+                          placeholder="22"
+                        />
+                      </Grid.Col>
+                      <Grid.Col span={{ base: 12, sm: 6 }}>
+                        <TextInput
+                          label="Username"
+                          id="deployment-username"
+                          value={form.username}
+                          onChange={(event) =>
+                            setForm((prev) => ({ ...prev, username: event.target.value }))
+                          }
+                          placeholder="deploy"
+                        />
+                      </Grid.Col>
+                      <Grid.Col span={{ base: 12, sm: 6 }}>
+                        <TextInput
+                          label="Remote path"
+                          id="deployment-remote"
+                          value={form.remotePath}
+                          onChange={(event) =>
+                            setForm((prev) => ({ ...prev, remotePath: event.target.value }))
+                          }
+                          placeholder="/srv/minecraft/releases"
+                        />
+                      </Grid.Col>
+                    </>
+                  )}
+                </Grid>
 
-      <ContentSection as="article">
-        <header>
-          <h3>Configured Targets</h3>
-        </header>
-        {targets.length === 0 && <p className="muted">No deployment targets configured yet.</p>}
-        {targets.length > 0 && (
-          <div className="layout-grid">
-            <ContentSection as="section">
-              <header>
-                <h4>Local Folders</h4>
-              </header>
-              {folderTargets.length === 0 && <p className="muted">None configured.</p>}
-              {folderTargets.length > 0 && (
-                <ul className="project-list">
-                  {folderTargets.map((target) => (
-                    <li key={target.id}>
-                      <strong>{target.name}</strong>
-                      <p className="muted">{target.path}</p>
-                      {target.notes && <p className="muted">{target.notes}</p>}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </ContentSection>
-            <ContentSection as="section">
-              <header>
-                <h4>SFTP Servers</h4>
-              </header>
-              {sftpTargets.length === 0 && <p className="muted">None configured.</p>}
-              {sftpTargets.length > 0 && (
-                <ul className="project-list">
-                  {sftpTargets.map((target) => (
-                    <li key={target.id}>
-                      <strong>{target.name}</strong>
-                      <p className="muted">
-                        {target.username}@{target.host}:{target.port ?? 22}
-                      </p>
-                      <p className="muted">{target.remotePath}</p>
-                      {target.notes && <p className="muted">{target.notes}</p>}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </ContentSection>
-          </div>
-        )}
-      </ContentSection>
-    </ContentSection>
+                <Group>
+                  <Button
+                    type="submit"
+                    variant="primary"
+                    disabled={saving}
+                  >
+                    {saving ? 'Saving…' : 'Save Target'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={resetForm}
+                    disabled={saving}
+                  >
+                    Reset
+                  </Button>
+                </Group>
+
+                {message && (
+                  <Alert
+                    color={message.startsWith('Error') || message.includes('required') || message.includes('Failed') ? 'red' : 'green'}
+                    title={message.startsWith('Error') || message.includes('required') || message.includes('Failed') ? 'Error' : 'Success'}
+                  >
+                    {message}
+                  </Alert>
+                )}
+              </Stack>
+            </form>
+          </Stack>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent>
+          <Stack gap="md">
+            <Title order={3}>Configured Targets</Title>
+            {targets.length === 0 && (
+              <Text size="sm" c="dimmed">No deployment targets configured yet.</Text>
+            )}
+            {targets.length > 0 && (
+              <Grid>
+                <Grid.Col span={{ base: 12, md: 6 }}>
+                  <Stack gap="md">
+                    <Title order={4}>Local Folders</Title>
+                    {folderTargets.length === 0 && (
+                      <Text size="sm" c="dimmed">None configured.</Text>
+                    )}
+                    {folderTargets.length > 0 && (
+                      <Stack gap="md">
+                        {folderTargets.map((target) => (
+                          <Card key={target.id}>
+                            <CardContent>
+                              <Stack gap={4}>
+                                <Text fw={600}>{target.name}</Text>
+                                <Text size="sm" c="dimmed">{target.path}</Text>
+                                {target.notes && (
+                                  <Text size="sm" c="dimmed">{target.notes}</Text>
+                                )}
+                              </Stack>
+                            </CardContent>
+                          </Card>
+                        ))}
+                      </Stack>
+                    )}
+                  </Stack>
+                </Grid.Col>
+                <Grid.Col span={{ base: 12, md: 6 }}>
+                  <Stack gap="md">
+                    <Title order={4}>SFTP Servers</Title>
+                    {sftpTargets.length === 0 && (
+                      <Text size="sm" c="dimmed">None configured.</Text>
+                    )}
+                    {sftpTargets.length > 0 && (
+                      <Stack gap="md">
+                        {sftpTargets.map((target) => (
+                          <Card key={target.id}>
+                            <CardContent>
+                              <Stack gap={4}>
+                                <Text fw={600}>{target.name}</Text>
+                                <Text size="sm" c="dimmed">
+                                  {target.username}@{target.host}:{target.port ?? 22}
+                                </Text>
+                                <Text size="sm" c="dimmed">{target.remotePath}</Text>
+                                {target.notes && (
+                                  <Text size="sm" c="dimmed">{target.notes}</Text>
+                                )}
+                              </Stack>
+                            </CardContent>
+                          </Card>
+                        ))}
+                      </Stack>
+                    )}
+                  </Stack>
+                </Grid.Col>
+              </Grid>
+            )}
+          </Stack>
+        </CardContent>
+      </Card>
+    </Stack>
   )
 }
 

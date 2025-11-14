@@ -15,7 +15,8 @@ import {
   type GitHubRepo,
 } from '../lib/api'
 import { subscribeProjectsUpdated } from '../lib/events'
-import { ContentSection } from '../components/layout'
+import { Alert, Anchor, Checkbox, Code, Group, NativeSelect, ScrollArea, SimpleGrid, Stack, Text, TextInput, Title } from '@mantine/core'
+import { Button, Card, CardContent } from '../components/ui'
 
 function TestTools() {
   const [projects, setProjects] = useState<ProjectSummary[]>([])
@@ -170,216 +171,262 @@ function TestTools() {
   }
 
   return (
-    <ContentSection as="section">
-      <header>
-        <h2>Developer Test Tools</h2>
-        <p className="muted">
-          Quick helpers for exercising backend endpoints while the UI is still under construction.
-        </p>
-      </header>
+    <Stack gap="lg" p="lg">
+      <Card>
+        <CardContent>
+          <Stack gap="md">
+            <Stack gap={4}>
+              <Title order={2}>Developer Test Tools</Title>
+              <Text size="sm" c="dimmed">
+                Quick helpers for exercising backend endpoints while the UI is still under construction.
+              </Text>
+            </Stack>
 
-      <div className="dev-actions">
-        <button type="button" className="primary" disabled={busy} onClick={handleCreateSample}>
-          Create Sample Project
-        </button>
-        <button type="button" className="ghost" disabled={busy} onClick={handleImportSample}>
-          Import Sample Repo
-        </button>
-      </div>
+            <Group>
+              <Button type="button" variant="primary" disabled={busy} onClick={handleCreateSample}>
+                Create Sample Project
+              </Button>
+              <Button type="button" variant="ghost" disabled={busy} onClick={handleImportSample}>
+                Import Sample Repo
+              </Button>
+            </Group>
 
-      {error && <p className="error-text">{error}</p>}
-
-      <div className="dev-grid">
-        <div>
-          <h3>GitHub Repositories</h3>
-          <form
-            className="github-form"
-            onSubmit={async (event) => {
-              event.preventDefault()
-              if (!selectedOrg || !newRepoName.trim()) {
-                appendLog('Org and repo name are required')
-                return
-              }
-              try {
-                setBusy(true)
-                const repo = await createGitHubRepo(selectedOrg, {
-                  name: newRepoName.trim(),
-                  private: newRepoPrivate,
-                })
-                appendLog(`Created repo ${repo.fullName}`)
-                setRepos((prev) => [repo, ...prev])
-                setNewRepoName('')
-              } catch (err) {
-                appendLog(`Repo creation failed: ${(err as Error).message}`)
-              } finally {
-                setBusy(false)
-              }
-            }}
-          >
-            <label htmlFor="org-select">Organization / Owner</label>
-            <select
-              id="org-select"
-              value={selectedOrg}
-              onChange={(event) => setSelectedOrg(event.target.value)}
-            >
-              {owners.map((owner) => (
-                <option key={owner.login} value={owner.login}>
-                  {owner.login}
-                </option>
-              ))}
-            </select>
-
-            <div className="field">
-              <label htmlFor="repo-name">Repository name</label>
-              <input
-                id="repo-name"
-                value={newRepoName}
-                onChange={(event) => setNewRepoName(event.target.value)}
-                placeholder="my-server-manager"
-              />
-            </div>
-
-            <label className="checkbox">
-              <input
-                type="checkbox"
-                checked={newRepoPrivate}
-                onChange={(event) => setNewRepoPrivate(event.target.checked)}
-              />
-              Private repository
-            </label>
-
-            <button type="submit" className="primary" disabled={busy}>
-              Create Repo
-            </button>
-          </form>
-
-          <div className="log-box">
-            {repos.length === 0 ? (
-              <p className="muted">No repositories found.</p>
-            ) : (
-              <ul className="github-repo-list">
-                {repos.map((repo) => (
-                  <li key={repo.id}>
-                    <strong>{repo.fullName}</strong> {repo.private ? '🔒' : '🌐'}{' '}
-                    <a href={repo.htmlUrl} target="_blank" rel="noreferrer">
-                      View
-                    </a>
-                  </li>
-                ))}
-              </ul>
+            {error && (
+              <Alert color="red" title="Error">
+                {error}
+              </Alert>
             )}
-          </div>
-        </div>
+          </Stack>
+        </CardContent>
+      </Card>
 
-        <div>
-          <h3>Projects</h3>
-          <ul className="project-list">
-            {sortedProjects.map((project) => (
-              <li key={project.id}>
-                <div>
-                  <h4>{project.name}</h4>
-                  <p className="muted">
-                    {[
-                      project.minecraftVersion,
-                      project.loader.toUpperCase(),
-                      project.repo?.fullName ?? null,
-                      project.manifest
-                        ? `Manifest ${project.manifest.lastBuildId}`
-                        : 'No manifest',
-                      project.plugins?.length
-                        ? `${project.plugins.length} plugin${project.plugins.length > 1 ? 's' : ''}`
-                        : null,
-                    ]
-                      .filter(Boolean)
-                      .join(' · ')}
-                  </p>
-                </div>
-                <div className="dev-buttons">
-                  <button
-                    type="button"
-                    className="ghost"
-                    disabled={busy}
-                    onClick={() => handleManifest(project)}
-                  >
-                    Generate Manifest
-                  </button>
-                  <button
-                    type="button"
-                    className="ghost"
-                    disabled={busy}
-                    onClick={() => handleSeedAssets(project)}
-                  >
-                    Scan Assets
-                  </button>
-                  <button
-                    type="button"
-                    className="ghost"
-                    disabled={busy}
-                    onClick={async () => {
-                      try {
-                        setBusy(true)
-                        const build = await triggerBuild(project.id)
-                        appendLog(`Queued build ${build.id} for ${project.name}`)
-                        setTimeout(async () => {
-                          const updated = await fetchBuild(build.id)
-                          setBuilds((prev) => {
-                            const copy = prev.filter((item) => item.id !== updated.id)
-                            return [updated, ...copy]
-                          })
-                        }, 1500)
-                      } catch (err) {
-                        appendLog(`Build failed to queue: ${(err as Error).message}`)
-                      } finally {
-                        setBusy(false)
-                      }
-                    }}
-                  >
-                    Trigger Build
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-          {sortedProjects.length === 0 && (
-            <p className="empty-state">No projects yet. Use the buttons above to seed data.</p>
-          )}
-        </div>
+      <SimpleGrid cols={{ base: 1, md: 2 }} spacing="lg">
+        <Card>
+          <CardContent>
+            <Stack gap="md">
+              <Title order={3}>GitHub Repositories</Title>
+              <form
+                onSubmit={async (event) => {
+                  event.preventDefault()
+                  if (!selectedOrg || !newRepoName.trim()) {
+                    appendLog('Org and repo name are required')
+                    return
+                  }
+                  try {
+                    setBusy(true)
+                    const repo = await createGitHubRepo(selectedOrg, {
+                      name: newRepoName.trim(),
+                      private: newRepoPrivate,
+                    })
+                    appendLog(`Created repo ${repo.fullName}`)
+                    setRepos((prev) => [repo, ...prev])
+                    setNewRepoName('')
+                  } catch (err) {
+                    appendLog(`Repo creation failed: ${(err as Error).message}`)
+                  } finally {
+                    setBusy(false)
+                  }
+                }}
+              >
+                <Stack gap="md">
+                  <NativeSelect
+                    label="Organization / Owner"
+                    id="org-select"
+                    value={selectedOrg}
+                    onChange={(event) => setSelectedOrg(event.target.value)}
+                    data={owners.map((owner) => ({
+                      value: owner.login,
+                      label: owner.login,
+                    }))}
+                  />
 
-        <div>
-          <h3>Builds</h3>
-          <div className="log-box">
-            {builds.length === 0 && <p className="muted">No builds queued yet.</p>}
-            {builds.length > 0 && (
-              <ul>
-                {builds.map((build) => (
-                  <li key={build.id}>
-                    <strong>{build.projectId}</strong> · {build.status.toUpperCase()} ·{' '}
-                    {build.finishedAt
-                      ? new Date(build.finishedAt).toLocaleTimeString()
-                      : new Date(build.createdAt).toLocaleTimeString()}
-                    {build.error ? ` — ${build.error}` : ''}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </div>
+                  <TextInput
+                    label="Repository name"
+                    id="repo-name"
+                    value={newRepoName}
+                    onChange={(event) => setNewRepoName(event.target.value)}
+                    placeholder="my-server-manager"
+                  />
 
-        <div>
-          <h3>Activity Log</h3>
-          <div className="log-box">
-            {logs.length === 0 && <p className="muted">Actions will appear here.</p>}
-            {logs.length > 0 && (
-              <ul>
-                {logs.map((entry, index) => (
-                  <li key={index}>{entry}</li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </div>
-      </div>
-    </ContentSection>
+                  <Checkbox
+                    label="Private repository"
+                    checked={newRepoPrivate}
+                    onChange={(event) => setNewRepoPrivate(event.target.checked)}
+                  />
+
+                  <Button type="submit" variant="primary" disabled={busy}>
+                    Create Repo
+                  </Button>
+                </Stack>
+              </form>
+
+              <Stack gap="sm">
+                {repos.length === 0 ? (
+                  <Text size="sm" c="dimmed">No repositories found.</Text>
+                ) : (
+                  <Stack gap="xs">
+                    {repos.map((repo) => (
+                      <Card key={repo.id}>
+                        <CardContent>
+                          <Group justify="space-between" align="center">
+                            <Group gap="xs">
+                              <Text fw={600}>{repo.fullName}</Text>
+                              <Text>{repo.private ? '🔒' : '🌐'}</Text>
+                            </Group>
+                            <Anchor href={repo.htmlUrl} target="_blank" rel="noreferrer" size="sm">
+                              View
+                            </Anchor>
+                          </Group>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </Stack>
+                )}
+              </Stack>
+            </Stack>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent>
+            <Stack gap="md">
+              <Title order={3}>Projects</Title>
+              {sortedProjects.length === 0 ? (
+                <Text size="sm" c="dimmed">No projects yet. Use the buttons above to seed data.</Text>
+              ) : (
+                <Stack gap="md">
+                  {sortedProjects.map((project) => (
+                    <Card key={project.id}>
+                      <CardContent>
+                        <Stack gap="sm">
+                          <Group justify="space-between" align="flex-start">
+                            <Stack gap={4}>
+                              <Title order={4}>{project.name}</Title>
+                              <Text size="sm" c="dimmed">
+                                {[
+                                  project.minecraftVersion,
+                                  project.loader.toUpperCase(),
+                                  project.repo?.fullName ?? null,
+                                  project.manifest
+                                    ? `Manifest ${project.manifest.lastBuildId}`
+                                    : 'No manifest',
+                                  project.plugins?.length
+                                    ? `${project.plugins.length} plugin${project.plugins.length > 1 ? 's' : ''}`
+                                    : null,
+                                ]
+                                  .filter(Boolean)
+                                  .join(' · ')}
+                              </Text>
+                            </Stack>
+                            <Group gap="xs" wrap="wrap">
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                disabled={busy}
+                                onClick={() => handleManifest(project)}
+                              >
+                                Generate Manifest
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                disabled={busy}
+                                onClick={() => handleSeedAssets(project)}
+                              >
+                                Scan Assets
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                disabled={busy}
+                                onClick={async () => {
+                                  try {
+                                    setBusy(true)
+                                    const build = await triggerBuild(project.id)
+                                    appendLog(`Queued build ${build.id} for ${project.name}`)
+                                    setTimeout(async () => {
+                                      const updated = await fetchBuild(build.id)
+                                      setBuilds((prev) => {
+                                        const copy = prev.filter((item) => item.id !== updated.id)
+                                        return [updated, ...copy]
+                                      })
+                                    }, 1500)
+                                  } catch (err) {
+                                    appendLog(`Build failed to queue: ${(err as Error).message}`)
+                                  } finally {
+                                    setBusy(false)
+                                  }
+                                }}
+                              >
+                                Trigger Build
+                              </Button>
+                            </Group>
+                          </Group>
+                        </Stack>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </Stack>
+              )}
+            </Stack>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent>
+            <Stack gap="md">
+              <Title order={3}>Builds</Title>
+              {builds.length === 0 ? (
+                <Text size="sm" c="dimmed">No builds queued yet.</Text>
+              ) : (
+                <ScrollArea>
+                  <Stack gap="xs">
+                    {builds.map((build) => (
+                      <Card key={build.id}>
+                        <CardContent>
+                          <Text size="sm">
+                            <Text component="span" fw={600}>{build.projectId}</Text>
+                            {' · '}
+                            {build.status.toUpperCase()}
+                            {' · '}
+                            {build.finishedAt
+                              ? new Date(build.finishedAt).toLocaleTimeString()
+                              : new Date(build.createdAt).toLocaleTimeString()}
+                            {build.error && (
+                              <>
+                                {' — '}
+                                <Text component="span" c="red">{build.error}</Text>
+                              </>
+                            )}
+                          </Text>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </Stack>
+                </ScrollArea>
+              )}
+            </Stack>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent>
+            <Stack gap="md">
+              <Title order={3}>Activity Log</Title>
+              {logs.length === 0 ? (
+                <Text size="sm" c="dimmed">Actions will appear here.</Text>
+              ) : (
+                <ScrollArea>
+                  <Code block style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                    {logs.join('\n')}
+                  </Code>
+                </ScrollArea>
+              )}
+            </Stack>
+          </CardContent>
+        </Card>
+      </SimpleGrid>
+    </Stack>
   )
 }
 

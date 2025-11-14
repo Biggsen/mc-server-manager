@@ -1,7 +1,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Building, Plug } from '@phosphor-icons/react'
+import { Building, Plug, SquaresFour } from '@phosphor-icons/react'
+import {
+  Accordion,
+  Anchor,
+  Badge,
+  Card,
+  Code,
+  Divider,
+  Group,
+  Loader,
+  Paper,
+  ScrollArea,
+  SimpleGrid,
+  Stack,
+  Text,
+  TextInput,
+  Title,
+} from '@mantine/core'
 import { Button, type ButtonProps } from '../components/ui'
 import {
   fetchProjects,
@@ -449,284 +466,407 @@ function Dashboard() {
   }, [latestManifest])
 
   return (
-    <>
-      <section className="dashboard-hero">
-        <div className="hero-headline">
-          <h2>Mission control</h2>
-          <p className="hero-subtitle">
-            Track your Paper servers, watch active runs, and keep plugins aligned across every
-            environment.
-          </p>
-        </div>
+    <Stack gap="xl" pb="xl">
+      <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="xl">
+        <ContentSection as="section" padding="xl">
+          <Stack gap="lg">
+            <Stack gap="xs">
+              <Title order={2}>Mission control</Title>
+              <Text c="dimmed">
+                Track your Paper servers, watch active runs, and keep plugins aligned across every
+                environment.
+              </Text>
+            </Stack>
 
-        <div className="hero-metrics">
-          <div className="metric-card">
-            <span className="metric-value">{projects.length}</span>
-            <span className="metric-label">Projects</span>
-          </div>
-          <div className="metric-card">
-            <span className="metric-value">{activeRuns.length}</span>
-            <span className="metric-label">Active runs</span>
-          </div>
-          <div className="metric-card">
-            <span className="metric-value">{library.length}</span>
-            <span className="metric-label">Saved plugins</span>
-          </div>
-          <div className="metric-card">
-            <span className="metric-value">
-              {latestManifest ? latestManifest.toLocaleTimeString() : '—'}
-            </span>
-            <span className="metric-label">{latestManifestLabel}</span>
-          </div>
-        </div>
+            <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="lg">
+              <Card withBorder radius="md" padding="xl">
+                <Stack gap={6}>
+                  <Text fw={700} fz={32}>
+                    {projects.length}
+                  </Text>
+                  <Text c="dimmed" fz="sm">
+                    Projects
+                  </Text>
+                </Stack>
+              </Card>
+              <Card withBorder radius="md" padding="xl">
+                <Stack gap={6}>
+                  <Text fw={700} fz={32}>
+                    {activeRuns.length}
+                  </Text>
+                  <Text c="dimmed" fz="sm">
+                    Active runs
+                  </Text>
+                </Stack>
+              </Card>
+              <Card withBorder radius="md" padding="xl">
+                <Stack gap={6}>
+                  <Text fw={700} fz={32}>
+                    {library.length}
+                  </Text>
+                  <Text c="dimmed" fz="sm">
+                    Saved plugins
+                  </Text>
+                </Stack>
+              </Card>
+              <Card withBorder radius="md" padding="xl">
+                <Stack gap={6}>
+                  <Text fw={700} fz={32}>
+                    {latestManifest ? latestManifest.toLocaleTimeString() : '—'}
+                  </Text>
+                  <Text c="dimmed" fz="sm">
+                    {latestManifestLabel}
+                  </Text>
+                </Stack>
+              </Card>
+            </SimpleGrid>
 
-        <div className="quick-actions">
-          {quickActions.map((action) => (
-            <Button
-              key={action.label}
-              variant={action.variant}
-              icon={action.icon}
-              onClick={action.action}
-            >
-              {action.label}
-            </Button>
-          ))}
-        </div>
-      </section>
-
-      <section className="dashboard-stack">
-        <ContentSection as="article">
-        <header>
-          <h2>Recent Projects</h2>
-            <Link to="/projects" className="link">
-            View all
-          </Link>
-        </header>
-        {loading && <p className="muted">Loading projects…</p>}
-        {error && <p className="error-text">{error}</p>}
-        {!loading && !error && recent.length === 0 && (
-          <p className="empty-state">No projects yet. Create your first Paper server to get started.</p>
-        )}
-        {!loading && !error && recent.length > 0 && (
-          <ul className="project-list">
-            {recent.map((project) => (
-              <li key={project.id}>
-                <div>
-                  <h4>
-                    <Link to={`/projects/${project.id}`}>{project.name}</Link>
-                  </h4>
-                  <p className="muted">
-                    {[
-                      project.minecraftVersion,
-                      project.loader.toUpperCase(),
-                      project.repo?.fullName ?? null,
-                      project.source === 'imported' ? 'Imported' : null,
-                      project.manifest
-                        ? `Built ${new Date(project.manifest.generatedAt).toLocaleTimeString()}`
-                        : null,
-                    ]
-                      .filter(Boolean)
-                      .join(' · ')}
-                  </p>
-                </div>
-                <div className="dev-buttons">
-                  <button
-                    type="button"
-                    className="ghost"
-                    disabled={
-                      startingRun[project.id] === true ||
-                      runs.some(
-                        (run) =>
-                          run.projectId === project.id &&
-                          (run.status === 'pending' ||
-                            run.status === 'running' ||
-                            run.status === 'stopping'),
-                      )
-                    }
-                    onClick={() => {
-                      void requestRunProject(project).catch(() => null)
-                    }}
-                  >
-                    {startingRun[project.id] === true ? 'Starting…' : 'Run locally'}
-                  </button>
-                  <button
-                    type="button"
-                    className="ghost"
-                    disabled={building[project.id] === 'running'}
-                    onClick={() => {
-                      void queueProjectBuild(project).catch(() => null)
-                    }}
-                  >
-                    {building[project.id] === 'running' ? 'Building…' : 'Build'}
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
+            <Group gap="sm">
+              {quickActions.map((action) => (
+                <Button
+                  key={action.label}
+                  variant={action.variant}
+                  icon={action.icon}
+                  onClick={action.action}
+                >
+                  {action.label}
+                </Button>
+              ))}
+            </Group>
+          </Stack>
         </ContentSection>
 
-        <ContentSection as="article">
-        <header>
-          <h2>Active Local Servers</h2>
-        </header>
-        {runsLoading && <p className="muted">Checking active runs…</p>}
-        {runsError && <p className="error-text">{runsError}</p>}
-        {!runsLoading && !runsError && activeRuns.length === 0 && (
-          <p className="muted">No local servers are running right now.</p>
-        )}
-        {!runsLoading && !runsError && activeRuns.length > 0 && (
-          <ul className="project-list">
-            {activeRuns.map((run) => {
-              const project = projectLookup[run.projectId]
-              return (
-                <li key={run.id} className="run-entry">
-                  <div>
-                    <h4>
-                      {project ? project.name : run.projectId}{' '}
-                      <span className="badge">{runStatusLabel[run.status]}</span>
-                    </h4>
-                    <p className="muted">
-                      Started {new Date(run.createdAt).toLocaleString()}
-                      {run.port && <> · Port {run.port}</>}
-                      {project?.minecraftVersion && <> · {project.minecraftVersion}</>}
-                    </p>
-                    {run.containerName && <p className="muted">Container: {run.containerName}</p>}
-                    {project && (
-                      <p className="muted">
-                        Loader: {project.loader.toUpperCase()}{' '}
-                        {project.repo?.fullName ? `· ${project.repo.fullName}` : ''}
-                      </p>
-                    )}
-                  </div>
-                  <div className="dev-buttons">
-                    <Link className="ghost" to={`/projects/${run.projectId}`}>
-                      View project
-                    </Link>
-                    <button
-                      type="button"
-                      className="ghost"
-                      disabled={run.status === 'stopping' || runBusy[run.id]}
-                      onClick={() => {
-                        void requestStopRun(run).catch(() => null)
-                      }}
-                    >
-                      {run.status === 'stopping' || runBusy[run.id] ? 'Stopping…' : 'Stop'}
-                    </button>
-                  </div>
-                  <div className="run-console">
-                    <details className="console-logs" open={run.logs.length > 0}>
-                      <summary>View logs</summary>
-                      <pre
-                        className="log-box"
-                        ref={(element) => {
-                          logRefs.current[run.id] = element
-                        }}
-                      >
-                        {run.logs.length > 0
-                          ? run.logs
-                              .map(
-                                (entry) =>
-                                  `[${new Date(entry.timestamp).toLocaleTimeString()}][${
-                                    entry.stream
-                                  }] ${entry.message}`,
-                              )
-                              .join('\n')
-                          : 'No log entries yet.'}
-                      </pre>
-                    </details>
-                    {run.status === 'running' ? (
-                      run.consoleAvailable ? (
-                        <form
-                          className="console-command"
-                          onSubmit={(event) => {
-                            event.preventDefault()
-                            const command = commandInputs[run.id]?.trim() ?? ''
-                            if (!command) return
-                            void sendRunCommandAction(run, command).catch(() => null)
+        <ContentSection as="article" padding="xl">
+          <Group justify="space-between" align="flex-start">
+            <Stack gap={4}>
+              <Title order={3}>Recent Projects</Title>
+              <Text c="dimmed" size="sm">
+                Latest activity across your managed Paper servers
+              </Text>
+            </Stack>
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={<SquaresFour size={16} weight="fill" aria-hidden="true" />}
+              onClick={() => navigate('/projects')}
+            >
+              View all projects
+            </Button>
+          </Group>
+
+          <Divider my="lg" />
+
+          {loading && (
+            <Group gap="xs">
+              <Loader size="sm" />
+              <Text size="sm" c="dimmed">
+                Loading projects…
+              </Text>
+            </Group>
+          )}
+          {error && (
+            <Text c="red.4" size="sm">
+              {error}
+            </Text>
+          )}
+          {!loading && !error && recent.length === 0 && (
+            <Text c="dimmed" size="sm">
+              No projects yet. Create your first Paper server to get started.
+            </Text>
+          )}
+          {!loading && !error && recent.length > 0 && (
+            <Stack gap="lg">
+              {recent.map((project) => {
+                const hasActiveRun = runs.some(
+                  (run) =>
+                    run.projectId === project.id &&
+                    ['pending', 'running', 'stopping'].includes(run.status),
+                )
+                return (
+                  <Paper key={project.id} withBorder radius="md" p="lg">
+                    <Group justify="space-between" align="flex-start">
+                      <Stack gap={4}>
+                        <Title order={4}>
+                          <Anchor component={Link} to={`/projects/${project.id}`}>
+                            {project.name}
+                          </Anchor>
+                        </Title>
+                        <Text c="dimmed" size="sm">
+                          {[
+                            project.minecraftVersion,
+                            project.loader.toUpperCase(),
+                            project.repo?.fullName ?? null,
+                            project.source === 'imported' ? 'Imported' : null,
+                            project.manifest
+                              ? `Built ${new Date(project.manifest.generatedAt).toLocaleTimeString()}`
+                              : null,
+                          ]
+                            .filter(Boolean)
+                            .join(' · ')}
+                        </Text>
+                      </Stack>
+
+                      <Group gap="sm">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={startingRun[project.id] === true || hasActiveRun}
+                          onClick={() => {
+                            void requestRunProject(project).catch(() => null)
                           }}
                         >
-                          <input
-                            type="text"
-                            aria-label="Console command"
-                            placeholder="/say Hello"
-                            value={commandInputs[run.id] ?? ''}
-                            onChange={(event) =>
-                              handleCommandInputChange(run.id, event.target.value)
-                            }
-                            disabled={Boolean(commandBusy[run.id])}
-                          />
+                          {startingRun[project.id] === true ? 'Starting…' : 'Run locally'}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={building[project.id] === 'running'}
+                          onClick={() => {
+                            void queueProjectBuild(project).catch(() => null)
+                          }}
+                        >
+                          {building[project.id] === 'running' ? 'Building…' : 'Build'}
+                        </Button>
+                      </Group>
+                    </Group>
+                  </Paper>
+                )
+              })}
+            </Stack>
+          )}
+        </ContentSection>
+      </SimpleGrid>
+
+      <ContentSection as="article" padding="xl">
+          <Stack gap="sm">
+            <Title order={3}>Active Local Servers</Title>
+            <Text c="dimmed" size="sm">
+              Monitor in-progress runs and interact with their consoles.
+            </Text>
+          </Stack>
+
+          <Divider my="lg" />
+
+          {runsLoading && (
+            <Group gap="xs">
+              <Loader size="sm" />
+              <Text size="sm" c="dimmed">
+                Checking active runs…
+              </Text>
+            </Group>
+          )}
+          {runsError && (
+            <Text c="red.4" size="sm">
+              {runsError}
+            </Text>
+          )}
+          {!runsLoading && !runsError && activeRuns.length === 0 && (
+            <Text c="dimmed" size="sm">
+              No local servers are running right now.
+            </Text>
+          )}
+          {!runsLoading && !runsError && activeRuns.length > 0 && (
+            <Stack gap="lg">
+              {activeRuns.map((run) => {
+                const project = projectLookup[run.projectId]
+                const runLabel = project ? project.name : run.projectId
+                const status = runStatusLabel[run.status]
+                return (
+                  <Paper key={run.id} withBorder radius="md" p="lg">
+                    <Stack gap="md">
+                      <Group justify="space-between" align="flex-start">
+                        <Stack gap={4}>
+                          <Group gap="xs">
+                            <Title order={4}>{runLabel}</Title>
+                            <Badge variant="light">{status}</Badge>
+                          </Group>
+                          <Text c="dimmed" size="sm">
+                            Started {new Date(run.createdAt).toLocaleString()}
+                            {run.port && ` • Port ${run.port}`}
+                            {project?.minecraftVersion && ` • ${project.minecraftVersion}`}
+                          </Text>
+                          {run.containerName && (
+                            <Text c="dimmed" size="sm">
+                              Container: {run.containerName}
+                            </Text>
+                          )}
+                          {project?.repo?.fullName && (
+                            <Text c="dimmed" size="sm">
+                              Repo: {project.repo.fullName}
+                            </Text>
+                          )}
+                        </Stack>
+
+                        <Group gap="sm">
                           <Button
-                            type="submit"
-                            disabled={
-                              Boolean(commandBusy[run.id]) ||
-                              !commandInputs[run.id] ||
-                              commandInputs[run.id]?.trim().length === 0
-                            }
+                            variant="ghost"
+                            size="sm"
+                            icon={<Building size={16} weight="fill" aria-hidden="true" />}
+                            onClick={() => navigate(`/projects/${run.projectId}`)}
                           >
-                            {commandBusy[run.id] ? 'Sending…' : 'Send'}
+                            View project
                           </Button>
-                        </form>
-                      ) : (
-                        <p className="muted" style={{ marginTop: '0.5rem' }}>
-                          Console not available yet.
-                        </p>
-                      )
-                    ) : null}
-                  </div>
-                </li>
-              )
-            })}
-          </ul>
-        )}
-        </ContentSection>
-      </section>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={run.status === 'stopping' || runBusy[run.id]}
+                            onClick={() => {
+                              void requestStopRun(run).catch(() => null)
+                            }}
+                          >
+                            {run.status === 'stopping' || runBusy[run.id] ? 'Stopping…' : 'Stop'}
+                          </Button>
+                        </Group>
+                      </Group>
 
-      <section className="dashboard-stack">
-        <ContentSection as="article">
-        <header>
-          <h2>Saved Plugins</h2>
-          <Link to="/plugins" className="link">
-            Browse library
-          </Link>
-        </header>
-        {libraryLoading && <p className="muted">Loading plugins…</p>}
-        {libraryError && <p className="error-text">{libraryError}</p>}
-        {!libraryLoading && !libraryError && library.length === 0 && (
-          <p className="muted">No saved plugins yet. Add one from a project to populate the library.</p>
-        )}
-        {!libraryLoading && !libraryError && library.length > 0 && (
-          <ul className="project-list">
-            {library.slice(0, 5).map((plugin) => (
-              <li key={`${plugin.id}:${plugin.version}`}>
-                <div>
-                  <strong>{plugin.id}</strong>{' '}
-                  <span className="muted">{sourceLabel[getPluginSourceKind(plugin)]}</span>{' '}
-                  <span className="muted">v{plugin.version}</span>
-                  {plugin.cachePath && (
-                    <p className="muted">
-                      Cache: <code>{plugin.cachePath}</code>
-                    </p>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
+                      <Accordion defaultValue={run.logs.length > 0 ? run.id : undefined}>
+                        <Accordion.Item value={run.id}>
+                          <Accordion.Control>View logs</Accordion.Control>
+                          <Accordion.Panel>
+                            <ScrollArea h={200} type="auto">
+                              <Code
+                                block
+                                component="pre"
+                                ref={(element: HTMLPreElement | null) => {
+                                  logRefs.current[run.id] = element
+                                }}
+                              >
+                                {run.logs.length > 0
+                                  ? run.logs
+                                      .map(
+                                        (entry) =>
+                                          `[${new Date(entry.timestamp).toLocaleTimeString()}][${
+                                            entry.stream
+                                          }] ${entry.message}`,
+                                      )
+                                      .join('\n')
+                                  : 'No log entries yet.'}
+                              </Code>
+                            </ScrollArea>
+                          </Accordion.Panel>
+                        </Accordion.Item>
+                      </Accordion>
+
+                      {run.status === 'running' ? (
+                        run.consoleAvailable ? (
+                          <Group
+                            component="form"
+                            align="flex-end"
+                            onSubmit={(event) => {
+                              event.preventDefault()
+                              const command = commandInputs[run.id]?.trim() ?? ''
+                              if (!command) return
+                              void sendRunCommandAction(run, command).catch(() => null)
+                            }}
+                          >
+                            <TextInput
+                              label="Console command"
+                              placeholder="/say Hello"
+                              value={commandInputs[run.id] ?? ''}
+                              onChange={(event) =>
+                                handleCommandInputChange(run.id, event.currentTarget.value)
+                              }
+                              disabled={Boolean(commandBusy[run.id])}
+                              flex={1}
+                            />
+                            <Button
+                              type="submit"
+                              disabled={
+                                Boolean(commandBusy[run.id]) ||
+                                !commandInputs[run.id] ||
+                                commandInputs[run.id]?.trim().length === 0
+                              }
+                            >
+                              {commandBusy[run.id] ? 'Sending…' : 'Send'}
+                            </Button>
+                          </Group>
+                        ) : (
+                          <Text c="dimmed" size="sm">
+                            Console not available yet.
+                          </Text>
+                        )
+                      ) : null}
+                    </Stack>
+                  </Paper>
+                )
+              })}
+            </Stack>
+          )}
+        </ContentSection>
+      <Stack gap="xl">
+        <ContentSection as="article" padding="xl">
+          <Group justify="space-between" align="flex-start">
+            <Stack gap={4}>
+              <Title order={3}>Saved Plugins</Title>
+              <Text c="dimmed" size="sm">
+                Plugins captured from builds and uploads.
+              </Text>
+            </Stack>
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={<Plug size={16} weight="fill" aria-hidden="true" />}
+              onClick={() => navigate('/plugins')}
+            >
+              Browse library
+            </Button>
+          </Group>
+
+          <Divider my="lg" />
+
+          {libraryLoading && (
+            <Group gap="xs">
+              <Loader size="sm" />
+              <Text size="sm" c="dimmed">
+                Loading plugins…
+              </Text>
+            </Group>
+          )}
+          {libraryError && (
+            <Text c="red.4" size="sm">
+              {libraryError}
+            </Text>
+          )}
+          {!libraryLoading && !libraryError && library.length === 0 && (
+            <Text c="dimmed" size="sm">
+              No saved plugins yet. Add one from a project to populate the library.
+            </Text>
+          )}
+          {!libraryLoading && !libraryError && library.length > 0 && (
+            <Stack gap="sm">
+              {library.slice(0, 5).map((plugin) => (
+                <Paper key={`${plugin.id}:${plugin.version}`} withBorder radius="md" p="md">
+                  <Stack gap={4}>
+                    <Group gap="sm">
+                      <Text fw={600}>{plugin.id}</Text>
+                      <Badge variant="light">{sourceLabel[getPluginSourceKind(plugin)]}</Badge>
+                      <Badge variant="outline">v{plugin.version}</Badge>
+                    </Group>
+                    {plugin.cachePath && (
+                      <Text c="dimmed" size="sm">
+                        Cache path: <Code>{plugin.cachePath}</Code>
+                      </Text>
+                    )}
+                  </Stack>
+                </Paper>
+              ))}
+            </Stack>
+          )}
         </ContentSection>
 
-        <ContentSection as="article">
-          <header>
-            <h3>Resources</h3>
-          </header>
-          <ul>
-            <li>Plugin registry overview</li>
-            <li>Overlay configuration guide</li>
-            <li>Deterministic build checklist</li>
-          </ul>
+        <ContentSection as="article" padding="xl">
+          <Stack gap="sm">
+            <Title order={3}>Resources</Title>
+            <Divider />
+            <Stack gap="xs">
+              <Text size="sm">Plugin registry overview</Text>
+              <Text size="sm">Overlay configuration guide</Text>
+              <Text size="sm">Deterministic build checklist</Text>
+            </Stack>
+          </Stack>
         </ContentSection>
-      </section>
-    </>
+      </Stack>
+    </Stack>
   )
 }
 

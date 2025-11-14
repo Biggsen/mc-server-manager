@@ -1,22 +1,29 @@
-import { createElement, forwardRef } from 'react'
-import { cn } from '../../lib/cn'
+import { forwardRef } from 'react'
+import type { HTMLAttributes } from 'react'
+import { Paper } from '@mantine/core'
 
 type ContentElement = 'section' | 'article' | 'div'
 
-export interface ContentSectionProps extends React.HTMLAttributes<HTMLElement> {
+export interface ContentSectionProps extends HTMLAttributes<HTMLElement> {
   as?: ContentElement
   tone?: 'default' | 'subtle'
+  padding?: 'sm' | 'md' | 'lg' | 'xl'
 }
 
 export const ContentSection = forwardRef<HTMLElement, ContentSectionProps>(function ContentSection(
-  { as: Component = 'section', className, tone = 'default', ...props },
+  { as = 'section', className, tone = 'default', padding = 'lg', ...props },
   ref,
 ) {
-  return createElement(Component, {
-    ref,
-    className: cn('content-section', `content-section--${tone}`, className),
-    ...props,
-  })
+  return (
+    <Paper
+      ref={ref}
+      component={as}
+      className={className}
+      shadow={tone === 'default' ? 'sm' : 'xs'}
+      radius="md"
+      withBorder={tone === 'default'}
+      p={padding}
+      {...props}
+    />
+  )
 })
-
-

@@ -1,5 +1,5 @@
 import { forwardRef, type HTMLAttributes } from 'react'
-import { cn } from '../../lib/cn'
+import { Box } from '@mantine/core'
 
 export interface MainCanvasProps extends HTMLAttributes<HTMLElement> {
   padded?: boolean
@@ -11,19 +11,13 @@ export const MainCanvas = forwardRef<HTMLElement, MainCanvasProps>(function Main
   ref,
 ) {
   return (
-    <main
+    <Box
+      component="main"
       ref={ref}
-      className={cn(
-        'main-canvas',
-        {
-          'main-canvas--padded': padded,
-          'main-canvas--bleed': bleed,
-        },
-        className,
-      )}
+      className={className}
+      px={padded && !bleed ? 'lg' : 0}
+      py={padded ? 'lg' : 0}
       {...props}
     />
   )
 })
-
-

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import { NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { NavLink as RouterNavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import {
   MagnifyingGlass,
   Package,
@@ -12,6 +12,18 @@ import {
   Building,
   GithubLogo,
 } from '@phosphor-icons/react'
+import {
+  Badge,
+  Box,
+  Divider,
+  Group,
+  NavLink as MantineNavLink,
+  Stack,
+  Text,
+  TextInput,
+  Title,
+  Avatar,
+} from '@mantine/core'
 import { fetchAuthStatus, logout, startGitHubLogin, type AuthStatus } from './lib/api'
 import Dashboard from './pages/Dashboard'
 import ImportProject from './pages/ImportProject'
@@ -24,8 +36,6 @@ import TestTools from './pages/TestTools'
 import PluginLibrary from './pages/PluginLibrary'
 import AddPlugin from './pages/AddPlugin'
 import GenerateProfile from './pages/GenerateProfile'
-import './App.css'
-import './components/ui/styles.css'
 import { ActiveActionIndicator, Button, ToastProvider, ToastViewport } from './components/ui'
 import { AppShell, MainCanvas } from './components/layout'
 import { AsyncActionsProvider } from './lib/asyncActions'
@@ -151,103 +161,109 @@ function App() {
     }
   }
 
+  const isActivePath = (item: NavItem): boolean => {
+    if (item.exact) {
+      return location.pathname === item.to
+    }
+    return location.pathname.startsWith(item.to)
+  }
+
   const sidebar = (
-    <>
-            <button
-              type="button"
-              className="brand-button"
-              onClick={() => navigate('/')}
-              aria-label="Return to dashboard"
-            >
-              <span className="brand-badge" aria-hidden="true">
-                <Package size={28} weight="duotone" />
-              </span>
-              <div className="brand">
-                <h1>MC Server Manager</h1>
-                <p className="brand-subtitle">Define • Build • Deploy</p>
-              </div>
-            </button>
+    <Stack gap="xl" miw={0}>
+      <Button
+        variant="ghost"
+        size="lg"
+        onClick={() => navigate('/')}
+        icon={<Package size={24} weight="duotone" aria-hidden="true" />}
+        style={{ justifyContent: 'flex-start' }}
+      >
+        <Stack gap={2}>
+          <Title order={4}>MC Server Manager</Title>
+          <Text size="xs" c="dimmed">
+            Define • Build • Deploy
+          </Text>
+        </Stack>
+      </Button>
 
-            {NAV_SECTIONS.map((section) => (
-              <section key={section.label} className="sidebar-section">
-                <p className="sidebar-heading">{section.label}</p>
-                <nav className="sidebar-nav" aria-label={section.label}>
-                  {section.items.map((item) => (
-                    <NavLink
-                      key={item.to}
-                      to={item.to}
-                      end={item.exact}
-                      className="sidebar-link"
-                    >
-                      <span className="sidebar-icon">{item.icon}</span>
-                      {item.label}
-                    </NavLink>
-                  ))}
-                </nav>
-              </section>
+      {NAV_SECTIONS.map((section) => (
+        <Box key={section.label}>
+          <Text size="xs" c="dimmed" tt="uppercase" fw={600} mb="xs">
+            {section.label}
+          </Text>
+          <Stack gap={4}>
+            {section.items.map((item) => (
+              <MantineNavLink
+                key={item.to}
+                component={RouterNavLink}
+                to={item.to}
+                label={item.label}
+                leftSection={item.icon}
+                variant="light"
+                active={isActivePath(item)}
+              />
             ))}
+          </Stack>
+        </Box>
+      ))}
 
-            <footer className="sidebar-foot">
-              <div className="sidebar-env" aria-live="polite">
-                <span role="status">●</span>
-                {ENVIRONMENT_LABEL} environment
-              </div>
-            </footer>
-    </>
+      <Divider />
+
+      <Box>
+        <Badge color="green" variant="light">
+          {ENVIRONMENT_LABEL}
+        </Badge>
+        <Text size="xs" c="dimmed" mt={4}>
+          Environment
+        </Text>
+      </Box>
+    </Stack>
   )
 
   const topbar = (
-    <>
-              <div className="topbar-context">
-                <small>{ENVIRONMENT_LABEL} mode</small>
-                <h2>{currentTitle}</h2>
-              </div>
+    <Group justify="space-between" align="center" gap="lg" wrap="nowrap" w="100%">
+      <Stack gap={2} flex={0}>
+        <Text size="xs" c="dimmed">
+          {ENVIRONMENT_LABEL} mode
+        </Text>
+        <Title order={2}>{currentTitle}</Title>
+      </Stack>
 
-              <label className="topbar-search">
-                <MagnifyingGlass size={18} weight="bold" aria-hidden="true" />
-                <input
-                  type="search"
-                  placeholder="Search projects, builds, plugins"
-                  aria-label="Global search"
-                />
-              </label>
+      <TextInput
+        placeholder="Search projects, builds, plugins"
+        flex={1}
+        leftSection={<MagnifyingGlass size={16} weight="bold" aria-hidden="true" />}
+        aria-label="Global search"
+      />
 
-              <div className="topbar-actions">
-                <ActiveActionIndicator />
-                <Button
-                  variant="ghost"
-                  icon={<Building size={16} weight="fill" aria-hidden="true" />}
-                  onClick={() => navigate('/projects/new')}
-                >
-                  New Project
-                </Button>
-                {authStatus?.authenticated ? (
-                  <>
-                    <span className="avatar" aria-hidden="true">
-                      {initials}
-                    </span>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="utility-button"
-                      onClick={handleSignOut}
-                      disabled={signingOut}
-                    >
-                      {signingOut ? 'Signing out…' : 'Sign out'}
-                    </Button>
-                  </>
-                ) : (
-                  <Button
-                    variant="primary"
-                    className="primary-with-icon"
-                    icon={<GithubLogo size={18} weight="fill" aria-hidden="true" />}
+      <Group gap="sm" flex={0} wrap="nowrap">
+        <ActiveActionIndicator />
+        <Button
+          variant="ghost"
+          icon={<Building size={16} weight="fill" aria-hidden="true" />}
+          onClick={() => navigate('/projects/new')}
+        >
+          New Project
+        </Button>
+        {authStatus?.authenticated ? (
+          <Group gap="xs" wrap="nowrap">
+            <Avatar radius="xl" color="blue">
+              {initials}
+            </Avatar>
+            <Button variant="ghost" size="sm" onClick={handleSignOut} disabled={signingOut}>
+              {signingOut ? 'Signing out…' : 'Sign out'}
+            </Button>
+          </Group>
+        ) : (
+          <Button
+            variant="primary"
+            icon={<GithubLogo size={18} weight="fill" aria-hidden="true" />}
             onClick={() => startGitHubLogin(`${window.location.origin}${location.pathname}`)}
-                  >
-                    Sign in with GitHub
-                  </Button>
-                )}
-              </div>
-    </>
+          >
+            Sign in with GitHub
+          </Button>
+        )}
+      </Group>
+    </Group>
   )
 
   return (

@@ -9,6 +9,7 @@ import {
   type ProjectConfigSummary,
   type ProjectSummary,
 } from '../lib/api'
+import { Alert, Button, Card, Grid, Group, Stack, Switch, Text, Textarea, TextInput, Title } from '@mantine/core'
 import { ContentSection } from '../components/layout'
 
 interface PluginFormEntry {
@@ -459,421 +460,448 @@ function GenerateProfile() {
 
   if (!id) {
     return (
-      <ContentSection as="section">
-        <p className="error-text">Project identifier missing.</p>
-        <Link className="ghost" to="/projects">
-          Back to Projects
-        </Link>
+      <ContentSection as="section" padding="xl">
+        <Stack gap="sm">
+          <Alert color="red" title="Project identifier missing">
+            <Text size="sm">We need a project id to generate a profile.</Text>
+          </Alert>
+          <Button component={Link} to="/projects" variant="subtle">
+            Back to projects
+          </Button>
+        </Stack>
       </ContentSection>
     )
   }
 
   if (loading) {
     return (
-      <ContentSection as="section">
-        <p className="muted">Loading project details…</p>
+      <ContentSection as="section" padding="xl">
+        <Stack gap="sm">
+          <Text size="sm" c="dimmed">
+            Loading project details…
+          </Text>
+        </Stack>
       </ContentSection>
     )
   }
 
   if (error) {
     return (
-      <ContentSection as="section">
-        <p className="error-text">{error}</p>
-        <Link className="ghost" to={`/projects/${id}`}>
-          Back to project
-        </Link>
+      <ContentSection as="section" padding="xl">
+        <Stack gap="sm">
+          <Alert color="red" title="Failed to load project">
+            <Text size="sm">{error}</Text>
+          </Alert>
+          <Button component={Link} to={`/projects/${id}`} variant="subtle">
+            Back to project
+          </Button>
+        </Stack>
       </ContentSection>
     )
   }
 
   if (!project || !profileDocument) {
     return (
-      <ContentSection as="section">
-        <p className="error-text">Project not found.</p>
-        <Link className="ghost" to="/projects">
-          Back to Projects
-        </Link>
+      <ContentSection as="section" padding="xl">
+        <Stack gap="sm">
+          <Alert color="red" title="Project not found">
+            <Text size="sm">We could not locate that project.</Text>
+          </Alert>
+          <Button component={Link} to="/projects" variant="subtle">
+            Back to projects
+          </Button>
+        </Stack>
       </ContentSection>
     )
   }
 
   return (
-    <ContentSection as="section">
-      <header>
-        <h2>Generate profile for {project.name}</h2>
-        <p className="muted">
-          Prefill a `profiles/base.yml` using the data you&apos;ve already entered for this project.
-        </p>
-        <div className="dev-buttons">
-          <Link className="ghost" to={`/projects/${project.id}`}>
-            ← Back to Project
-          </Link>
-        </div>
-      </header>
+    <ContentSection as="section" padding="xl">
+      <Stack gap="xl">
+        <Group justify="space-between" align="flex-start">
+          <Stack gap={4}>
+            <Title order={2}>Generate profile for {project.name}</Title>
+            <Text size="sm" c="dimmed">
+              Prefill a <Text component="span" ff="monospace">profiles/base.yml</Text> using data already stored on this
+              project.
+            </Text>
+          </Stack>
+          <Button component={Link} to={`/projects/${project.id}`} variant="subtle">
+            Back to project
+          </Button>
+        </Group>
 
-      {missingRequiredConfigs.length > 0 && (
-        <div className="alert-block alert-block--warning">
-          <strong>Missing required plugin configs</strong>
-          <p className="muted">
-            Upload these files before generating a profile to keep builds in sync.
-          </p>
-          <ul>
-            {missingRequiredConfigs.map((item) => (
-              <li key={`${item.pluginId}:${item.definitionId}`}>
-                <code>{item.path}</code> · {item.pluginId} ({item.definitionId})
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      <form
-        className="page-form"
-        onSubmit={(event: FormEvent<HTMLFormElement>) => {
-          event.preventDefault()
-        }}
-      >
-        <div className="layout-grid">
-          <ContentSection as="section">
-            <header>
-              <h3>Project Basics</h3>
-            </header>
-            <div className="form-grid">
-              <div className="field">
-                <label htmlFor="profile-name">Server name</label>
-                <input
-                  id="profile-name"
-                  value={project.name}
-                  readOnly
-                />
-                <p className="muted">Uses the project display name.</p>
-              </div>
-              <div className="field">
-                <label htmlFor="minecraft-loader">Loader</label>
-                <input
-                  id="minecraft-loader"
-                  value={project.loader}
-                  readOnly
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="minecraft-version">Minecraft version</label>
-                <input
-                  id="minecraft-version"
-                  value={project.minecraftVersion}
-                  readOnly
-                />
-              </div>
-            </div>
-          </ContentSection>
-
-          <ContentSection as="section">
-            <header>
-              <h3>World</h3>
-            </header>
-            <div className="form-grid">
-              <div className="field">
-                <label htmlFor="world-mode">World mode</label>
-                <input
-                  id="world-mode"
-                  value={worldMode}
-                  onChange={(event) => setWorldMode(event.target.value)}
-                  placeholder="generated"
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="world-name">World folder</label>
-                <input
-                  id="world-name"
-                  value={worldName}
-                  onChange={(event) => setWorldName(event.target.value)}
-                  placeholder="world"
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="world-seed">Seed (optional)</label>
-                <input
-                  id="world-seed"
-                  value={worldSeed}
-                  onChange={(event) => setWorldSeed(event.target.value)}
-                  placeholder="Leave blank for random seed"
-                />
-              </div>
-            </div>
-          </ContentSection>
-        </div>
-
-        <ContentSection as="section">
-          <header>
-            <h3>Plugins</h3>
-          </header>
-          <p className="muted">
-            These entries are pre-filled from the project&apos;s plugin list. Update the versions if
-            needed or remove entries you don&apos;t want in the generated profile.
-          </p>
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Plugin ID</th>
-                <th>Version</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {plugins.length === 0 && (
-                <tr>
-                  <td colSpan={3}>
-                    <p className="muted">No plugins associated with this project yet.</p>
-                  </td>
-                </tr>
-              )}
-              {plugins.map((plugin, index) => (
-                <tr key={`${plugin.id}:${index}`}>
-                  <td>
-                    <input
-                      value={plugin.id}
-                      onChange={(event) => {
-                        const next = plugins.slice()
-                        next[index] = { ...next[index], id: event.target.value }
-                        setPlugins(next)
-                      }}
-                    />
-                  </td>
-                  <td>
-                    <input
-                      value={plugin.version}
-                      onChange={(event) => {
-                        const next = plugins.slice()
-                        next[index] = { ...next[index], version: event.target.value }
-                        setPlugins(next)
-                      }}
-                    />
-                  </td>
-                  <td className="dev-buttons">
-                    <button
-                      type="button"
-                      className="ghost"
-                      onClick={() => {
-                        setPlugins((prev) => prev.filter((_, idx) => idx !== index))
-                      }}
-                    >
-                      Remove
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <div className="form-actions">
-            <button
-              type="button"
-              className="ghost"
-              onClick={() => setPlugins((prev) => [...prev, { id: '', version: '' }])}
-            >
-              Add plugin entry
-            </button>
-          </div>
-        </ContentSection>
-
-        <div className="layout-grid">
-          <ContentSection as="section">
-            <header>
-              <h3>Server Properties</h3>
-            </header>
-            <label className="checkbox">
-              <input
-                type="checkbox"
-                checked={serverProperties.include}
-                onChange={(event) =>
-                  setServerProperties((prev) => ({ ...prev, include: event.target.checked }))
-                }
-              />
-              Include `server.properties`
-            </label>
-            {serverProperties.include && (
-              <div className="form-grid">
-                <div className="field span-2">
-                  <label htmlFor="motd">MOTD</label>
-                  <input
-                    id="motd"
-                    value={serverProperties.motd}
-                    onChange={(event) =>
-                      setServerProperties((prev) => ({ ...prev, motd: event.target.value }))
-                    }
-                  />
-                </div>
-                <div className="field">
-                  <label htmlFor="max-players">Max players</label>
-                  <input
-                    id="max-players"
-                    value={serverProperties.maxPlayers}
-                    onChange={(event) =>
-                      setServerProperties((prev) => ({ ...prev, maxPlayers: event.target.value }))
-                    }
-                  />
-                </div>
-                <div className="field">
-                  <label htmlFor="view-distance">View distance</label>
-                  <input
-                    id="view-distance"
-                    value={serverProperties.viewDistance}
-                    onChange={(event) =>
-                      setServerProperties((prev) => ({ ...prev, viewDistance: event.target.value }))
-                    }
-                  />
-                </div>
-                <label className="checkbox">
-                  <input
-                    type="checkbox"
-                    checked={serverProperties.onlineMode}
-                    onChange={(event) =>
-                      setServerProperties((prev) => ({ ...prev, onlineMode: event.target.checked }))
-                    }
-                  />
-                  Online mode
-                </label>
-                <label className="checkbox">
-                  <input
-                    type="checkbox"
-                    checked={serverProperties.enforceSecureProfile}
-                    onChange={(event) =>
-                      setServerProperties((prev) => ({
-                        ...prev,
-                        enforceSecureProfile: event.target.checked,
-                      }))
-                    }
-                  />
-                  Enforce secure profile
-                </label>
-              </div>
-            )}
-          </ContentSection>
-
-          <ContentSection as="section">
-            <header>
-              <h3>Paper Global Config</h3>
-            </header>
-            <label className="checkbox">
-              <input
-                type="checkbox"
-                checked={paperGlobal.include}
-                onChange={(event) =>
-                  setPaperGlobal((prev) => ({ ...prev, include: event.target.checked }))
-                }
-              />
-              Include `config/paper-global.yml`
-            </label>
-            {paperGlobal.include && (
-              <div className="form-grid">
-                <div className="field">
-                  <label htmlFor="target-tick-distance">Target Tick Distance</label>
-                  <input
-                    id="target-tick-distance"
-                    value={paperGlobal.targetTickDistance}
-                    onChange={(event) =>
-                      setPaperGlobal((prev) => ({ ...prev, targetTickDistance: event.target.value }))
-                    }
-                  />
-                </div>
-              </div>
-            )}
-          </ContentSection>
-        </div>
-
-        {configs.length > 0 && (
-          <ContentSection as="section">
-            <header>
-              <h3>Detected Config Files</h3>
-            </header>
-            <p className="muted">
-              These files are in the project&apos;s config uploads. They are added to the profile with
-              unknown templates so you can wire them manually later.
-            </p>
-            <ul className="project-list">
-              {configs.map((config) => (
-                <li key={config.path}>
-                  <div>
-                    <strong>{config.path}</strong>
-                    <p className="muted">
-                      Updated {new Date(config.modifiedAt).toLocaleString()} · {config.size} bytes
-                    </p>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </ContentSection>
+        {missingRequiredConfigs.length > 0 && (
+          <Alert color="yellow" title="Missing required plugin configs">
+            <Stack gap={6}>
+              <Text size="sm" c="dimmed">
+                Upload these files before generating a profile to keep builds in sync.
+              </Text>
+              <Stack gap={4}>
+                {missingRequiredConfigs.map((item) => (
+                  <Text key={`${item.pluginId}:${item.definitionId}`} size="sm">
+                    <Text component="span" ff="monospace" fw={600}>
+                      {item.path}
+                    </Text>{' '}
+                    · {item.pluginId} ({item.definitionId})
+                  </Text>
+                ))}
+              </Stack>
+            </Stack>
+          </Alert>
         )}
-      </form>
 
-      <ContentSection as="article">
-        <header>
-          <h3>Export Preview</h3>
-          <div className="dev-buttons">
-            <button
-              type="button"
-              className="ghost"
-              onClick={async () => {
-                try {
-                  await navigator.clipboard.writeText(yamlPreview)
-                  setClipboardStatus('Copied to clipboard.')
-                  window.setTimeout(() => setClipboardStatus(null), 2000)
-                } catch (err) {
-                  setClipboardStatus(
-                    err instanceof Error ? err.message : 'Clipboard copy failed.',
-                  )
-                }
-              }}
-            >
-              Copy YAML
-            </button>
-            <button
-              type="button"
-              className="primary"
-              disabled={saveBusy}
-              onClick={async () => {
-                if (!yamlPreview.trim()) {
-                  setSaveError('Nothing to save; YAML is empty.')
-                  return
-                }
-                try {
-                  setSaveBusy(true)
-                  setSaveError(null)
-                  const result = await saveProjectProfile(project.id, { yaml: yamlPreview })
-                  setProject((prev) =>
-                    prev
-                      ? {
-                          ...prev,
-                          plugins: result.plugins ?? prev.plugins,
-                          configs: result.configs ?? prev.configs,
+        <form
+          onSubmit={(event: FormEvent<HTMLFormElement>) => {
+            event.preventDefault()
+          }}
+        >
+          <Stack gap="lg">
+            <Card withBorder p="lg" radius="md">
+              <Stack gap="md">
+                <Title order={3}>Project basics</Title>
+                <Grid gutter="md">
+                  <Grid.Col span={{ base: 12, sm: 6 }}>
+                    <TextInput
+                      label="Server name"
+                      value={project.name}
+                      readOnly
+                      description="Uses the project display name."
+                    />
+                  </Grid.Col>
+                  <Grid.Col span={{ base: 12, sm: 3 }}>
+                    <TextInput label="Loader" value={project.loader} readOnly />
+                  </Grid.Col>
+                  <Grid.Col span={{ base: 12, sm: 3 }}>
+                    <TextInput label="Minecraft version" value={project.minecraftVersion} readOnly />
+                  </Grid.Col>
+                </Grid>
+              </Stack>
+            </Card>
+
+            <Card withBorder p="lg" radius="md">
+              <Stack gap="md">
+                <Title order={3}>World</Title>
+                <Grid gutter="md">
+                  <Grid.Col span={{ base: 12, sm: 4 }}>
+                    <TextInput
+                      label="World mode"
+                      value={worldMode}
+                      onChange={(event) => setWorldMode(event.currentTarget.value)}
+                      placeholder="generated"
+                    />
+                  </Grid.Col>
+                  <Grid.Col span={{ base: 12, sm: 4 }}>
+                    <TextInput
+                      label="World folder"
+                      value={worldName}
+                      onChange={(event) => setWorldName(event.currentTarget.value)}
+                      placeholder="world"
+                    />
+                  </Grid.Col>
+                  <Grid.Col span={{ base: 12, sm: 4 }}>
+                    <TextInput
+                      label="Seed (optional)"
+                      value={worldSeed}
+                      onChange={(event) => setWorldSeed(event.currentTarget.value)}
+                      placeholder="Leave blank for random seed"
+                    />
+                  </Grid.Col>
+                </Grid>
+              </Stack>
+            </Card>
+
+            <Card withBorder p="lg" radius="md">
+              <Stack gap="md">
+                <Stack gap={4}>
+                  <Title order={3}>Plugins</Title>
+                  <Text size="sm" c="dimmed">
+                    Pre-filled from the project&apos;s plugin list. Adjust versions or remove entries you
+                    don&apos;t want in the generated profile.
+                  </Text>
+                </Stack>
+
+                <Stack gap="sm">
+                  {plugins.length === 0 && (
+                    <Text size="sm" c="dimmed">
+                      No plugins associated with this project yet.
+                    </Text>
+                  )}
+
+                  {plugins.map((plugin, index) => (
+                    <Card key={`${plugin.id}:${index}`} withBorder p="md" radius="md">
+                      <Stack gap="sm">
+                        <Grid gutter="md">
+                          <Grid.Col span={{ base: 12, sm: 6 }}>
+                            <TextInput
+                              label="Plugin ID"
+                              value={plugin.id}
+                              onChange={(event) => {
+                                const next = plugins.slice()
+                                next[index] = { ...next[index], id: event.currentTarget.value }
+                                setPlugins(next)
+                              }}
+                              placeholder="luckperms"
+                            />
+                          </Grid.Col>
+                          <Grid.Col span={{ base: 12, sm: 6 }}>
+                            <TextInput
+                              label="Version"
+                              value={plugin.version}
+                              onChange={(event) => {
+                                const next = plugins.slice()
+                                next[index] = { ...next[index], version: event.currentTarget.value }
+                                setPlugins(next)
+                              }}
+                              placeholder="5.4.123"
+                            />
+                          </Grid.Col>
+                        </Grid>
+                        <Group justify="flex-end">
+                          <Button
+                            type="button"
+                            variant="subtle"
+                            color="red"
+                            size="xs"
+                            onClick={() => {
+                              setPlugins((prev) => prev.filter((_, idx) => idx !== index))
+                            }}
+                          >
+                            Remove
+                          </Button>
+                        </Group>
+                      </Stack>
+                    </Card>
+                  ))}
+                </Stack>
+
+                <Button
+                  type="button"
+                  variant="subtle"
+                  onClick={() => setPlugins((prev) => [...prev, { id: '', version: '' }])}
+                >
+                  Add plugin entry
+                </Button>
+              </Stack>
+            </Card>
+
+            <Grid gutter="lg">
+              <Grid.Col span={{ base: 12, md: 6 }}>
+                <Card withBorder p="lg" radius="md">
+                  <Stack gap="md">
+                    <Title order={3}>Server properties</Title>
+                    <Switch
+                      label="Include server.properties"
+                      checked={serverProperties.include}
+                      onChange={(event) =>
+                        setServerProperties((prev) => ({ ...prev, include: event.currentTarget.checked }))
+                      }
+                    />
+                    {serverProperties.include && (
+                      <Grid gutter="md">
+                        <Grid.Col span={12}>
+                          <TextInput
+                            label="MOTD"
+                            value={serverProperties.motd}
+                            onChange={(event) =>
+                              setServerProperties((prev) => ({ ...prev, motd: event.currentTarget.value }))
+                            }
+                          />
+                        </Grid.Col>
+                        <Grid.Col span={{ base: 12, sm: 6 }}>
+                          <TextInput
+                            label="Max players"
+                            value={serverProperties.maxPlayers}
+                            onChange={(event) =>
+                              setServerProperties((prev) => ({ ...prev, maxPlayers: event.currentTarget.value }))
+                            }
+                            type="number"
+                            min={1}
+                          />
+                        </Grid.Col>
+                        <Grid.Col span={{ base: 12, sm: 6 }}>
+                          <TextInput
+                            label="View distance"
+                            value={serverProperties.viewDistance}
+                            onChange={(event) =>
+                              setServerProperties((prev) => ({
+                                ...prev,
+                                viewDistance: event.currentTarget.value,
+                              }))
+                            }
+                            type="number"
+                            min={2}
+                          />
+                        </Grid.Col>
+                        <Grid.Col span={{ base: 12, sm: 6 }}>
+                          <Switch
+                            label="Online mode"
+                            checked={serverProperties.onlineMode}
+                            onChange={(event) =>
+                              setServerProperties((prev) => ({
+                                ...prev,
+                                onlineMode: event.currentTarget.checked,
+                              }))
+                            }
+                          />
+                        </Grid.Col>
+                        <Grid.Col span={{ base: 12, sm: 6 }}>
+                          <Switch
+                            label="Enforce secure profile"
+                            checked={serverProperties.enforceSecureProfile}
+                            onChange={(event) =>
+                              setServerProperties((prev) => ({
+                                ...prev,
+                                enforceSecureProfile: event.currentTarget.checked,
+                              }))
+                            }
+                          />
+                        </Grid.Col>
+                      </Grid>
+                    )}
+                  </Stack>
+                </Card>
+              </Grid.Col>
+
+              <Grid.Col span={{ base: 12, md: 6 }}>
+                <Card withBorder p="lg" radius="md">
+                  <Stack gap="md">
+                    <Title order={3}>Paper global config</Title>
+                    <Switch
+                      label="Include config/paper-global.yml"
+                      checked={paperGlobal.include}
+                      onChange={(event) =>
+                        setPaperGlobal((prev) => ({ ...prev, include: event.currentTarget.checked }))
+                      }
+                    />
+                    {paperGlobal.include && (
+                      <TextInput
+                        label="Target tick distance"
+                        value={paperGlobal.targetTickDistance}
+                        onChange={(event) =>
+                          setPaperGlobal((prev) => ({
+                            ...prev,
+                            targetTickDistance: event.currentTarget.value,
+                          }))
                         }
-                      : prev,
-                  )
-                  setProfileSource('existing')
-                  setSaveMessage(`Profile saved to ${result.path}`)
-                } catch (err) {
-                  setSaveError(err instanceof Error ? err.message : 'Failed to save profile.')
-                  setSaveMessage(null)
-                } finally {
-                  setSaveBusy(false)
-                }
-              }}
-            >
-              Save profile to project
-            </button>
-          </div>
-        </header>
-        {saveMessage && <p className="success-text">{saveMessage}</p>}
-        {saveError && <p className="error-text">{saveError}</p>}
-        {clipboardStatus && <p className="muted">{clipboardStatus}</p>}
-        <textarea
-          value={yamlPreview}
-          readOnly
-          rows={24}
-          spellCheck={false}
-          style={{ width: '100%', fontFamily: 'monospace' }}
-        />
-      </ContentSection>
+                        type="number"
+                        min={1}
+                      />
+                    )}
+                  </Stack>
+                </Card>
+              </Grid.Col>
+            </Grid>
+
+            {configs.length > 0 && (
+              <Card withBorder p="lg" radius="md">
+                <Stack gap="md">
+                  <Title order={3}>Detected config files</Title>
+                  <Text size="sm" c="dimmed">
+                    Files discovered in this project&apos;s config uploads are added to the profile with
+                    unknown templates so you can wire them manually later.
+                  </Text>
+                  <Stack gap="sm">
+                    {configs.map((config) => (
+                      <Card key={config.path} withBorder p="md" radius="md">
+                        <Stack gap={2}>
+                          <Text fw={600}>{config.path}</Text>
+                          <Text size="xs" c="dimmed">
+                            Updated {new Date(config.modifiedAt).toLocaleString()} · {config.size} bytes
+                          </Text>
+                        </Stack>
+                      </Card>
+                    ))}
+                  </Stack>
+                </Stack>
+              </Card>
+            )}
+          </Stack>
+        </form>
+
+        <Card withBorder p="lg" radius="md">
+          <Stack gap="md">
+            <Group justify="space-between" align="center">
+              <Title order={3}>Export preview</Title>
+              <Group gap="sm">
+                <Button
+                  type="button"
+                  variant="subtle"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(yamlPreview)
+                      setClipboardStatus('Copied to clipboard.')
+                      window.setTimeout(() => setClipboardStatus(null), 2000)
+                    } catch (err) {
+                      setClipboardStatus(
+                        err instanceof Error ? err.message : 'Clipboard copy failed.',
+                      )
+                    }
+                  }}
+                >
+                  Copy YAML
+                </Button>
+                <Button
+                  type="button"
+                  disabled={saveBusy}
+                  onClick={async () => {
+                    if (!yamlPreview.trim()) {
+                      setSaveError('Nothing to save; YAML is empty.')
+                      return
+                    }
+                    try {
+                      setSaveBusy(true)
+                      setSaveError(null)
+                      const result = await saveProjectProfile(project.id, { yaml: yamlPreview })
+                      setProject((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              plugins: result.plugins ?? prev.plugins,
+                              configs: result.configs ?? prev.configs,
+                            }
+                          : prev,
+                      )
+                      setProfileSource('existing')
+                      setSaveMessage(`Profile saved to ${result.path}`)
+                    } catch (err) {
+                      setSaveError(err instanceof Error ? err.message : 'Failed to save profile.')
+                      setSaveMessage(null)
+                    } finally {
+                      setSaveBusy(false)
+                    }
+                  }}
+                >
+                  Save profile to project
+                </Button>
+              </Group>
+            </Group>
+            {saveMessage && (
+              <Alert color="green" title="Profile saved">
+                <Text size="sm">{saveMessage}</Text>
+              </Alert>
+            )}
+            {saveError && (
+              <Alert color="red" title="Save failed">
+                <Text size="sm">{saveError}</Text>
+              </Alert>
+            )}
+            {clipboardStatus && (
+              <Text size="sm" c="dimmed">
+                {clipboardStatus}
+              </Text>
+            )}
+            <Textarea
+              value={yamlPreview}
+              minRows={18}
+              autosize
+              readOnly
+              spellCheck={false}
+              styles={{ input: { fontFamily: 'monospace' } }}
+            />
+          </Stack>
+        </Card>
+      </Stack>
     </ContentSection>
   )
 }

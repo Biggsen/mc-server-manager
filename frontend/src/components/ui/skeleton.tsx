@@ -1,10 +1,8 @@
-import type { HTMLAttributes } from 'react'
-import { cn } from '../../lib/cn'
+import type { ComponentPropsWithoutRef } from 'react'
+import { Skeleton as MantineSkeleton } from '@mantine/core'
 
-export type SkeletonProps = HTMLAttributes<HTMLDivElement>
+export type SkeletonProps = ComponentPropsWithoutRef<typeof MantineSkeleton>
 
-export function Skeleton({ className, ...props }: SkeletonProps) {
-  return <div className={cn('ui-skeleton', className)} {...props} />
+export function Skeleton(props: SkeletonProps) {
+  return <MantineSkeleton {...props} />
 }
-
-

@@ -1,4 +1,4 @@
-import { SpinnerGap } from '@phosphor-icons/react'
+import { Loader, Badge, Group, Text } from '@mantine/core'
 import { useActiveAsyncActions } from '../../lib/asyncActionsContext'
 
 export function ActiveActionIndicator() {
@@ -15,24 +15,27 @@ export function ActiveActionIndicator() {
         : `${activeCount} actions in progress. Latest: ${label}`
 
   return (
-    <div
-      className={`activity-indicator${activeCount > 0 ? ' is-active' : ''}`}
+    <Group
+      gap="xs"
+      align="center"
       role="status"
       aria-live="polite"
       aria-label={statusLabel}
+      px="sm"
+      py={4}
+      bg={activeCount > 0 ? 'blue.9' : 'dark.6'}
+      bd="1px solid var(--mantine-color-dark-5)"
+      style={{ borderRadius: 'var(--mantine-radius-md)' }}
     >
-      <span
-        className={`activity-indicator__icon${activeCount > 0 ? ' is-spinning' : ''}`}
-        aria-hidden="true"
-      >
-        <SpinnerGap size={18} weight="bold" />
-      </span>
-      <span className="activity-indicator__text">
+      <Loader size="sm" color={activeCount > 0 ? 'blue' : 'gray'} type="oval" />
+      <Text size="sm" fw={500}>
         {label}
-        {activeCount > 1 ? <span className="activity-indicator__count">+{activeCount - 1}</span> : null}
-      </span>
-    </div>
+      </Text>
+      {activeCount > 1 ? (
+        <Badge size="xs" variant="filled" color="blue">
+          +{activeCount - 1}
+        </Badge>
+      ) : null}
+    </Group>
   )
 }
-
-
