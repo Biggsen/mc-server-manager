@@ -34,7 +34,12 @@ function getPluginSourceKind(plugin: StoredPluginRecord): 'download' | 'upload' 
   if (plugin.source?.uploadPath) {
     return 'upload'
   }
-  return 'download'
+  if (plugin.source?.downloadUrl) {
+    return 'download'
+  }
+  // If neither exists, likely an uploaded plugin missing uploadPath in source
+  // (older data or edge case) - default to 'upload' to avoid misleading "Download URL" badge
+  return 'upload'
 }
 
 type ConfigDefinitionDraft = {
@@ -325,7 +330,25 @@ function PluginLibrary() {
                       </Table.Td>
                       <Table.Td>{plugin.version}</Table.Td>
                       <Table.Td>
-                        <Badge variant="light">{sourceLabel[kind]}</Badge>
+                        <Stack gap={4}>
+                          <Badge variant="light">{sourceLabel[kind]}</Badge>
+                          {plugin.source?.downloadUrl && (
+                            <Anchor
+                              href={plugin.source.downloadUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              size="sm"
+                              style={{ wordBreak: 'break-all', overflowWrap: 'break-word' }}
+                            >
+                              {plugin.source.downloadUrl}
+                            </Anchor>
+                          )}
+                          {plugin.source?.uploadPath && (
+                            <Text size="sm" c="dimmed" style={{ wordBreak: 'break-all', overflowWrap: 'break-word' }}>
+                              {plugin.source.uploadPath}
+                            </Text>
+                          )}
+                        </Stack>
                       </Table.Td>
                       <Table.Td>
                         <Stack gap={2}>
@@ -341,7 +364,7 @@ function PluginLibrary() {
                         <Stack gap={4}>
                           {plugin.cachePath ? (
                             <>
-                              <Text size="sm">
+                              <Text size="sm" style={{ wordBreak: 'break-all', overflowWrap: 'break-word' }}>
                                 <code>{plugin.cachePath}</code>
                               </Text>
                               {plugin.cachedAt && (
