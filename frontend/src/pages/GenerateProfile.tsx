@@ -560,22 +560,17 @@ function GenerateProfile() {
             <Card withBorder p="lg" radius="md">
               <Stack gap="md">
                 <Title order={3}>Project basics</Title>
-                <Grid gutter="md">
-                  <Grid.Col span={{ base: 12, sm: 6 }}>
-                    <TextInput
-                      label="Server name"
-                      value={project.name}
-                      readOnly
-                      description="Uses the project display name."
-                    />
-                  </Grid.Col>
-                  <Grid.Col span={{ base: 12, sm: 3 }}>
-                    <TextInput label="Loader" value={project.loader} readOnly />
-                  </Grid.Col>
-                  <Grid.Col span={{ base: 12, sm: 3 }}>
-                    <TextInput label="Minecraft version" value={project.minecraftVersion} readOnly />
-                  </Grid.Col>
-                </Grid>
+                <Group gap="md" align="flex-end" grow>
+                  <TextInput
+                    label="Server name"
+                    value={project.name}
+                    readOnly
+                    description="Uses the project display name."
+                    style={{ flex: 2 }}
+                  />
+                  <TextInput label="Loader" value={project.loader} readOnly style={{ flex: 1 }} />
+                  <TextInput label="Minecraft version" value={project.minecraftVersion} readOnly style={{ flex: 1 }} />
+                </Group>
               </Stack>
             </Card>
 

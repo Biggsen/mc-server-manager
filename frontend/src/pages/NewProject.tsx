@@ -215,6 +215,48 @@ function NewProject() {
         >
           <Stack gap="md">
             <Grid gutter="md">
+              <Grid.Col span={{ base: 12, md: 6 }}>
+                <Stack gap={4}>
+                  <Text size="xs" fw={600} c="dimmed">
+                    Repository owner
+                  </Text>
+                  <NativeSelect
+                    id="owner-select"
+                    value={selectedOwner}
+                    onChange={(event) => setSelectedOwner(event.currentTarget.value)}
+                    disabled={repoLoading || owners.length === 0}
+                    data={owners.map((owner) => ({ value: owner.key, label: owner.label }))}
+                  />
+                </Stack>
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, md: 6 }}>
+                <Checkbox
+                  label="Private repo"
+                  checked={newRepoPrivate}
+                  onChange={(event) => setNewRepoPrivate(event.currentTarget.checked)}
+                />
+              </Grid.Col>
+
+              <Grid.Col span={12}>
+                <Stack gap={8}>
+                  <Text size="xs" fw={600} c="dimmed">
+                    Create new repository
+                  </Text>
+                  <Group align="flex-end" gap="sm">
+                    <TextInput
+                      id="new-repo-name"
+                      value={newRepoName}
+                      placeholder="my-server-manager"
+                      onChange={(event) => setNewRepoName(event.currentTarget.value)}
+                      disabled={repoLoading}
+                    />
+                    <Button type="button" variant="ghost" onClick={handleCreateRepo} disabled={repoLoading || creatingRepo}>
+                      {creatingRepo ? 'Creating…' : 'Create & Select'}
+                    </Button>
+                  </Group>
+                </Stack>
+              </Grid.Col>
+
               <Grid.Col span={12}>
                 <Stack gap={4}>
                   <Text size="xs" fw={600} c="dimmed">
@@ -247,7 +289,7 @@ function NewProject() {
                   />
                   {!repoLoading && sortedRepos.length === 0 && (
                     <Text size="sm" c="dimmed">
-                      No repositories found. Create one below.
+                      No repositories found. Create one above.
                     </Text>
                   )}
                 </Stack>
@@ -315,7 +357,7 @@ function NewProject() {
                     id="minecraft-version"
                     name="minecraftVersion"
                     defaultValue="1.21.1"
-                    data={['1.21.8', '1.21.1', '1.21', '1.20.6']}
+                    data={['1.21.11', '1.21.8', '1.21.1', '1.21', '1.20.6']}
                   />
                 </Stack>
               </Grid.Col>
@@ -347,48 +389,6 @@ function NewProject() {
                     rows={3}
                     placeholder="Optional notes about this project"
                   />
-                </Stack>
-              </Grid.Col>
-
-              <Grid.Col span={{ base: 12, md: 6 }}>
-                <Stack gap={4}>
-                  <Text size="xs" fw={600} c="dimmed">
-                    Repository owner
-                  </Text>
-                  <NativeSelect
-                    id="owner-select"
-                    value={selectedOwner}
-                    onChange={(event) => setSelectedOwner(event.currentTarget.value)}
-                    disabled={repoLoading || owners.length === 0}
-                    data={owners.map((owner) => ({ value: owner.key, label: owner.label }))}
-                  />
-                </Stack>
-              </Grid.Col>
-              <Grid.Col span={{ base: 12, md: 6 }}>
-                <Checkbox
-                  label="Private repo"
-                  checked={newRepoPrivate}
-                  onChange={(event) => setNewRepoPrivate(event.currentTarget.checked)}
-                />
-              </Grid.Col>
-
-              <Grid.Col span={12}>
-                <Stack gap={8}>
-                  <Text size="xs" fw={600} c="dimmed">
-                    Create new repository
-                  </Text>
-                  <Group align="flex-end" gap="sm">
-                    <TextInput
-                      id="new-repo-name"
-                      value={newRepoName}
-                      placeholder="my-server-manager"
-                      onChange={(event) => setNewRepoName(event.currentTarget.value)}
-                      disabled={repoLoading}
-                    />
-                    <Button type="button" variant="ghost" onClick={handleCreateRepo} disabled={repoLoading || creatingRepo}>
-                      {creatingRepo ? 'Creating…' : 'Create & Select'}
-                    </Button>
-                  </Group>
                 </Stack>
               </Grid.Col>
             </Grid>
