@@ -1175,6 +1175,7 @@ useEffect(() => {
       }
       try {
         setConfigUploadBusy(true)
+        const isReplacement = configFiles.some((f) => f.path === configUploadPath.trim())
         const configs = await uploadProjectConfig(id, {
           path: configUploadPath.trim(),
           file: configUploadFile,
@@ -1183,6 +1184,11 @@ useEffect(() => {
         })
         setConfigFiles(configs)
         setConfigsError(null)
+        toast({
+          title: isReplacement ? 'Config replaced' : 'Config uploaded',
+          description: `${configUploadPath.trim()} ${isReplacement ? 'replaced' : 'uploaded'} successfully.`,
+          variant: 'success',
+        })
         setConfigUploadPath('')
         setConfigUploadFile(null)
         setConfigUploadPlugin('')
@@ -1208,9 +1214,11 @@ useEffect(() => {
       configUploadFile,
       configUploadPath,
       configUploadPlugin,
+      configFiles,
       id,
       pluginConfigManager,
       refreshPluginConfigManager,
+      toast,
     ],
   )
 
@@ -1226,6 +1234,22 @@ useEffect(() => {
       }
     },
     [id],
+  )
+
+  const handleReplaceConfig = useCallback(
+    (file: ProjectConfigSummary) => {
+      setConfigUploadPath(file.path)
+      setConfigUploadPathDirty(false)
+      setConfigUploadPlugin(file.pluginId ?? '')
+      setConfigUploadDefinition(file.definitionId ?? '')
+      setConfigUploadFile(null)
+      setConfigsError(null)
+      configUploadFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      setTimeout(() => {
+        configUploadFileInputRef.current?.click()
+      }, 100)
+    },
+    [],
   )
 
   const handleSaveConfig = useCallback(async () => {
@@ -2400,10 +2424,29 @@ useEffect(() => {
                                       </Grid>
 
                                       {draft.uploaded ? (
-                                        <Text size="sm" c="dimmed">
-                                          Uploaded {formatBytes(draft.uploaded.size)} ·{' '}
-                                          {new Date(draft.uploaded.modifiedAt).toLocaleString()}
-                                        </Text>
+                                        <Group justify="space-between" align="center">
+                                          <Text size="sm" c="dimmed">
+                                            Uploaded {formatBytes(draft.uploaded.size)} ·{' '}
+                                            {new Date(draft.uploaded.modifiedAt).toLocaleString()}
+                                          </Text>
+                                          <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="xs"
+                                            onClick={() =>
+                                              handleReplaceConfig({
+                                                path: draft.uploaded!.path,
+                                                size: draft.uploaded!.size,
+                                                modifiedAt: draft.uploaded!.modifiedAt,
+                                                sha256: draft.uploaded!.sha256,
+                                                pluginId: pluginConfigManager.pluginId,
+                                                definitionId: draft.definitionId,
+                                              })
+                                            }
+                                          >
+                                            Replace
+                                          </Button>
+                                        </Group>
                                       ) : draft.missing ? (
                                         <Text size="sm" c="dimmed">Not uploaded yet</Text>
                                       ) : null}
@@ -2550,7 +2593,11 @@ useEffect(() => {
                           </div>
                           <Group>
                             <Button type="submit" variant="ghost" disabled={configUploadBusy}>
-                              {configUploadBusy ? 'Uploading…' : 'Upload config'}
+                              {configUploadBusy
+                                ? 'Uploading…'
+                                : configFiles.some((f) => f.path === configUploadPath.trim())
+                                  ? 'Replace config'
+                                  : 'Upload config'}
                             </Button>
                           </Group>
                         </Stack>
@@ -2604,6 +2651,13 @@ useEffect(() => {
                                       onClick={() => void handleEditConfig(file.path)}
                                     >
                                       Edit
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      onClick={() => handleReplaceConfig(file)}
+                                    >
+                                      Replace
                                     </Button>
                                     <Button
                                       type="button"
