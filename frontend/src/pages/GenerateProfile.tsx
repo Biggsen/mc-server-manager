@@ -233,10 +233,16 @@ function buildProfileDocument(options: {
       template: 'server.properties.hbs',
       output: 'server.properties',
       data: {
-        motd: options.serverProperties.motd,
-        maxPlayers: Number.parseInt(options.serverProperties.maxPlayers, 10) || 10,
+        motd: typeof options.serverProperties.motd === 'string' ? options.serverProperties.motd : '',
+        maxPlayers: Number.parseInt(
+          typeof options.serverProperties.maxPlayers === 'string' ? options.serverProperties.maxPlayers : '10',
+          10,
+        ) || 10,
         enforceSecureProfile: options.serverProperties.enforceSecureProfile,
-        viewDistance: Number.parseInt(options.serverProperties.viewDistance, 10) || 10,
+        viewDistance: Number.parseInt(
+          typeof options.serverProperties.viewDistance === 'string' ? options.serverProperties.viewDistance : '10',
+          10,
+        ) || 10,
         onlineMode: options.serverProperties.onlineMode,
         levelSeed: options.worldSeed.trim() ? options.worldSeed.trim() : undefined,
       },
@@ -244,7 +250,10 @@ function buildProfileDocument(options: {
   }
 
   if (options.paperGlobal.include) {
-    const distance = Number.parseInt(options.paperGlobal.targetTickDistance, 10)
+    const distance = Number.parseInt(
+      typeof options.paperGlobal.targetTickDistance === 'string' ? options.paperGlobal.targetTickDistance : '6',
+      10,
+    )
     configEntries.push({
       template: 'paper-global.yml.hbs',
       output: 'config/paper-global.yml',
@@ -285,7 +294,13 @@ function buildProfileDocument(options: {
       ? [
           {
             path: 'paper-global.yml:chunk-system.target-tick-distance',
-            value: Number.parseInt(options.paperGlobal.targetTickDistance, 10) || 6,
+            value:
+              Number.parseInt(
+                typeof options.paperGlobal.targetTickDistance === 'string'
+                  ? options.paperGlobal.targetTickDistance
+                  : '6',
+                10,
+              ) || 6,
           },
         ]
       : undefined,
@@ -439,23 +454,33 @@ function GenerateProfile() {
       return null
     }
 
-    return buildProfileDocument({
-      project,
-      worldMode,
-      worldName,
-      worldSeed,
-      plugins,
-      serverProperties,
-      paperGlobal,
-      additionalConfigs: configs,
-    })
+    try {
+      return buildProfileDocument({
+        project,
+        worldMode,
+        worldName,
+        worldSeed,
+        plugins,
+        serverProperties,
+        paperGlobal,
+        additionalConfigs: configs,
+      })
+    } catch (error) {
+      console.error('Failed to build profile document:', error)
+      return null
+    }
   }, [project, worldMode, worldName, worldSeed, plugins, serverProperties, paperGlobal, configs])
 
   const yamlPreview = useMemo(() => {
     if (!profileDocument) {
       return ''
     }
-    return YAML.stringify(profileDocument, { defaultStringType: 'QUOTE_DOUBLE' })
+    try {
+      return YAML.stringify(profileDocument, { defaultStringType: 'QUOTE_DOUBLE' })
+    } catch (error) {
+      console.error('Failed to stringify profile document:', error)
+      return '# Error: Failed to generate YAML preview'
+    }
   }, [profileDocument])
 
   if (!id) {
@@ -560,16 +585,16 @@ function GenerateProfile() {
             <Card withBorder p="lg" radius="md">
               <Stack gap="md">
                 <Title order={3}>Project basics</Title>
-                <Group gap="md" align="flex-end" grow>
+                <Group gap="md" align="flex-end" wrap="nowrap">
                   <TextInput
                     label="Server name"
                     value={project.name}
                     readOnly
                     description="Uses the project display name."
-                    style={{ flex: 2 }}
+                    style={{ flex: '2 1 0', minWidth: 0 }}
                   />
-                  <TextInput label="Loader" value={project.loader} readOnly style={{ flex: 1 }} />
-                  <TextInput label="Minecraft version" value={project.minecraftVersion} readOnly style={{ flex: 1 }} />
+                  <TextInput label="Loader" value={project.loader} readOnly style={{ flex: '1 1 0', minWidth: 0 }} />
+                  <TextInput label="Minecraft version" value={project.minecraftVersion} readOnly style={{ flex: '1 1 0', minWidth: 0 }} />
                 </Group>
               </Stack>
             </Card>
@@ -697,19 +722,35 @@ function GenerateProfile() {
                         <Grid.Col span={12}>
                           <TextInput
                             label="MOTD"
-                            value={serverProperties.motd}
-                            onChange={(event) =>
-                              setServerProperties((prev) => ({ ...prev, motd: event.currentTarget.value }))
-                            }
+                            value={typeof serverProperties.motd === 'string' ? serverProperties.motd : ''}
+                            onChange={(event) => {
+                              try {
+                                const newValue = String(event.currentTarget?.value ?? '')
+                                setServerProperties((prev) => ({
+                                  ...prev,
+                                  motd: newValue,
+                                }))
+                              } catch (error) {
+                                console.error('Error updating MOTD:', error)
+                              }
+                            }}
                           />
                         </Grid.Col>
                         <Grid.Col span={{ base: 12, sm: 6 }}>
                           <TextInput
                             label="Max players"
-                            value={serverProperties.maxPlayers}
-                            onChange={(event) =>
-                              setServerProperties((prev) => ({ ...prev, maxPlayers: event.currentTarget.value }))
-                            }
+                            value={typeof serverProperties.maxPlayers === 'string' ? serverProperties.maxPlayers : ''}
+                            onChange={(event) => {
+                              try {
+                                const newValue = String(event.currentTarget?.value ?? '')
+                                setServerProperties((prev) => ({
+                                  ...prev,
+                                  maxPlayers: newValue,
+                                }))
+                              } catch (error) {
+                                console.error('Error updating max players:', error)
+                              }
+                            }}
                             type="number"
                             min={1}
                           />
@@ -717,13 +758,18 @@ function GenerateProfile() {
                         <Grid.Col span={{ base: 12, sm: 6 }}>
                           <TextInput
                             label="View distance"
-                            value={serverProperties.viewDistance}
-                            onChange={(event) =>
-                              setServerProperties((prev) => ({
-                                ...prev,
-                                viewDistance: event.currentTarget.value,
-                              }))
-                            }
+                            value={typeof serverProperties.viewDistance === 'string' ? serverProperties.viewDistance : ''}
+                            onChange={(event) => {
+                              try {
+                                const newValue = String(event.currentTarget?.value ?? '')
+                                setServerProperties((prev) => ({
+                                  ...prev,
+                                  viewDistance: newValue,
+                                }))
+                              } catch (error) {
+                                console.error('Error updating view distance:', error)
+                              }
+                            }}
                             type="number"
                             min={2}
                           />
@@ -772,13 +818,18 @@ function GenerateProfile() {
                     {paperGlobal.include && (
                       <TextInput
                         label="Target tick distance"
-                        value={paperGlobal.targetTickDistance}
-                        onChange={(event) =>
-                          setPaperGlobal((prev) => ({
-                            ...prev,
-                            targetTickDistance: event.currentTarget.value,
-                          }))
-                        }
+                        value={typeof paperGlobal.targetTickDistance === 'string' ? paperGlobal.targetTickDistance : ''}
+                        onChange={(event) => {
+                          try {
+                            const newValue = String(event.currentTarget?.value ?? '')
+                            setPaperGlobal((prev) => ({
+                              ...prev,
+                              targetTickDistance: newValue,
+                            }))
+                          } catch (error) {
+                            console.error('Error updating target tick distance:', error)
+                          }
+                        }}
                         type="number"
                         min={1}
                       />
