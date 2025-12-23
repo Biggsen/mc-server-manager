@@ -6,7 +6,7 @@ import { resolveProjectRoot } from "./projectFiles";
 
 const UPLOAD_ROOT_SEGMENTS = ["config", "uploads"];
 
-function sanitizeRelativePath(input: string | undefined | null): string {
+export function sanitizeRelativePath(input: string | undefined | null): string {
   if (typeof input !== "string") {
     throw new Error("relativePath is required");
   }
@@ -23,7 +23,7 @@ function sanitizeRelativePath(input: string | undefined | null): string {
   return normalized;
 }
 
-function getUploadsRoot(project: StoredProject): string {
+export function getUploadsRoot(project: StoredProject): string {
   return join(resolveProjectRoot(project), ...UPLOAD_ROOT_SEGMENTS);
 }
 

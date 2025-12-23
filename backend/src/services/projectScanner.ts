@@ -5,7 +5,7 @@ import { join } from "path";
 import { parse } from "yaml";
 import type { StoredProject } from "../types/storage";
 import { resolveProjectRoot } from "./projectFiles";
-import { deleteUploadedConfigFile, listUploadedConfigFiles } from "./configUploads";
+import { deleteUploadedConfigFile, getUploadsRoot, listUploadedConfigFiles, sanitizeRelativePath } from "./configUploads";
 
 interface ProfileFileEntry {
   template?: string;
@@ -180,6 +180,7 @@ export async function scanProjectAssets(project: StoredProject): Promise<Scanned
 
   const uploadedSummaries = await listUploadedConfigFiles(project);
   const cleanupTasks: Array<Promise<void>> = [];
+  const uploadsRoot = getUploadsRoot(project);
   for (const summary of uploadedSummaries) {
     const previous = configMap.get(summary.path);
     if (
@@ -198,7 +199,11 @@ export async function scanProjectAssets(project: StoredProject): Promise<Scanned
       );
       continue;
     }
-    const sha256 = summary.sha256 ?? previous?.sha256 ?? computeHashFromString(summary.path);
+    // Compute fresh hash from disk to detect file changes
+    const sanitized = sanitizeRelativePath(summary.path);
+    const targetPath = join(uploadsRoot, sanitized);
+    const computedHash = await computeFileHash(targetPath);
+    const sha256 = computedHash ?? previous?.sha256 ?? computeHashFromString(summary.path);
     activePaths.add(summary.path);
     configMap.set(summary.path, {
       path: summary.path,

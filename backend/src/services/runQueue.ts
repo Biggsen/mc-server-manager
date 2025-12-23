@@ -610,6 +610,7 @@ async function syncWorkspaceWithArtifact(
     const currentHash = await hashFileIfExists(targetPath);
     const previousBaseline = baseline[relativePath];
     const matchesArtifact = currentHash === artifactHash;
+    const artifactChanged = previousBaseline && previousBaseline !== artifactHash;
     let wroteFile = false;
 
     if (firstRun) {
@@ -626,6 +627,11 @@ async function syncWorkspaceWithArtifact(
         baseline[relativePath] = artifactHash;
         dirty.delete(relativePath);
       }
+    } else if (artifactChanged) {
+      // Artifact has changed - update file even if workspace was modified
+      await writeFile(targetPath, data);
+      wroteFile = true;
+      appendLog(job, "system", `Updating ${relativePath} from changed artifact (previous baseline: ${previousBaseline.substring(0, 16)}..., new: ${artifactHash.substring(0, 16)}...).`);
     } else if (currentHash === previousBaseline) {
       await writeFile(targetPath, data);
       wroteFile = true;
