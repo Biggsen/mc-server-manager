@@ -466,6 +466,23 @@ export async function fetchProject(projectId: string): Promise<ProjectSummary> {
   return data.project
 }
 
+export async function updateProject(
+  projectId: string,
+  payload: {
+    name?: string
+    minecraftVersion?: string
+    loader?: string
+    description?: string
+  },
+): Promise<ProjectSummary> {
+  const data = await request<{ project: ProjectSummary }>(`/projects/${projectId}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
+  emitProjectsUpdated()
+  return data.project
+}
+
 export interface ProjectConfigSummary {
   path: string
   size: number

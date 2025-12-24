@@ -21,6 +21,7 @@ import {
   stopRunJob,
   triggerBuild,
   triggerManifest,
+  updateProject,
   updateProjectConfigFile,
   updateProjectPluginConfigs,
   uploadProjectConfig,
@@ -211,6 +212,9 @@ function ProjectDetail() {
   const [uploadPluginMin, setUploadPluginMin] = useState('')
   const [uploadPluginMax, setUploadPluginMax] = useState('')
   const [uploadPluginFile, setUploadPluginFile] = useState<File | null>(null)
+  const [editingVersion, setEditingVersion] = useState(false)
+  const [versionValue, setVersionValue] = useState('')
+  const [versionBusy, setVersionBusy] = useState(false)
 
   const existingProjectPlugins = useMemo(() => {
     const set = new Set<string>()
@@ -1428,9 +1432,69 @@ useEffect(() => {
             <SimpleGrid cols={{ base: 1, sm: 2, md: 3, lg: 5 }} spacing="lg">
               <Stack gap={4}>
                 <Text size="sm" c="dimmed">
-                  Minecraft
+                  Paper version
                 </Text>
-                <Text fw={600}>{project.minecraftVersion}</Text>
+                {editingVersion ? (
+                  <Group gap="xs" align="flex-end">
+                    <TextInput
+                      value={versionValue}
+                      onChange={(e) => setVersionValue(e.currentTarget.value)}
+                      placeholder="e.g., 1.21.11-54"
+                      size="sm"
+                      style={{ flex: 1 }}
+                    />
+                    <Button
+                      size="xs"
+                      variant="primary"
+                      loading={versionBusy}
+                      onClick={async () => {
+                        if (!versionValue.trim()) {
+                          toast.error('Version cannot be empty')
+                          return
+                        }
+                        try {
+                          setVersionBusy(true)
+                          const updated = await updateProject(id!, {
+                            minecraftVersion: versionValue.trim(),
+                          })
+                          setProject(updated)
+                          setEditingVersion(false)
+                          toast.success('Version updated')
+                        } catch (err) {
+                          toast.error(err instanceof Error ? err.message : 'Failed to update version')
+                        } finally {
+                          setVersionBusy(false)
+                        }
+                      }}
+                    >
+                      Save
+                    </Button>
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      onClick={() => {
+                        setEditingVersion(false)
+                        setVersionValue(project.minecraftVersion)
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                  </Group>
+                ) : (
+                  <Group gap="xs" align="center">
+                    <Text fw={600}>{project.minecraftVersion}</Text>
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      onClick={() => {
+                        setVersionValue(project.minecraftVersion)
+                        setEditingVersion(true)
+                      }}
+                    >
+                      Edit
+                    </Button>
+                  </Group>
+                )}
               </Stack>
               <Stack gap={4}>
                 <Text size="sm" c="dimmed">

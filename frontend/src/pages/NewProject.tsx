@@ -351,13 +351,14 @@ function NewProject() {
               <Grid.Col span={{ base: 12, md: 3 }}>
                 <Stack gap={4}>
                   <Text size="xs" fw={600} c="dimmed">
-                    Minecraft version
+                    Paper version
                   </Text>
-                  <NativeSelect
+                  <TextInput
                     id="minecraft-version"
                     name="minecraftVersion"
-                    defaultValue="1.21.1"
-                    data={['1.21.11', '1.21.8', '1.21.1', '1.21', '1.20.6']}
+                    defaultValue="1.21.11"
+                    placeholder="e.g., 1.21.11-54"
+                    description="Include build number for specific Paper version (e.g., 1.21.11-54)"
                   />
                 </Stack>
               </Grid.Col>

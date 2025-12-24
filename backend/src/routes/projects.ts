@@ -11,6 +11,7 @@ import {
   getManifestFilePath,
   recordManifestMetadata,
   setProjectAssets,
+  updateProject,
   upsertProjectPlugin,
   deleteProjectRecord,
   removeProjectPlugin,
@@ -577,6 +578,45 @@ router.get("/:id", async (req: Request, res: Response) => {
   }
 
   res.json({ project: toSummary(project) });
+});
+
+router.put("/:id", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { name, minecraftVersion, loader, description } = req.body ?? {};
+
+    const project = await findProject(id);
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+
+    const updated = await updateProject(id, (p) => {
+      if (typeof name === "string" && name.trim()) {
+        p.name = name.trim();
+      }
+      if (typeof minecraftVersion === "string" && minecraftVersion.trim()) {
+        p.minecraftVersion = minecraftVersion.trim();
+      }
+      if (typeof loader === "string" && loader.trim()) {
+        p.loader = loader.trim();
+      }
+      if (typeof description === "string") {
+        p.description = description.trim() || undefined;
+      }
+      return p;
+    });
+
+    if (!updated) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+
+    res.json({ project: toSummary(updated) });
+  } catch (error) {
+    console.error("Failed to update project", error);
+    res.status(500).json({ error: "Failed to update project" });
+  }
 });
 
 router.post("/:id/assets", async (req: Request, res: Response) => {

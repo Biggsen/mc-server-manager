@@ -232,10 +232,23 @@ async function ensureDockerJob(job: RunJob, project: StoredProject): Promise<voi
   await persistRuns();
 
   const serverType = determineServerType(project.loader);
-  const version =
+  const rawVersion =
     project.minecraftVersion && project.minecraftVersion !== "unknown"
       ? project.minecraftVersion
       : "LATEST";
+
+  // Parse Paper version format: "1.21.11-54" -> version="1.21.11", build="54"
+  // For other formats or if no build number, use the version as-is
+  let version = rawVersion;
+  let paperBuild: string | undefined;
+  
+  if (serverType === "PAPER" && rawVersion !== "LATEST" && rawVersion.includes("-")) {
+    const parts = rawVersion.split("-");
+    if (parts.length === 2) {
+      version = parts[0];
+      paperBuild = parts[1];
+    }
+  }
 
   const dockerArgs = [
     "run",
@@ -253,12 +266,21 @@ async function ensureDockerJob(job: RunJob, project: StoredProject): Promise<voi
     `TYPE=${serverType}`,
     "-e",
     `VERSION=${version}`,
+  ];
+
+  // Add PAPERBUILD environment variable if we have a build number
+  // The itzg/minecraft-server image uses PAPERBUILD (no underscore) for Paper build numbers
+  if (paperBuild) {
+    dockerArgs.push("-e", `PAPERBUILD=${paperBuild}`);
+  }
+
+  dockerArgs.push(
     "-e",
     "USE_AIKAR_FLAGS=true",
     "-e",
     "MEMORY=4G",
     "itzg/minecraft-server:latest",
-  ];
+  );
 
   appendLog(job, "system", `Launching container ${containerName} with image itzg/minecraft-server:latest`);
 
