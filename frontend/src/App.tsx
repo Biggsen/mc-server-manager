@@ -11,6 +11,7 @@ import {
   Buildings,
   Building,
   GithubLogo,
+  PaintBrush,
 } from '@phosphor-icons/react'
 import {
   Badge,
@@ -36,6 +37,7 @@ import TestTools from './pages/TestTools'
 import PluginLibrary from './pages/PluginLibrary'
 import AddPlugin from './pages/AddPlugin'
 import GenerateProfile from './pages/GenerateProfile'
+import Styleguide from './pages/Styleguide'
 import { ActiveActionIndicator, Button, ToastProvider, ToastViewport } from './components/ui'
 import { AppShell, MainCanvas } from './components/layout'
 import { AsyncActionsProvider } from './lib/asyncActions'
@@ -89,6 +91,11 @@ const NAV_SECTIONS: NavSection[] = [
         label: 'Dev Tools',
         icon: <Toolbox size={18} weight="fill" aria-hidden="true" />,
       },
+      {
+        to: '/styleguide',
+        label: 'Style Guide',
+        icon: <PaintBrush size={18} weight="fill" aria-hidden="true" />,
+      },
     ],
   },
 ]
@@ -136,6 +143,9 @@ function App() {
     }
     if (location.pathname.startsWith('/dev/tools')) {
       return 'Developer Tools'
+    }
+    if (location.pathname.startsWith('/styleguide')) {
+      return 'Style Guide'
     }
     return 'Server Manager'
   }, [location.pathname])
@@ -283,6 +293,7 @@ function App() {
                 <Route path="/plugins/add" element={<AddPlugin />} />
                 <Route path="/dev/tools" element={<TestTools />} />
                 <Route path="/deployments" element={<Deployments />} />
+                <Route path="/styleguide" element={<Styleguide />} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
           </MainCanvas>
