@@ -864,6 +864,9 @@ function ProjectDetail() {
       }
       return
     }
+    if (configUploadDefinition === '') {
+      return
+    }
     const match = options.find((option) => option.definitionId === configUploadDefinition)
     if (!match) {
       const [firstOption] = options
@@ -2776,25 +2779,21 @@ useEffect(() => {
                 const value = event.target.value
                 setConfigUploadPlugin(value)
                 setConfigUploadPathDirty(false)
-                if (value) {
-                  const options = pluginDefinitionOptions[value] ?? []
-                  const first = options[0]
-                  setConfigUploadDefinition(first ? first.definitionId : '')
-                  setConfigUploadPath(first ? first.path : '')
-                } else {
-                  setConfigUploadDefinition('')
-                  setConfigUploadPath('')
-                }
+                setConfigUploadDefinition('')
+                setConfigUploadPath('')
               }}
               data={[
                 { value: '', label: 'No association' },
-                ...(project?.plugins ?? []).map((plugin) => {
-                  const fileCount = configFiles.filter(f => f.pluginId === plugin.id).length
-                  return {
-                    value: plugin.id,
-                    label: `${plugin.id}${fileCount > 0 ? ` (${fileCount})` : ''}`,
-                  }
-                }),
+                ...(project?.plugins ?? [])
+                  .slice()
+                  .sort((a, b) => a.id.localeCompare(b.id))
+                  .map((plugin) => {
+                    const fileCount = configFiles.filter(f => f.pluginId === plugin.id).length
+                    return {
+                      value: plugin.id,
+                      label: `${plugin.id}${fileCount > 0 ? ` (${fileCount})` : ''}`,
+                    }
+                  }),
               ]}
             />
             <NativeSelect
@@ -2813,7 +2812,7 @@ useEffect(() => {
                   setConfigUploadPath('')
                 }
               }}
-              disabled={!configUploadPlugin || (pluginDefinitionOptions[configUploadPlugin] ?? []).length === 0}
+              disabled={!configUploadPlugin}
               data={[
                 { value: '', label: 'None' },
                 ...(pluginDefinitionOptions[configUploadPlugin] ?? []).map((option) => ({
