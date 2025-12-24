@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Building, Plug, SquaresFour } from '@phosphor-icons/react'
+import { Building, Plug, SquaresFour, Play, Package as PackageIcon } from '@phosphor-icons/react'
 import {
   Accordion,
   Anchor,
@@ -608,24 +608,26 @@ function Dashboard() {
 
                       <Group gap="sm">
                         <Button
-                          variant="ghost"
+                          variant="primary"
                           size="sm"
-                          disabled={startingRun[project.id] === true || hasActiveRun}
-                          onClick={() => {
-                            void requestRunProject(project).catch(() => null)
-                          }}
-                        >
-                          {startingRun[project.id] === true ? 'Starting…' : 'Run locally'}
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
+                          icon={<PackageIcon size={18} weight="fill" aria-hidden="true" />}
                           disabled={building[project.id] === 'running'}
                           onClick={() => {
                             void queueProjectBuild(project).catch(() => null)
                           }}
                         >
                           {building[project.id] === 'running' ? 'Building…' : 'Build'}
+                        </Button>
+                        <Button
+                          variant="pill"
+                          size="sm"
+                          icon={<Play size={18} weight="fill" aria-hidden="true" />}
+                          disabled={startingRun[project.id] === true || hasActiveRun}
+                          onClick={() => {
+                            void requestRunProject(project).catch(() => null)
+                          }}
+                        >
+                          {startingRun[project.id] === true ? 'Starting…' : 'Run locally'}
                         </Button>
                       </Group>
                     </Group>
