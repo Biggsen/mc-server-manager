@@ -76,7 +76,7 @@ function Dashboard() {
   const [startingRun, setStartingRun] = useState<Record<string, boolean>>({})
   const [commandInputs, setCommandInputs] = useState<Record<string, string>>({})
   const [commandBusy, setCommandBusy] = useState<Record<string, boolean>>({})
-  const logRefs = useRef<Record<string, HTMLPreElement | null>>({})
+  const logRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
   const { run: queueProjectBuild } = useAsyncAction(
     async (project: ProjectSummary) => triggerBuild(project.id),
@@ -223,7 +223,18 @@ function Dashboard() {
     runs.forEach((run) => {
       const element = logRefs.current[run.id]
       if (element) {
-        element.scrollTop = element.scrollHeight
+        let scrollableParent: HTMLElement | null = element.parentElement
+        while (scrollableParent) {
+          const style = window.getComputedStyle(scrollableParent)
+          if (
+            scrollableParent.scrollHeight > scrollableParent.clientHeight &&
+            (style.overflow === 'auto' || style.overflow === 'scroll' || style.overflowY === 'auto' || style.overflowY === 'scroll')
+          ) {
+            scrollableParent.scrollTop = scrollableParent.scrollHeight
+            break
+          }
+          scrollableParent = scrollableParent.parentElement
+        }
       }
     })
   }, [runs])
@@ -726,24 +737,34 @@ function Dashboard() {
                           <Accordion.Control>View logs</Accordion.Control>
                           <Accordion.Panel>
                             <ScrollArea h={200} type="auto">
-                              <Code
-                                block
-                                component="pre"
-                                ref={(element: HTMLPreElement | null) => {
+                              <div
+                                ref={(element) => {
                                   logRefs.current[run.id] = element
                                 }}
+                                style={{
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  justifyContent: 'flex-end',
+                                  minHeight: '200px',
+                                }}
                               >
-                                {run.logs.length > 0
-                                  ? run.logs
-                                      .map(
-                                        (entry) =>
-                                          `[${new Date(entry.timestamp).toLocaleTimeString()}][${
-                                            entry.stream
-                                          }] ${entry.message}`,
-                                      )
-                                      .join('\n')
-                                  : 'No log entries yet.'}
-                              </Code>
+                                <Code
+                                  block
+                                  component="pre"
+                                  style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0 }}
+                                >
+                                  {run.logs.length > 0
+                                    ? run.logs
+                                        .map(
+                                          (entry) =>
+                                            `[${new Date(entry.timestamp).toLocaleTimeString()}][${
+                                              entry.stream
+                                            }] ${entry.message}`,
+                                        )
+                                        .join('\n')
+                                    : 'No log entries yet.'}
+                                </Code>
+                              </div>
                             </ScrollArea>
                           </Accordion.Panel>
                         </Accordion.Item>
