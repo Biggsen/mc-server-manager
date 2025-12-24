@@ -651,7 +651,22 @@ async function syncWorkspaceWithArtifact(
 
   for (const key of Object.keys(baseline)) {
     if (!seenPaths.has(key)) {
+      const filePath = join(workspaceDir, key);
+      try {
+        await rm(filePath, { force: true });
+        appendLog(job, "system", `Removed ${key} (no longer in artifact)`);
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== "ENOENT") {
+          appendLog(
+            job,
+            "system",
+            `Failed to remove ${key}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
       delete baseline[key];
+      dirty.delete(key);
     }
   }
 
