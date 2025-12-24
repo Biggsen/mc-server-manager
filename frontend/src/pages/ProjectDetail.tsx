@@ -1460,12 +1460,12 @@ useEffect(() => {
 
             <Group gap="sm" wrap="wrap">
               <Button
-                variant="primary"
-                icon={<PackageIcon size={18} weight="fill" aria-hidden="true" />}
-                onClick={() => void queueBuild()}
+                variant="ghost"
+                icon={<MagnifyingGlass size={18} weight="bold" aria-hidden="true" />}
+                onClick={() => void scanAssets()}
                 disabled={busy}
               >
-                Trigger build
+                Scan assets
               </Button>
               <Button
                 variant="ghost"
@@ -1476,12 +1476,12 @@ useEffect(() => {
                 Generate manifest
               </Button>
               <Button
-                variant="ghost"
-                icon={<MagnifyingGlass size={18} weight="bold" aria-hidden="true" />}
-                onClick={() => void scanAssets()}
+                variant="primary"
+                icon={<PackageIcon size={18} weight="fill" aria-hidden="true" />}
+                onClick={() => void queueBuild()}
                 disabled={busy}
               >
-                Scan assets
+                Trigger build
               </Button>
               <Button
                 variant="pill"
@@ -1587,17 +1587,17 @@ useEffect(() => {
                       </Button>
                       <Button
                         variant="ghost"
-                        onClick={() => void queueBuild()}
-                        disabled={busy}
-                      >
-                        Trigger build
-                      </Button>
-                      <Button
-                        variant="ghost"
                         onClick={() => void generateManifest()}
                         disabled={busy}
                       >
                         Generate manifest
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        onClick={() => void queueBuild()}
+                        disabled={busy}
+                      >
+                        Trigger build
                       </Button>
                       <Button
                         variant="ghost"

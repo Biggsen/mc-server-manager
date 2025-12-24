@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Buildings } from '@phosphor-icons/react'
+import { Buildings, Play, FileText, MagnifyingGlass, Package as PackageIcon } from '@phosphor-icons/react'
 import {
   fetchProjects,
   triggerBuild,
@@ -521,25 +521,8 @@ function Projects() {
 
                       <Group gap="sm" wrap="wrap">
                         <Button
-                          variant="primary"
-                          disabled={busy[project.id] || buildStatus === 'running'}
-                          onClick={() => {
-                            void queueProjectBuild(project).catch(() => null)
-                          }}
-                        >
-                          {buildStatus === 'running' ? 'Building…' : 'Build'}
-                        </Button>
-                        <Button
                           variant="ghost"
-                          disabled={busy[project.id]}
-                          onClick={() => {
-                            void generateProjectManifest(project).catch(() => null)
-                          }}
-                        >
-                          Generate manifest
-                        </Button>
-                        <Button
-                          variant="ghost"
+                          icon={<MagnifyingGlass size={18} weight="bold" aria-hidden="true" />}
                           disabled={busy[project.id]}
                           onClick={() => {
                             void scanProjectAssetsAction(project).catch(() => null)
@@ -549,6 +532,27 @@ function Projects() {
                         </Button>
                         <Button
                           variant="ghost"
+                          icon={<FileText size={18} weight="fill" aria-hidden="true" />}
+                          disabled={busy[project.id]}
+                          onClick={() => {
+                            void generateProjectManifest(project).catch(() => null)
+                          }}
+                        >
+                          Generate manifest
+                        </Button>
+                        <Button
+                          variant="primary"
+                          icon={<PackageIcon size={18} weight="fill" aria-hidden="true" />}
+                          disabled={busy[project.id] || buildStatus === 'running'}
+                          onClick={() => {
+                            void queueProjectBuild(project).catch(() => null)
+                          }}
+                        >
+                          {buildStatus === 'running' ? 'Building…' : 'Build'}
+                        </Button>
+                        <Button
+                          variant="pill"
+                          icon={<Play size={18} weight="fill" aria-hidden="true" />}
                           disabled={busy[project.id]}
                           onClick={() => {
                             void runProjectLocallyAction(project).catch(() => null)
