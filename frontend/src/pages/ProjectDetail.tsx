@@ -2097,16 +2097,31 @@ useEffect(() => {
                                     required
                                     data={[
                                       { value: '', label: 'Select a plugin' },
-                                      ...libraryPlugins.map((plugin) => {
+                                      ...libraryPlugins
+                                        .slice()
+                                        .sort((a, b) => {
+                                          const idCompare = a.id.localeCompare(b.id, undefined, { sensitivity: 'base' })
+                                          if (idCompare !== 0) return idCompare
+                                          return b.version.localeCompare(a.version, undefined, { numeric: true })
+                                        })
+                                        .map((plugin) => {
                                         const key = `${plugin.id}:${plugin.version}`
                                         const providerLabel =
                                           plugin.provider && plugin.provider !== 'custom'
                                             ? ` (${plugin.provider})`
                                             : ''
+                                        const minVersion = plugin.minecraftVersionMin ?? plugin.source?.minecraftVersionMin
+                                        const maxVersion = plugin.minecraftVersionMax ?? plugin.source?.minecraftVersionMax
+                                        const versionRangeLabel =
+                                          minVersion && maxVersion
+                                            ? minVersion === maxVersion
+                                              ? ` (${minVersion})`
+                                              : ` (${minVersion} - ${maxVersion})`
+                                            : ''
                                         const isAlreadyAdded = existingProjectPlugins.has(key)
                                         return {
                                           value: key,
-                                          label: `${plugin.id} v${plugin.version}${providerLabel}${isAlreadyAdded ? ' · already added' : ''}`,
+                                          label: `${plugin.id} v${plugin.version}${versionRangeLabel}${providerLabel}${isAlreadyAdded ? ' · already added' : ''}`,
                                           disabled: isAlreadyAdded,
                                         }
                                       }),
