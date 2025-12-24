@@ -24,7 +24,7 @@ const variantMap: Record<
 > = {
   primary: { variant: 'filled', color: 'blue' },
   secondary: { variant: 'light', color: 'blue' },
-  ghost: { variant: 'subtle', color: 'gray' },
+  ghost: { variant: 'outline', color: 'gray' },
   pill: { variant: 'filled', color: 'blue', radius: 'xl' },
   link: { variant: 'subtle', color: 'blue', underline: true },
   danger: { variant: 'filled', color: 'red' },

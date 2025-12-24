@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { Play, FileText, MagnifyingGlass, Package as PackageIcon } from '@phosphor-icons/react'
+import { Play, FileText, MagnifyingGlass, Package as PackageIcon, Upload, PencilSimple, ArrowsClockwise, Trash, X, FloppyDisk } from '@phosphor-icons/react'
+import CodeMirror from '@uiw/react-codemirror'
+import { yaml } from '@codemirror/lang-yaml'
+import { oneDark } from '@codemirror/theme-one-dark'
 import {
   addProjectPlugin,
   deleteProject,
@@ -37,7 +40,7 @@ import {
   type StoredPluginRecord,
 } from '../lib/api'
 import { Accordion, Alert, Anchor, Checkbox, Code, Grid, Group, Loader, NativeSelect, ScrollArea, SimpleGrid, Stack, Table, Tabs, Text, Textarea, TextInput, Title } from '@mantine/core'
-import { Badge, Button, Card, CardContent, CardHeader, Skeleton } from '../components/ui'
+import { Badge, Button, Card, CardContent, CardHeader, Modal, Skeleton } from '../components/ui'
 import { useToast } from '../components/ui/toast'
 import { ContentSection } from '../components/layout'
 import { useAsyncAction } from '../lib/useAsyncAction'
@@ -192,6 +195,7 @@ function ProjectDetail() {
   const [configUploadDefinition, setConfigUploadDefinition] = useState('')
   const [configUploadPathDirty, setConfigUploadPathDirty] = useState(false)
   const [configUploadBusy, setConfigUploadBusy] = useState(false)
+  const [configUploadModalOpened, setConfigUploadModalOpened] = useState(false)
   const [configEditor, setConfigEditor] = useState<{ path: string; content: string } | null>(null)
   const [configEditorBusy, setConfigEditorBusy] = useState(false)
   const [configEditorError, setConfigEditorError] = useState<string | null>(null)
@@ -832,7 +836,7 @@ function ProjectDetail() {
       setConfigUploadDefinition(definitionId)
       setConfigUploadPath(path ?? '')
       setConfigUploadPathDirty(false)
-      configUploadFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      setConfigUploadModalOpened(true)
     },
     [],
   )
@@ -1198,6 +1202,7 @@ useEffect(() => {
         setConfigUploadPlugin('')
         setConfigUploadDefinition('')
         setConfigUploadPathDirty(false)
+        setConfigUploadModalOpened(false)
         if (event.currentTarget instanceof HTMLFormElement) {
           event.currentTarget.reset()
         }
@@ -1248,7 +1253,7 @@ useEffect(() => {
       setConfigUploadDefinition(file.definitionId ?? '')
       setConfigUploadFile(null)
       setConfigsError(null)
-      configUploadFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      setConfigUploadModalOpened(true)
       setTimeout(() => {
         configUploadFileInputRef.current?.click()
       }, 100)
@@ -2583,104 +2588,23 @@ useEffect(() => {
             </Tabs.Panel>
 
             <Tabs.Panel value="configs">
-              <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="lg" pt="lg">
+              <Stack gap="lg" pt="lg">
                 <Card>
                   <CardContent>
                     <Stack gap="md">
-                      <Title order={3}>Plugin Config Files</Title>
-                      <form
-                        ref={configUploadFormRef}
-                        onSubmit={handleUploadConfig}
-                      >
-                        <Stack gap="md">
-                          <NativeSelect
-                            label="Plugin (optional)"
-                            id="config-upload-plugin"
-                            value={configUploadPlugin}
-                            onChange={(event) => {
-                              const value = event.target.value
-                              setConfigUploadPlugin(value)
-                              setConfigUploadPathDirty(false)
-                              if (value) {
-                                const options = pluginDefinitionOptions[value] ?? []
-                                const first = options[0]
-                                setConfigUploadDefinition(first ? first.definitionId : '')
-                                setConfigUploadPath(first ? first.path : '')
-                              } else {
-                                setConfigUploadDefinition('')
-                                setConfigUploadPath('')
-                              }
-                            }}
-                            data={[
-                              { value: '', label: 'No association' },
-                              ...(project?.plugins ?? []).map((plugin) => ({
-                                value: plugin.id,
-                                label: `${plugin.id}${plugin.configMappings && plugin.configMappings.length > 0 ? ` (${plugin.configMappings.length})` : ''}`,
-                              })),
-                            ]}
-                          />
-                          <NativeSelect
-                            label="Config mapping"
-                            id="config-upload-definition"
-                            value={configUploadDefinition}
-                            onChange={(event) => {
-                              const value = event.target.value
-                              setConfigUploadDefinition(value)
-                              setConfigUploadPathDirty(false)
-                              const options = pluginDefinitionOptions[configUploadPlugin] ?? []
-                              const selected = options.find((option) => option.definitionId === value)
-                              if (selected) {
-                                setConfigUploadPath(selected.path)
-                              } else if (!value) {
-                                setConfigUploadPath('')
-                              }
-                            }}
-                            disabled={!configUploadPlugin || (pluginDefinitionOptions[configUploadPlugin] ?? []).length === 0}
-                            data={[
-                              { value: '', label: 'None' },
-                              ...(pluginDefinitionOptions[configUploadPlugin] ?? []).map((option) => ({
-                                value: option.definitionId,
-                                label: option.label,
-                              })),
-                            ]}
-                          />
-                          {selectedDefinition?.path && (
-                            <Text size="sm" c="dimmed">
-                              Suggested path: {selectedDefinition.path}
-                            </Text>
-                          )}
-                          <TextInput
-                            label="Relative path"
-                            id="config-upload-path"
-                            value={configUploadPath}
-                            onChange={(event) => {
-                              setConfigUploadPath(event.target.value)
-                              setConfigUploadPathDirty(true)
-                            }}
-                            placeholder="plugins/WorldGuard/worlds/world/regions.yml"
-                          />
-                          <div>
-                            <label htmlFor="config-upload-file" style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem' }}>
-                              Config file
-                            </label>
-                            <input
-                              id="config-upload-file"
-                              type="file"
-                              ref={configUploadFileInputRef}
-                              onChange={(event) => setConfigUploadFile(event.target.files?.[0] ?? null)}
-                            />
-                          </div>
-                          <Group>
-                            <Button type="submit" variant="ghost" disabled={configUploadBusy}>
-                              {configUploadBusy
-                                ? 'Uploading…'
-                                : configFiles.some((f) => f.path === configUploadPath.trim())
-                                  ? 'Replace config'
-                                  : 'Upload config'}
-                            </Button>
-                          </Group>
-                        </Stack>
-                      </form>
+                      <Group justify="space-between" align="center">
+                        <Title order={3}>Plugin Config Files</Title>
+                        <Button
+                          variant="primary"
+                          icon={<Upload size={18} weight="fill" aria-hidden="true" />}
+                          onClick={() => {
+                            setConfigUploadModalOpened(true)
+                            setConfigsError(null)
+                          }}
+                        >
+                          Upload Config
+                        </Button>
+                      </Group>
                       {configsError && (
                         <Alert color="red" title="Error">
                           {configsError}
@@ -2712,14 +2636,16 @@ useEffect(() => {
                               <CardContent>
                                 <Group justify="space-between" align="flex-start">
                                   <Stack gap={4}>
+                                    <Badge variant="outline" size="sm">
+                                      {file.pluginId || 'No plugin'}
+                                    </Badge>
                                     <Text fw={600}>{file.path}</Text>
                                     <Text size="sm" c="dimmed">
                                       {formatBytes(file.size)} · Updated {new Date(file.modifiedAt).toLocaleString()}
                                     </Text>
-                                    {file.pluginId && (
+                                    {file.definitionId && (
                                       <Text size="sm" c="dimmed">
-                                        Plugin: {file.pluginId}
-                                        {file.definitionId ? ` · ${file.definitionId}` : ''}
+                                        Definition: {file.definitionId}
                                       </Text>
                                     )}
                                   </Stack>
@@ -2727,6 +2653,7 @@ useEffect(() => {
                                     <Button
                                       type="button"
                                       variant="ghost"
+                                      icon={<PencilSimple size={18} weight="fill" aria-hidden="true" />}
                                       onClick={() => void handleEditConfig(file.path)}
                                     >
                                       Edit
@@ -2734,6 +2661,7 @@ useEffect(() => {
                                     <Button
                                       type="button"
                                       variant="ghost"
+                                      icon={<ArrowsClockwise size={18} weight="fill" aria-hidden="true" />}
                                       onClick={() => handleReplaceConfig(file)}
                                     >
                                       Replace
@@ -2741,6 +2669,7 @@ useEffect(() => {
                                     <Button
                                       type="button"
                                       variant="ghost"
+                                      icon={<Trash size={18} weight="fill" aria-hidden="true" />}
                                       onClick={async () => {
                                         if (!id) return
                                         if (!window.confirm(`Delete config file ${file.path}? This cannot be undone.`)) {
@@ -2779,62 +2708,7 @@ useEffect(() => {
                     </Stack>
                   </CardContent>
                 </Card>
-
-                {configEditor && (
-                  <Card>
-                    <CardContent>
-                      <Stack gap="md">
-                        <Group justify="space-between" align="flex-start">
-                          <Title order={3}>Edit Config: {configEditor.path}</Title>
-                          <Button
-                            variant="ghost"
-                            onClick={() => {
-                              setConfigEditor(null)
-                              setConfigEditorError(null)
-                            }}
-                          >
-                            Close
-                          </Button>
-                        </Group>
-                        {configEditorError && (
-                          <Alert color="red" title="Error">
-                            {configEditorError}
-                          </Alert>
-                        )}
-                        <Textarea
-                          value={configEditor.content}
-                          onChange={(event) =>
-                            setConfigEditor((prev) => (prev ? { ...prev, content: event.target.value } : prev))
-                          }
-                          rows={18}
-                          spellCheck={false}
-                        />
-                        <Group>
-                          <Button
-                            type="button"
-                            variant="primary"
-                            onClick={() => void handleSaveConfig()}
-                            disabled={configEditorBusy}
-                          >
-                            {configEditorBusy ? 'Saving…' : 'Save changes'}
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            onClick={() => {
-                              setConfigEditor(null)
-                              setConfigEditorError(null)
-                            }}
-                            disabled={configEditorBusy}
-                          >
-                            Cancel
-                          </Button>
-                        </Group>
-                      </Stack>
-                    </CardContent>
-                  </Card>
-                )}
-              </SimpleGrid>
+              </Stack>
             </Tabs.Panel>
 
             <Tabs.Panel value="settings">
@@ -2878,6 +2752,197 @@ useEffect(() => {
             </Tabs.Panel>
         </Tabs>
       </ContentSection>
+
+      <Modal
+        opened={configUploadModalOpened}
+        onClose={() => {
+          setConfigUploadModalOpened(false)
+          setConfigsError(null)
+        }}
+        title="Upload Plugin Config File"
+        size="lg"
+        centered
+      >
+        <form
+          ref={configUploadFormRef}
+          onSubmit={handleUploadConfig}
+        >
+          <Stack gap="md">
+            <NativeSelect
+              label="Plugin (optional)"
+              id="config-upload-plugin"
+              value={configUploadPlugin}
+              onChange={(event) => {
+                const value = event.target.value
+                setConfigUploadPlugin(value)
+                setConfigUploadPathDirty(false)
+                if (value) {
+                  const options = pluginDefinitionOptions[value] ?? []
+                  const first = options[0]
+                  setConfigUploadDefinition(first ? first.definitionId : '')
+                  setConfigUploadPath(first ? first.path : '')
+                } else {
+                  setConfigUploadDefinition('')
+                  setConfigUploadPath('')
+                }
+              }}
+              data={[
+                { value: '', label: 'No association' },
+                ...(project?.plugins ?? []).map((plugin) => {
+                  const fileCount = configFiles.filter(f => f.pluginId === plugin.id).length
+                  return {
+                    value: plugin.id,
+                    label: `${plugin.id}${fileCount > 0 ? ` (${fileCount})` : ''}`,
+                  }
+                }),
+              ]}
+            />
+            <NativeSelect
+              label="Config mapping"
+              id="config-upload-definition"
+              value={configUploadDefinition}
+              onChange={(event) => {
+                const value = event.target.value
+                setConfigUploadDefinition(value)
+                setConfigUploadPathDirty(false)
+                const options = pluginDefinitionOptions[configUploadPlugin] ?? []
+                const selected = options.find((option) => option.definitionId === value)
+                if (selected) {
+                  setConfigUploadPath(selected.path)
+                } else if (!value) {
+                  setConfigUploadPath('')
+                }
+              }}
+              disabled={!configUploadPlugin || (pluginDefinitionOptions[configUploadPlugin] ?? []).length === 0}
+              data={[
+                { value: '', label: 'None' },
+                ...(pluginDefinitionOptions[configUploadPlugin] ?? []).map((option) => ({
+                  value: option.definitionId,
+                  label: option.label,
+                })),
+              ]}
+            />
+            {selectedDefinition?.path && (
+              <Text size="sm" c="dimmed">
+                Suggested path: {selectedDefinition.path}
+              </Text>
+            )}
+            <TextInput
+              label="Relative path"
+              id="config-upload-path"
+              value={configUploadPath}
+              onChange={(event) => {
+                setConfigUploadPath(event.target.value)
+                setConfigUploadPathDirty(true)
+              }}
+              placeholder="plugins/WorldGuard/worlds/world/regions.yml"
+            />
+            <div>
+              <label htmlFor="config-upload-file" style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem' }}>
+                Config file
+              </label>
+              <input
+                id="config-upload-file"
+                type="file"
+                ref={configUploadFileInputRef}
+                onChange={(event) => setConfigUploadFile(event.target.files?.[0] ?? null)}
+              />
+            </div>
+            {configsError && (
+              <Alert color="red" title="Error">
+                {configsError}
+              </Alert>
+            )}
+            <Group justify="flex-end">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => {
+                  setConfigUploadModalOpened(false)
+                  setConfigsError(null)
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                variant="primary"
+                icon={<Upload size={18} weight="fill" aria-hidden="true" />}
+                disabled={configUploadBusy}
+              >
+                {configUploadBusy
+                  ? 'Uploading…'
+                  : configFiles.some((f) => f.path === configUploadPath.trim())
+                    ? 'Replace config'
+                    : 'Upload config'}
+              </Button>
+            </Group>
+          </Stack>
+        </form>
+      </Modal>
+
+      <Modal
+        opened={configEditor !== null}
+        onClose={() => {
+          setConfigEditor(null)
+          setConfigEditorError(null)
+        }}
+        title={configEditor ? `Edit Config: ${configEditor.path}` : 'Edit Config'}
+        size="100%"
+        styles={{
+          content: { height: 'calc(100vh - 120px)', maxHeight: 'calc(100vh - 120px)' },
+          body: { height: 'calc(100vh - 180px)', display: 'flex', flexDirection: 'column' },
+        }}
+      >
+        <Stack gap="md" style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          {configEditorError && (
+            <Alert color="red" title="Error" style={{ flexShrink: 0 }}>
+              {configEditorError}
+            </Alert>
+          )}
+          {configEditor && (
+            <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
+              <CodeMirror
+                value={configEditor.content}
+                onChange={(value) =>
+                  setConfigEditor((prev) => (prev ? { ...prev, content: value } : null))
+                }
+                extensions={[yaml()]}
+                theme={oneDark}
+                basicSetup={{
+                  lineNumbers: true,
+                  foldGutter: true,
+                  dropCursor: false,
+                  allowMultipleSelections: false,
+                }}
+                style={{ flex: 1, height: '100%' }}
+              />
+            </div>
+          )}
+          <Group justify="flex-end" style={{ flexShrink: 0, paddingBottom: '2px' }}>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => {
+                setConfigEditor(null)
+                setConfigEditorError(null)
+              }}
+              disabled={configEditorBusy}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              icon={<FloppyDisk size={18} weight="fill" aria-hidden="true" />}
+              onClick={() => void handleSaveConfig()}
+              disabled={configEditorBusy}
+            >
+              {configEditorBusy ? 'Saving…' : 'Save changes'}
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
   </>
   )
 }
