@@ -490,6 +490,10 @@ function ProjectDetail() {
   const [editingVersion, setEditingVersion] = useState(false)
   const [versionValue, setVersionValue] = useState('')
   const [versionBusy, setVersionBusy] = useState(false)
+  const [descriptionModalOpen, setDescriptionModalOpen] = useState(false)
+  const [descriptionValue, setDescriptionValue] = useState('')
+  const [descriptionBusy, setDescriptionBusy] = useState(false)
+  const [activeTab, setActiveTab] = useState<string>('overview')
 
   const existingProjectPlugins = useMemo(() => {
     const set = new Set<string>()
@@ -1637,7 +1641,7 @@ useEffect(() => {
       </Card>
 
       <ContentSection as="section" padding="xl">
-        <Tabs defaultValue="overview">
+        <Tabs value={activeTab} onChange={(value) => setActiveTab(value ?? 'overview')}>
           <Tabs.List>
             <Tabs.Tab value="overview">Overview</Tabs.Tab>
             <Tabs.Tab value="profile">Profile</Tabs.Tab>
@@ -1649,6 +1653,78 @@ useEffect(() => {
           </Tabs.List>
             <Tabs.Panel value="overview">
               <Stack gap="lg" pt="lg">
+                <Card>
+                  <CardContent>
+                    <Stack gap="sm">
+                      <Group justify="space-between" align="flex-start">
+                        <Title order={3}>Description</Title>
+                        <Button
+                          size="xs"
+                          variant="ghost"
+                          onClick={() => {
+                            setDescriptionValue(project.description ?? '')
+                            setDescriptionModalOpen(true)
+                          }}
+                        >
+                          {project.description ? 'Edit' : 'Add'}
+                        </Button>
+                      </Group>
+                      <Text size="sm" c={project.description ? undefined : 'dimmed'} style={{ minHeight: '20px' }}>
+                        {project.description || 'No description'}
+                      </Text>
+                    </Stack>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardContent>
+                    <Stack gap="sm">
+                      <Group justify="space-between" align="flex-start">
+                        <Title order={3}>Plugins</Title>
+                        <Button
+                          size="xs"
+                          variant="ghost"
+                          onClick={() => setActiveTab('plugins')}
+                        >
+                          View all
+                        </Button>
+                      </Group>
+                      {project.plugins && project.plugins.length > 0 ? (
+                        <Stack gap={4}>
+                          {project.plugins
+                            .slice()
+                            .sort((a, b) => a.id.localeCompare(b.id, undefined, { sensitivity: 'base' }))
+                            .slice(0, 10)
+                            .map((plugin) => (
+                            <Group key={`${plugin.id}:${plugin.version}`} gap="xs" wrap="nowrap">
+                              <Text size="sm" fw={500} style={{ flex: 1 }}>
+                                {plugin.id}
+                              </Text>
+                              <Text size="sm" c="dimmed">
+                                v{plugin.version}
+                              </Text>
+                              {plugin.provider && plugin.provider !== 'custom' && (
+                                <Badge variant="accent" size="xs">
+                                  {plugin.provider}
+                                </Badge>
+                              )}
+                            </Group>
+                          ))}
+                          {project.plugins.length > 10 && (
+                            <Text size="sm" c="dimmed">
+                              +{project.plugins.length - 10} more
+                            </Text>
+                          )}
+                        </Stack>
+                      ) : (
+                        <Text size="sm" c="dimmed">
+                          No plugins configured yet.
+                        </Text>
+                      )}
+                    </Stack>
+                  </CardContent>
+                </Card>
+
                 <Card>
                   <CardContent>
                     <Stack gap="sm">
@@ -2392,6 +2468,61 @@ useEffect(() => {
               </Stack>
             </Tabs.Panel>
         </Tabs>
+
+        <Modal
+          opened={descriptionModalOpen}
+          onClose={() => {
+            setDescriptionModalOpen(false)
+            setDescriptionValue(project.description ?? '')
+          }}
+          title="Edit Description"
+          size="lg"
+          centered
+        >
+          <Stack gap="md">
+            <Textarea
+              value={descriptionValue}
+              onChange={(e) => setDescriptionValue(e.currentTarget.value)}
+              placeholder="Optional notes about this project"
+              rows={15}
+              autosize
+              minRows={15}
+              maxRows={30}
+            />
+            <Group justify="flex-end">
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setDescriptionModalOpen(false)
+                  setDescriptionValue(project.description ?? '')
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                loading={descriptionBusy}
+                onClick={async () => {
+                  try {
+                    setDescriptionBusy(true)
+                    const updated = await updateProject(id!, {
+                      description: descriptionValue.trim() || undefined,
+                    })
+                    setProject(updated)
+                    setDescriptionModalOpen(false)
+                    toast.success('Description updated')
+                  } catch (err) {
+                    toast.error(err instanceof Error ? err.message : 'Failed to update description')
+                  } finally {
+                    setDescriptionBusy(false)
+                  }
+                }}
+              >
+                Save
+              </Button>
+            </Group>
+          </Stack>
+        </Modal>
       </ContentSection>
 
       <Modal
