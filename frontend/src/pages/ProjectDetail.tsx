@@ -173,6 +173,69 @@ interface PluginCardProps {
   onAddCustomPath: (pluginId: string) => void
 }
 
+interface DescriptionModalProps {
+  opened: boolean
+  initialValue: string
+  onClose: () => void
+  onSave: (value: string) => Promise<void>
+  loading: boolean
+}
+
+const DescriptionModal = memo(function DescriptionModal({
+  opened,
+  initialValue,
+  onClose,
+  onSave,
+  loading,
+}: DescriptionModalProps) {
+  const [value, setValue] = useState(initialValue)
+
+  useEffect(() => {
+    if (opened) {
+      setValue(initialValue)
+    }
+  }, [opened, initialValue])
+
+  const handleSave = useCallback(async () => {
+    await onSave(value.trim() || '')
+  }, [value, onSave])
+
+  const handleCancel = useCallback(() => {
+    setValue(initialValue)
+    onClose()
+  }, [initialValue, onClose])
+
+  return (
+    <Modal
+      opened={opened}
+      onClose={handleCancel}
+      title="Edit Description"
+      size="lg"
+      centered
+    >
+      <Stack gap="md">
+        <Textarea
+          value={value}
+          onChange={(e) => setValue(e.currentTarget.value)}
+          placeholder="Optional notes about this project"
+          rows={15}
+          autosize
+          minRows={15}
+          maxRows={30}
+        />
+        <Group justify="flex-end">
+          <Button variant="ghost" onClick={handleCancel}>
+            Cancel
+          </Button>
+          <Button variant="primary" loading={loading} onClick={handleSave}>
+            Save
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
+  )
+})
+
 const PluginCard = memo(function PluginCard({
   plugin,
   pluginDefinitions,
@@ -491,7 +554,6 @@ function ProjectDetail() {
   const [versionValue, setVersionValue] = useState('')
   const [versionBusy, setVersionBusy] = useState(false)
   const [descriptionModalOpen, setDescriptionModalOpen] = useState(false)
-  const [descriptionValue, setDescriptionValue] = useState('')
   const [descriptionBusy, setDescriptionBusy] = useState(false)
   const [activeTab, setActiveTab] = useState<string>('overview')
 
@@ -1661,15 +1723,16 @@ useEffect(() => {
                         <Button
                           size="xs"
                           variant="ghost"
-                          onClick={() => {
-                            setDescriptionValue(project.description ?? '')
-                            setDescriptionModalOpen(true)
-                          }}
+                          onClick={() => setDescriptionModalOpen(true)}
                         >
                           {project.description ? 'Edit' : 'Add'}
                         </Button>
                       </Group>
-                      <Text size="sm" c={project.description ? undefined : 'dimmed'} style={{ minHeight: '20px' }}>
+                      <Text 
+                        size="sm" 
+                        c={project.description ? undefined : 'dimmed'} 
+                        style={{ minHeight: '20px', whiteSpace: 'pre-wrap' }}
+                      >
                         {project.description || 'No description'}
                       </Text>
                     </Stack>
@@ -2469,60 +2532,27 @@ useEffect(() => {
             </Tabs.Panel>
         </Tabs>
 
-        <Modal
+        <DescriptionModal
           opened={descriptionModalOpen}
-          onClose={() => {
-            setDescriptionModalOpen(false)
-            setDescriptionValue(project.description ?? '')
+          initialValue={project.description ?? ''}
+          onClose={() => setDescriptionModalOpen(false)}
+          onSave={async (value) => {
+            try {
+              setDescriptionBusy(true)
+              const updated = await updateProject(id!, {
+                description: value || undefined,
+              })
+              setProject(updated)
+              setDescriptionModalOpen(false)
+              toast.success('Description updated')
+            } catch (err) {
+              toast.error(err instanceof Error ? err.message : 'Failed to update description')
+            } finally {
+              setDescriptionBusy(false)
+            }
           }}
-          title="Edit Description"
-          size="lg"
-          centered
-        >
-          <Stack gap="md">
-            <Textarea
-              value={descriptionValue}
-              onChange={(e) => setDescriptionValue(e.currentTarget.value)}
-              placeholder="Optional notes about this project"
-              rows={15}
-              autosize
-              minRows={15}
-              maxRows={30}
-            />
-            <Group justify="flex-end">
-              <Button
-                variant="ghost"
-                onClick={() => {
-                  setDescriptionModalOpen(false)
-                  setDescriptionValue(project.description ?? '')
-                }}
-              >
-                Cancel
-              </Button>
-              <Button
-                variant="primary"
-                loading={descriptionBusy}
-                onClick={async () => {
-                  try {
-                    setDescriptionBusy(true)
-                    const updated = await updateProject(id!, {
-                      description: descriptionValue.trim() || undefined,
-                    })
-                    setProject(updated)
-                    setDescriptionModalOpen(false)
-                    toast.success('Description updated')
-                  } catch (err) {
-                    toast.error(err instanceof Error ? err.message : 'Failed to update description')
-                  } finally {
-                    setDescriptionBusy(false)
-                  }
-                }}
-              >
-                Save
-              </Button>
-            </Group>
-          </Stack>
-        </Modal>
+          loading={descriptionBusy}
+        />
       </ContentSection>
 
       <Modal
