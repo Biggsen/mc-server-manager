@@ -28,7 +28,6 @@ import {
   updateProjectConfigFile,
   updateProjectPluginConfigs,
   uploadProjectConfig,
-  uploadProjectPlugin,
   type BuildJob,
   type PluginConfigDefinitionView,
   type PluginConfigRequirement,
@@ -204,18 +203,12 @@ function ProjectDetail() {
   const [deleteBusy, setDeleteBusy] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [addPluginOpen, setAddPluginOpen] = useState(false)
-  const [addPluginMode, setAddPluginMode] = useState<'library' | 'upload'>('library')
   const [addPluginBusy, setAddPluginBusy] = useState(false)
   const [addPluginError, setAddPluginError] = useState<string | null>(null)
   const [libraryLoading, setLibraryLoading] = useState(false)
   const [libraryError, setLibraryError] = useState<string | null>(null)
   const [libraryPlugins, setLibraryPlugins] = useState<StoredPluginRecord[]>([])
   const [selectedLibraryPlugin, setSelectedLibraryPlugin] = useState('')
-  const [uploadPluginId, setUploadPluginId] = useState('')
-  const [uploadPluginVersion, setUploadPluginVersion] = useState('')
-  const [uploadPluginMin, setUploadPluginMin] = useState('')
-  const [uploadPluginMax, setUploadPluginMax] = useState('')
-  const [uploadPluginFile, setUploadPluginFile] = useState<File | null>(null)
   const [editingVersion, setEditingVersion] = useState(false)
   const [versionValue, setVersionValue] = useState('')
   const [versionBusy, setVersionBusy] = useState(false)
@@ -231,16 +224,10 @@ function ProjectDetail() {
   const resetAddPluginForms = useCallback(() => {
     setAddPluginError(null)
     setSelectedLibraryPlugin('')
-    setUploadPluginId('')
-    setUploadPluginVersion('')
-    setUploadPluginMin('')
-    setUploadPluginMax('')
-    setUploadPluginFile(null)
   }, [])
 
   const openAddPluginPanel = useCallback(() => {
     resetAddPluginForms()
-    setAddPluginMode('library')
     setAddPluginOpen(true)
   }, [resetAddPluginForms])
 
@@ -250,19 +237,6 @@ function ProjectDetail() {
     resetAddPluginForms()
   }, [resetAddPluginForms])
 
-  const handleSelectAddPluginMode = useCallback((mode: 'library' | 'upload') => {
-    setAddPluginMode(mode)
-    setAddPluginError(null)
-    if (mode === 'library') {
-      setUploadPluginId('')
-      setUploadPluginVersion('')
-      setUploadPluginMin('')
-      setUploadPluginMax('')
-      setUploadPluginFile(null)
-    } else {
-      setSelectedLibraryPlugin('')
-    }
-  }, [])
 
   const handleRefreshLibrary = useCallback(async () => {
     setLibraryLoading(true)
@@ -647,64 +621,6 @@ function ProjectDetail() {
     ],
   )
 
-  const handleUploadPlugin = useCallback(
-    async (event: FormEvent<HTMLFormElement>) => {
-      event.preventDefault()
-      if (!id) {
-        setAddPluginError('Project identifier missing.')
-        return
-      }
-      if (!uploadPluginId.trim() || !uploadPluginVersion.trim()) {
-        setAddPluginError('Plugin id and version are required.')
-        return
-      }
-      if (!uploadPluginFile) {
-        setAddPluginError('Select a plugin jar to upload.')
-        return
-      }
-
-      setAddPluginBusy(true)
-      setAddPluginError(null)
-      try {
-        const plugins = await uploadProjectPlugin(id, {
-          pluginId: uploadPluginId.trim(),
-          version: uploadPluginVersion.trim(),
-          file: uploadPluginFile,
-          minecraftVersionMin: uploadPluginMin.trim() || undefined,
-          minecraftVersionMax: uploadPluginMax.trim() || undefined,
-        })
-        setProject((prev) => (prev ? { ...prev, plugins: plugins ?? [] } : prev))
-        toast({
-          title: 'Plugin uploaded',
-          description: `${uploadPluginId.trim()} v${uploadPluginVersion.trim()} uploaded to project.`,
-          variant: 'success',
-        })
-        closeAddPluginPanel()
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'Failed to upload plugin.'
-        setAddPluginError(message)
-        toast({
-          title: 'Upload failed',
-          description: message,
-          variant: 'danger',
-        })
-      } finally {
-        setAddPluginBusy(false)
-      }
-    },
-    [
-      closeAddPluginPanel,
-      id,
-      setProject,
-      toast,
-      uploadPluginFile,
-      uploadPluginId,
-      uploadPluginMax,
-      uploadPluginMin,
-      uploadPluginVersion,
-      uploadProjectPlugin,
-    ],
-  )
 
   const refreshPluginConfigManager = useCallback(async () => {
     if (!pluginConfigManager) return
@@ -970,7 +886,7 @@ function ProjectDetail() {
   }, [])
 
   useEffect(() => {
-    if (!addPluginOpen || addPluginMode !== 'library') {
+    if (!addPluginOpen) {
       return
     }
     if (libraryLoading || libraryPlugins.length > 0 || libraryError) {
@@ -978,7 +894,6 @@ function ProjectDetail() {
     }
     void handleRefreshLibrary()
   }, [
-    addPluginMode,
     addPluginOpen,
     handleRefreshLibrary,
     libraryError,
@@ -2022,10 +1937,10 @@ useEffect(() => {
                         <Button
                           type="button"
                           variant="primary"
-                          onClick={addPluginOpen ? closeAddPluginPanel : openAddPluginPanel}
+                          onClick={openAddPluginPanel}
                           disabled={addPluginBusy}
                         >
-                          {addPluginOpen ? 'Close' : 'Add plugin'}
+                          Add plugin
                         </Button>
                       </Group>
                       {project.plugins && project.plugins.length > 0 ? (
@@ -2098,231 +2013,6 @@ useEffect(() => {
                       ) : (
                         <Text size="sm" c="dimmed">No plugins configured yet.</Text>
                       )}
-                    </Stack>
-                  </CardContent>
-                </Card>
-
-                {addPluginOpen && (
-                  <Card>
-                    <CardContent>
-                      <Stack gap="md">
-                        <Title order={3}>Add Plugin to Project</Title>
-
-                        <Group gap="xs" wrap="wrap">
-                          <Button
-                            type="button"
-                            variant={addPluginMode === 'library' ? 'primary' : 'ghost'}
-                            onClick={() => handleSelectAddPluginMode('library')}
-                            disabled={addPluginBusy}
-                          >
-                            From library
-                          </Button>
-                          <Button
-                            type="button"
-                            variant={addPluginMode === 'upload' ? 'primary' : 'ghost'}
-                            onClick={() => handleSelectAddPluginMode('upload')}
-                            disabled={addPluginBusy}
-                          >
-                            Upload jar
-                          </Button>
-                        </Group>
-
-                        {addPluginError && (
-                          <Alert color="red" title="Error">
-                            {addPluginError}
-                          </Alert>
-                        )}
-
-                        {addPluginMode === 'library' && (
-                          <>
-                            {libraryLoading && <Loader size="sm" />}
-                            {libraryError && (
-                              <Stack gap="sm">
-                                <Alert color="red" title="Error">
-                                  {libraryError}
-                                </Alert>
-                                <Group>
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    onClick={() => void handleRefreshLibrary()}
-                                    disabled={libraryLoading}
-                                  >
-                                    Retry
-                                  </Button>
-                                </Group>
-                              </Stack>
-                            )}
-                            {!libraryLoading && !libraryError && libraryPlugins.length === 0 && (
-                              <Text size="sm" c="dimmed">
-                                No saved plugins yet. Add plugins from the Plugin Library page first.
-                              </Text>
-                            )}
-                            {!libraryLoading && !libraryError && libraryPlugins.length > 0 && (
-                              <form onSubmit={handleAddLibraryPlugin}>
-                                <Stack gap="md">
-                                  <NativeSelect
-                                    label="Library plugin"
-                                    id="library-plugin-select"
-                                    value={selectedLibraryPlugin}
-                                    onChange={(event) => setSelectedLibraryPlugin(event.target.value)}
-                                    required
-                                    data={[
-                                      { value: '', label: 'Select a plugin' },
-                                      ...libraryPlugins
-                                        .slice()
-                                        .sort((a, b) => {
-                                          const idCompare = a.id.localeCompare(b.id, undefined, { sensitivity: 'base' })
-                                          if (idCompare !== 0) return idCompare
-                                          return b.version.localeCompare(a.version, undefined, { numeric: true })
-                                        })
-                                        .map((plugin) => {
-                                        const key = `${plugin.id}:${plugin.version}`
-                                        const providerLabel =
-                                          plugin.provider && plugin.provider !== 'custom'
-                                            ? ` (${plugin.provider})`
-                                            : ''
-                                        const minVersion = plugin.minecraftVersionMin ?? plugin.source?.minecraftVersionMin
-                                        const maxVersion = plugin.minecraftVersionMax ?? plugin.source?.minecraftVersionMax
-                                        const versionRangeLabel =
-                                          minVersion && maxVersion
-                                            ? minVersion === maxVersion
-                                              ? ` (${minVersion})`
-                                              : ` (${minVersion} - ${maxVersion})`
-                                            : ''
-                                        const isAlreadyAdded = existingProjectPlugins.has(key)
-                                        return {
-                                          value: key,
-                                          label: `${plugin.id} v${plugin.version}${versionRangeLabel}${providerLabel}${isAlreadyAdded ? ' · already added' : ''}`,
-                                          disabled: isAlreadyAdded,
-                                        }
-                                      }),
-                                    ]}
-                                  />
-                                  <Group>
-                                    <Button
-                                      type="submit"
-                                      disabled={!selectedLibraryPlugin || addPluginBusy}
-                                    >
-                                      {addPluginBusy ? 'Adding…' : 'Add plugin'}
-                                    </Button>
-                                    <Button
-                                      type="button"
-                                      variant="ghost"
-                                      onClick={() => void handleRefreshLibrary()}
-                                      disabled={libraryLoading}
-                                    >
-                                      Refresh
-                                    </Button>
-                                  </Group>
-                                </Stack>
-                              </form>
-                            )}
-                          </>
-                        )}
-
-                        {addPluginMode === 'upload' && (
-                          <form onSubmit={handleUploadPlugin}>
-                            <Stack gap="md">
-                              <Grid>
-                                <Grid.Col span={{ base: 12, sm: 6 }}>
-                                  <TextInput
-                                    label="Plugin id"
-                                    id="upload-plugin-id"
-                                    value={uploadPluginId}
-                                    onChange={(event) => setUploadPluginId(event.target.value)}
-                                    placeholder="WorldGuard"
-                                    required
-                                    disabled={addPluginBusy}
-                                  />
-                                </Grid.Col>
-                                <Grid.Col span={{ base: 12, sm: 6 }}>
-                                  <TextInput
-                                    label="Version"
-                                    id="upload-plugin-version"
-                                    value={uploadPluginVersion}
-                                    onChange={(event) => setUploadPluginVersion(event.target.value)}
-                                    placeholder="7.0.9"
-                                    required
-                                    disabled={addPluginBusy}
-                                  />
-                                </Grid.Col>
-                                <Grid.Col span={12}>
-                                  <div>
-                                    <label htmlFor="upload-plugin-file" style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem' }}>
-                                      Plugin jar
-                                    </label>
-                                    <input
-                                      id="upload-plugin-file"
-                                      type="file"
-                                      accept=".jar,.zip"
-                                      onChange={(event) => setUploadPluginFile(event.target.files?.[0] ?? null)}
-                                      required
-                                      disabled={addPluginBusy}
-                                    />
-                                    {uploadPluginFile && (
-                                      <Text size="sm" c="dimmed" mt="xs">
-                                        Selected file: {uploadPluginFile.name}
-                                      </Text>
-                                    )}
-                                  </div>
-                                </Grid.Col>
-                                <Grid.Col span={{ base: 12, sm: 6 }}>
-                                  <TextInput
-                                    label="Minecraft version min"
-                                    id="upload-plugin-min"
-                                    value={uploadPluginMin}
-                                    onChange={(event) => setUploadPluginMin(event.target.value)}
-                                    placeholder="1.20"
-                                    disabled={addPluginBusy}
-                                  />
-                                </Grid.Col>
-                                <Grid.Col span={{ base: 12, sm: 6 }}>
-                                  <TextInput
-                                    label="Minecraft version max"
-                                    id="upload-plugin-max"
-                                    value={uploadPluginMax}
-                                    onChange={(event) => setUploadPluginMax(event.target.value)}
-                                    placeholder="1.20.1"
-                                    disabled={addPluginBusy}
-                                  />
-                                </Grid.Col>
-                              </Grid>
-                              <Group>
-                                <Button
-                                  type="submit"
-                                  disabled={
-                                    addPluginBusy ||
-                                    !uploadPluginId.trim() ||
-                                    !uploadPluginVersion.trim() ||
-                                    !uploadPluginFile
-                                  }
-                                >
-                                  {addPluginBusy ? 'Uploading…' : 'Upload plugin'}
-                                </Button>
-                                <Button type="button" variant="ghost" onClick={closeAddPluginPanel}>
-                                  Cancel
-                                </Button>
-                              </Group>
-                            </Stack>
-                          </form>
-                        )}
-                      </Stack>
-                    </CardContent>
-                  </Card>
-                )}
-
-                <Card>
-                  <CardContent>
-                    <Stack gap="sm">
-                      <Title order={3}>Plugin Library</Title>
-                      <Text size="sm" c="dimmed">
-                        Manage saved plugins and add new ones from the{' '}
-                        <Anchor component={Link} to="/plugins">
-                          Plugin Library
-                        </Anchor>{' '}
-                        page.
-                      </Text>
                     </Stack>
                   </CardContent>
                 </Card>
@@ -2588,6 +2278,105 @@ useEffect(() => {
                   </Card>
                 )}
               </SimpleGrid>
+
+              <Modal
+                opened={addPluginOpen}
+                onClose={closeAddPluginPanel}
+                title="Add Plugin to Project"
+                size="lg"
+                centered
+              >
+                <Stack gap="md">
+                  {addPluginError && (
+                    <Alert color="red" title="Error">
+                      {addPluginError}
+                    </Alert>
+                  )}
+
+                  {libraryLoading && <Loader size="sm" />}
+                  {libraryError && (
+                    <Stack gap="sm">
+                      <Alert color="red" title="Error">
+                        {libraryError}
+                      </Alert>
+                      <Group>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          onClick={() => void handleRefreshLibrary()}
+                          disabled={libraryLoading}
+                        >
+                          Retry
+                        </Button>
+                      </Group>
+                    </Stack>
+                  )}
+                  {!libraryLoading && !libraryError && libraryPlugins.length === 0 && (
+                    <Text size="sm" c="dimmed">
+                      No saved plugins yet. Add plugins from the Plugin Library page first.
+                    </Text>
+                  )}
+                  {!libraryLoading && !libraryError && libraryPlugins.length > 0 && (
+                    <form onSubmit={handleAddLibraryPlugin}>
+                      <Stack gap="md">
+                        <NativeSelect
+                          label="Library plugin"
+                          id="library-plugin-select"
+                          value={selectedLibraryPlugin}
+                          onChange={(event) => setSelectedLibraryPlugin(event.target.value)}
+                          required
+                          data={[
+                            { value: '', label: 'Select a plugin' },
+                            ...libraryPlugins
+                              .slice()
+                              .sort((a, b) => {
+                                const idCompare = a.id.localeCompare(b.id, undefined, { sensitivity: 'base' })
+                                if (idCompare !== 0) return idCompare
+                                return b.version.localeCompare(a.version, undefined, { numeric: true })
+                              })
+                              .map((plugin) => {
+                              const key = `${plugin.id}:${plugin.version}`
+                              const providerLabel =
+                                plugin.provider && plugin.provider !== 'custom'
+                                  ? ` (${plugin.provider})`
+                                  : ''
+                              const minVersion = plugin.minecraftVersionMin ?? plugin.source?.minecraftVersionMin
+                              const maxVersion = plugin.minecraftVersionMax ?? plugin.source?.minecraftVersionMax
+                              const versionRangeLabel =
+                                minVersion && maxVersion
+                                  ? minVersion === maxVersion
+                                    ? ` (${minVersion})`
+                                    : ` (${minVersion} - ${maxVersion})`
+                                  : ''
+                              const isAlreadyAdded = existingProjectPlugins.has(key)
+                              return {
+                                value: key,
+                                label: `${plugin.id} v${plugin.version}${versionRangeLabel}${providerLabel}${isAlreadyAdded ? ' · already added' : ''}`,
+                                disabled: isAlreadyAdded,
+                              }
+                            }),
+                          ]}
+                        />
+                        <Group justify="flex-end">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            onClick={closeAddPluginPanel}
+                          >
+                            Cancel
+                          </Button>
+                          <Button
+                            type="submit"
+                            disabled={!selectedLibraryPlugin || addPluginBusy}
+                          >
+                            {addPluginBusy ? 'Adding…' : 'Add plugin'}
+                          </Button>
+                        </Group>
+                      </Stack>
+                    </form>
+                  )}
+                </Stack>
+              </Modal>
             </Tabs.Panel>
 
             <Tabs.Panel value="configs">
