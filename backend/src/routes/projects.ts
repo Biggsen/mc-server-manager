@@ -232,7 +232,7 @@ function buildPluginConfigViews(
     views.push({
       id: mapping.definitionId,
       source: "custom",
-      label: mapping.definitionId,
+      label: mapping.label ?? mapping.definitionId,
       description: undefined,
       tags: undefined,
       defaultPath: resolvedPath,
@@ -1286,8 +1286,14 @@ router.put("/:id/plugins/:pluginId/configs", async (req: Request, res: Response)
           ? (raw as { notes: string }).notes.trim() || undefined
           : undefined;
 
+      const labelValue =
+        typeof (raw as { label?: unknown }).label === "string"
+          ? (raw as { label: string }).label.trim() || undefined
+          : undefined;
+
       const normalized: ProjectPluginConfigMapping = {
         definitionId: definitionIdValue,
+        label: labelValue,
         path: pathValue,
         requirement: requirementValue,
         notes: notesValue,

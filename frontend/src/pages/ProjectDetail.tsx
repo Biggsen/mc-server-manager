@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, memo, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { Play, FileText, MagnifyingGlass, Package as PackageIcon, Upload, PencilSimple, ArrowsClockwise, Trash, X, FloppyDisk } from '@phosphor-icons/react'
+import { Play, FileText, MagnifyingGlass, Package as PackageIcon, Upload, PencilSimple, ArrowsClockwise, Trash, X, FloppyDisk, Plus } from '@phosphor-icons/react'
 import CodeMirror from '@uiw/react-codemirror'
 import { yaml } from '@codemirror/lang-yaml'
 import { oneDark } from '@codemirror/theme-one-dark'
@@ -43,6 +43,7 @@ import { Badge, Button, Card, CardContent, CardHeader, Modal, Skeleton } from '.
 import { useToast } from '../components/ui/toast'
 import { ContentSection } from '../components/layout'
 import { useAsyncAction } from '../lib/useAsyncAction'
+import { CustomPathModal, type CustomPathModalState } from '../components/CustomPathModal'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? '/api'
 const sourceBadgeLabel: Record<'download' | 'upload', string> = {
@@ -163,6 +164,278 @@ function formatBytes(bytes: number): string {
   return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[unitIndex]}`
 }
 
+interface PluginCardProps {
+  plugin: NonNullable<ProjectSummary['plugins']>[number]
+  pluginDefinitions: PluginConfigDefinitionView[]
+  onRemove: (pluginId: string) => void
+  onEditCustomPath: (data: Omit<CustomPathModalState, 'opened'>) => void
+  onRemoveCustomPath: (data: { pluginId: string; definitionId: string; path: string }) => void
+  onAddCustomPath: (pluginId: string) => void
+}
+
+const PluginCard = memo(function PluginCard({
+  plugin,
+  pluginDefinitions,
+  onRemove,
+  onEditCustomPath,
+  onRemoveCustomPath,
+  onAddCustomPath,
+}: PluginCardProps) {
+  const supportRange = useMemo(
+    () =>
+      formatMinecraftRange(
+        plugin.minecraftVersionMin ?? plugin.source?.minecraftVersionMin,
+        plugin.minecraftVersionMax ?? plugin.source?.minecraftVersionMax,
+      ),
+    [plugin.minecraftVersionMin, plugin.source?.minecraftVersionMin, plugin.minecraftVersionMax, plugin.source?.minecraftVersionMax],
+  )
+  const sourceKind = useMemo(() => getStoredPluginSourceKind(plugin), [plugin])
+
+  // Memoize filter operations to avoid recalculating on every render
+  const libraryDefinitions = useMemo(
+    () => pluginDefinitions.filter((def) => def.source === 'library'),
+    [pluginDefinitions],
+  )
+  const customDefinitions = useMemo(
+    () => pluginDefinitions.filter((def) => def.source === 'custom'),
+    [pluginDefinitions],
+  )
+  const missingCount = useMemo(
+    () => pluginDefinitions.filter((def) => def.missing).length,
+    [pluginDefinitions],
+  )
+  const totalCount = useMemo(() => libraryDefinitions.length + customDefinitions.length, [libraryDefinitions.length, customDefinitions.length])
+
+  return (
+    <Card key={`${plugin.id}:${plugin.version}`}>
+      <CardContent>
+        <Stack gap="sm">
+          <Group justify="space-between" align="flex-start">
+            <Stack gap={4}>
+              <Group gap="xs" wrap="wrap">
+                <Text fw={600}>{plugin.id}</Text>
+                <Badge variant="outline">{sourceBadgeLabel[sourceKind]}</Badge>
+                {plugin.provider && plugin.provider !== 'custom' && (
+                  <Badge variant="accent">{plugin.provider}</Badge>
+                )}
+                <Text size="sm" c="dimmed">v{plugin.version}</Text>
+              </Group>
+              {supportRange && <Text size="sm" c="dimmed">Supports: {supportRange}</Text>}
+              {plugin.source?.projectUrl && (
+                <Anchor href={plugin.source.projectUrl} target="_blank" rel="noreferrer" size="sm">
+                  View project
+                </Anchor>
+              )}
+              {plugin.source?.downloadUrl && (
+                <Anchor href={plugin.source.downloadUrl} target="_blank" rel="noreferrer" size="sm">
+                  Download URL
+                </Anchor>
+              )}
+              {plugin.source?.uploadPath && (
+                <Text size="sm" c="dimmed">Uploaded jar: {plugin.source.uploadPath}</Text>
+              )}
+              {(plugin.cachePath ?? plugin.source?.cachePath) && (
+                <Text size="sm" c="dimmed">Cache: {plugin.cachePath ?? plugin.source?.cachePath}</Text>
+              )}
+            </Stack>
+            <Group gap="xs">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => onRemove(plugin.id)}
+                icon={<Trash size={18} weight="fill" aria-hidden="true" />}
+              >
+                Remove
+              </Button>
+            </Group>
+          </Group>
+
+          <Accordion
+            styles={{
+              item: {
+                borderBottom: 'none',
+              },
+              content: {
+                paddingBottom: 0,
+              },
+            }}
+          >
+            <Accordion.Item value={`config-paths-${plugin.id}`}>
+              <Accordion.Control>
+                <Group gap="xs" justify="space-between" style={{ flex: 1 }}>
+                  <Text size="sm" fw={500}>
+                    Config Paths
+                  </Text>
+                  <Group gap="xs">
+                    {totalCount > 0 && (
+                      <Badge variant="default" size="sm">
+                        {totalCount} path{totalCount !== 1 ? 's' : ''}
+                      </Badge>
+                    )}
+                    {missingCount > 0 && (
+                      <Badge variant="warning" size="sm">
+                        {missingCount} missing
+                      </Badge>
+                    )}
+                  </Group>
+                </Group>
+              </Accordion.Control>
+              <Accordion.Panel>
+                <Stack gap="md" mt="xs">
+                  {libraryDefinitions.length > 0 && (
+                    <Stack gap="xs">
+                      <Text size="xs" fw={600} c="dimmed" tt="uppercase">
+                        Library Paths
+                      </Text>
+                      {libraryDefinitions.map((definition) => (
+                        <Group key={definition.id} justify="space-between" align="flex-start" wrap="nowrap">
+                          <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
+                            <Group gap="xs" wrap="wrap">
+                              <Text size="sm" fw={500}>
+                                {definition.label || definition.id}
+                              </Text>
+                              <Badge
+                                variant={
+                                  definition.requirement === 'required'
+                                    ? 'danger'
+                                    : definition.requirement === 'optional'
+                                      ? 'outline'
+                                      : 'accent'
+                                }
+                                size="xs"
+                              >
+                                {definition.requirement}
+                              </Badge>
+                              {definition.uploaded ? (
+                                <Badge variant="success" size="xs">
+                                  Uploaded
+                                </Badge>
+                              ) : definition.missing ? (
+                                <Badge variant="warning" size="xs">
+                                  Missing
+                                </Badge>
+                              ) : null}
+                            </Group>
+                            <Text size="xs" c="dimmed" style={{ wordBreak: 'break-all' }}>
+                              {definition.resolvedPath}
+                            </Text>
+                            {definition.description && (
+                              <Text size="xs" c="dimmed">
+                                {definition.description}
+                              </Text>
+                            )}
+                          </Stack>
+                        </Group>
+                      ))}
+                    </Stack>
+                  )}
+
+                  {customDefinitions.length > 0 && (
+                    <Stack gap="xs">
+                      <Group justify="space-between" align="center">
+                        <Text size="xs" fw={600} c="dimmed" tt="uppercase">
+                          Custom Paths
+                        </Text>
+                      </Group>
+                      {customDefinitions.map((definition) => (
+                        <Group key={definition.id} justify="space-between" align="flex-start" wrap="nowrap">
+                          <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
+                            <Group gap="xs" wrap="wrap">
+                              <Text size="sm" fw={500}>
+                                {definition.label || definition.id}
+                              </Text>
+                              <Badge
+                                variant={
+                                  definition.requirement === 'required'
+                                    ? 'danger'
+                                    : definition.requirement === 'optional'
+                                      ? 'outline'
+                                      : 'accent'
+                                }
+                                size="xs"
+                              >
+                                {definition.requirement}
+                              </Badge>
+                              {definition.uploaded ? (
+                                <Badge variant="success" size="xs">
+                                  Uploaded
+                                </Badge>
+                              ) : definition.missing ? (
+                                <Badge variant="warning" size="xs">
+                                  Missing
+                                </Badge>
+                              ) : null}
+                            </Group>
+                            <Text size="xs" c="dimmed" style={{ wordBreak: 'break-all' }}>
+                              {definition.resolvedPath}
+                            </Text>
+                            {definition.notes && (
+                              <Text size="xs" c="dimmed">
+                                {definition.notes}
+                              </Text>
+                            )}
+                          </Stack>
+                          <Group gap="xs">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="xs"
+                              onClick={() => {
+                                onEditCustomPath({
+                                  pluginId: plugin.id,
+                                  definitionId: definition.id,
+                                  label: definition.label ?? '',
+                                  path: definition.resolvedPath,
+                                  requirement: definition.requirement,
+                                  notes: definition.notes ?? '',
+                                })
+                              }}
+                              icon={<PencilSimple size={16} weight="fill" aria-hidden="true" />}
+                            >
+                              Edit
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="xs"
+                              onClick={() => {
+                                onRemoveCustomPath({
+                                  pluginId: plugin.id,
+                                  definitionId: definition.id,
+                                  path: definition.resolvedPath,
+                                })
+                              }}
+                              icon={<Trash size={16} weight="fill" aria-hidden="true" />}
+                            >
+                              Remove
+                            </Button>
+                          </Group>
+                        </Group>
+                      ))}
+                    </Stack>
+                  )}
+
+                  <Group>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="xs"
+                      onClick={() => onAddCustomPath(plugin.id)}
+                      icon={<Plus size={16} weight="fill" aria-hidden="true" />}
+                    >
+                      Add custom config
+                    </Button>
+                  </Group>
+                </Stack>
+              </Accordion.Panel>
+            </Accordion.Item>
+          </Accordion>
+        </Stack>
+      </CardContent>
+    </Card>
+  )
+})
+
 function ProjectDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -198,7 +471,12 @@ function ProjectDetail() {
   const [configEditor, setConfigEditor] = useState<{ path: string; content: string } | null>(null)
   const [configEditorBusy, setConfigEditorBusy] = useState(false)
   const [configEditorError, setConfigEditorError] = useState<string | null>(null)
-  const [pluginConfigManager, setPluginConfigManager] = useState<PluginConfigManagerState | null>(null)
+  const [customPathModal, setCustomPathModal] = useState<CustomPathModalState | null>(null)
+  const [removeCustomPathConfirm, setRemoveCustomPathConfirm] = useState<{
+    pluginId: string
+    definitionId: string
+    path: string
+  } | null>(null)
   const [deleteRepo, setDeleteRepo] = useState(false)
   const [deleteBusy, setDeleteBusy] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
@@ -435,13 +713,8 @@ function ProjectDetail() {
         )
       }
     }
-    if (pluginConfigManager) {
-      map[pluginConfigManager.pluginId] = pluginConfigManager.drafts.map((draft) =>
-        formatOption(draft.definitionId, draft.path, draft.label || draft.definitionId || 'Custom'),
-      )
-    }
     return map
-  }, [pluginConfigManager, pluginDefinitionCache, project?.plugins])
+  }, [pluginDefinitionCache, project?.plugins])
 
   const selectedDefinitionOptions = pluginDefinitionOptions[configUploadPlugin] ?? []
   const selectedDefinition = selectedDefinitionOptions.find(
@@ -492,71 +765,6 @@ function ProjectDetail() {
       cancelled = true
     }
   }, [fetchProjectPluginConfigs, id, pluginDefinitionCache, project?.plugins])
-
-  const openPluginConfigManager = useCallback(
-    async (pluginId: string) => {
-      if (!id || !project) return
-      const target = project.plugins?.find((entry) => entry.id === pluginId)
-      if (!target) {
-        toast({
-          title: 'Plugin not found',
-          description: `Plugin ${pluginId} is not part of this project.`,
-          variant: 'danger',
-        })
-        return
-      }
-      setPluginConfigManager({
-        pluginId: target.id,
-        pluginVersion: target.version,
-        busy: true,
-        saving: false,
-        error: null,
-        drafts: [],
-        uploads: [],
-      })
-      try {
-        const data = await fetchProjectPluginConfigs(id, pluginId)
-        setPluginConfigManager({
-          pluginId: target.id,
-          pluginVersion: target.version,
-          busy: false,
-          saving: false,
-          error: null,
-          drafts: data.definitions.map((definition, index) => toPluginConfigDraft(definition, index)),
-          uploads: data.uploads,
-        })
-        setPluginDefinitionCache((prev) => ({
-          ...prev,
-          [pluginId]: data.definitions,
-        }))
-        setProject((prev) =>
-          prev
-            ? {
-                ...prev,
-                plugins: prev.plugins?.map((plugin) =>
-                  plugin.id === pluginId ? { ...plugin, configMappings: data.mappings } : plugin,
-                ),
-              }
-            : prev,
-        )
-      } catch (err) {
-        setPluginConfigManager((prev) =>
-          prev && prev.pluginId === pluginId
-            ? {
-                ...prev,
-                busy: false,
-                error: err instanceof Error ? err.message : 'Failed to load config paths.',
-              }
-            : prev,
-        )
-      }
-    },
-    [id, project, toast],
-  )
-
-  const closePluginConfigManager = useCallback(() => {
-    setPluginConfigManager(null)
-  }, [])
 
   const handleAddLibraryPlugin = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
@@ -621,130 +829,6 @@ function ProjectDetail() {
     ],
   )
 
-
-  const refreshPluginConfigManager = useCallback(async () => {
-    if (!pluginConfigManager) return
-    await openPluginConfigManager(pluginConfigManager.pluginId)
-  }, [openPluginConfigManager, pluginConfigManager])
-
-  const updatePluginConfigDraft = useCallback(
-    (key: string, changes: Partial<PluginConfigDraft>) => {
-      setPluginConfigManager((prev) =>
-        prev
-          ? {
-              ...prev,
-              drafts: prev.drafts.map((draft) =>
-                draft.key === key ? { ...draft, ...changes } : draft,
-              ),
-            }
-          : prev,
-      )
-    },
-    [],
-  )
-
-  const addCustomPluginConfigDraft = useCallback(() => {
-    setPluginConfigManager((prev) =>
-      prev
-        ? {
-            ...prev,
-            drafts: [...prev.drafts, createCustomPluginConfigDraft()],
-          }
-        : prev,
-    )
-  }, [])
-
-  const removePluginConfigDraft = useCallback((key: string) => {
-    setPluginConfigManager((prev) =>
-      prev
-        ? {
-            ...prev,
-            drafts: prev.drafts.filter((draft) => draft.key !== key),
-          }
-        : prev,
-    )
-  }, [])
-
-  const handleSavePluginConfigManager = useCallback(async () => {
-    if (!id || !pluginConfigManager) return
-    const sanitizedMappings: ProjectPluginConfigMapping[] = []
-    for (const draft of pluginConfigManager.drafts) {
-      const path = draft.path.trim()
-      if (!path) {
-        setPluginConfigManager((prev) =>
-          prev
-            ? {
-                ...prev,
-                error: 'Each config mapping must include a relative path.',
-              }
-            : prev,
-        )
-        return
-      }
-      sanitizedMappings.push({
-        definitionId: draft.definitionId,
-        path,
-        requirement: draft.requirement,
-        notes: draft.notes.trim() || undefined,
-      })
-    }
-    setPluginConfigManager((prev) =>
-      prev
-        ? {
-            ...prev,
-            saving: true,
-            error: null,
-          }
-        : prev,
-    )
-    try {
-      const response = await updateProjectPluginConfigs(id, pluginConfigManager.pluginId, {
-        mappings: sanitizedMappings,
-      })
-      setProject((prev) =>
-        prev
-          ? {
-              ...prev,
-              plugins: prev.plugins?.map((plugin) =>
-                plugin.id === pluginConfigManager.pluginId
-                  ? { ...plugin, configMappings: response.mappings }
-                  : plugin,
-              ),
-            }
-          : prev,
-      )
-      setPluginConfigManager({
-        pluginId: response.plugin.id,
-        pluginVersion: response.plugin.version,
-        busy: false,
-        saving: false,
-        error: null,
-        drafts: response.definitions.map((definition, index) => toPluginConfigDraft(definition, index)),
-        uploads: response.uploads,
-      })
-      setPluginDefinitionCache((prev) => ({
-        ...prev,
-        [response.plugin.id]: response.definitions,
-      }))
-      toast({
-        title: 'Plugin config paths updated',
-        description: `Saved ${sanitizedMappings.length} mapping${
-          sanitizedMappings.length === 1 ? '' : 's'
-        } for ${response.plugin.id}.`,
-        variant: 'success',
-      })
-    } catch (err) {
-      setPluginConfigManager((prev) =>
-        prev
-          ? {
-              ...prev,
-              saving: false,
-              error: err instanceof Error ? err.message : 'Failed to save plugin config paths.',
-            }
-          : prev,
-      )
-    }
-  }, [id, pluginConfigManager, toast, updateProjectPluginConfigs])
 
   useEffect(() => {
     if (configUploadPlugin && !pluginDefinitionOptions[configUploadPlugin]) {
@@ -1116,8 +1200,17 @@ useEffect(() => {
         if (configUploadFileInputRef.current) {
           configUploadFileInputRef.current.value = ''
         }
-        if (pluginConfigManager && configUploadPlugin && pluginConfigManager.pluginId === configUploadPlugin) {
-          void refreshPluginConfigManager()
+        if (configUploadPlugin) {
+          void fetchProjectPluginConfigs(id, configUploadPlugin)
+            .then((data) => {
+              setPluginDefinitionCache((prev) => ({
+                ...prev,
+                [configUploadPlugin]: data.definitions,
+              }))
+            })
+            .catch(() => {
+              // Ignore errors, cache will update on next load
+            })
         }
       } catch (err) {
         setConfigsError(err instanceof Error ? err.message : 'Failed to upload config file.')
@@ -1132,8 +1225,7 @@ useEffect(() => {
       configUploadPlugin,
       configFiles,
       id,
-      pluginConfigManager,
-      refreshPluginConfigManager,
+      pluginDefinitionCache,
       toast,
     ],
   )
@@ -1182,6 +1274,78 @@ useEffect(() => {
       setConfigEditorBusy(false)
     }
   }, [configEditor, id, loadConfigs])
+
+  const handleCustomPathSubmit = useCallback(
+    async (data: Omit<CustomPathModalState, 'opened'>) => {
+      if (!id) return
+      const currentMappings = project?.plugins?.find((p) => p.id === data.pluginId)?.configMappings ?? []
+      const existingIndex = data.definitionId
+        ? currentMappings.findIndex((m) => m.definitionId === data.definitionId)
+        : -1
+      const newMapping: ProjectPluginConfigMapping = {
+        definitionId: data.definitionId ?? `custom/${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
+        label: data.label.trim() || undefined,
+        path: data.path.trim(),
+        requirement: data.requirement,
+        notes: data.notes.trim() || undefined,
+      }
+      const updatedMappings =
+        existingIndex >= 0
+          ? currentMappings.map((m, i) => (i === existingIndex ? newMapping : m))
+          : [...currentMappings, newMapping]
+      const response = await updateProjectPluginConfigs(id, data.pluginId, {
+        mappings: updatedMappings,
+      })
+      setPluginDefinitionCache((prev) => ({
+        ...prev,
+        [data.pluginId]: response.definitions,
+      }))
+      setProject((prev) =>
+        prev
+          ? {
+              ...prev,
+              plugins: prev.plugins?.map((p) =>
+                p.id === data.pluginId ? { ...p, configMappings: response.mappings } : p,
+              ),
+            }
+          : prev,
+      )
+      toast({
+        title: data.definitionId ? 'Custom path updated' : 'Custom path added',
+        description: `${data.path.trim()} ${data.definitionId ? 'updated' : 'added'} successfully.`,
+        variant: 'success',
+      })
+    },
+    [id, project?.plugins, toast],
+  )
+
+  const handleEditCustomPath = useCallback(
+    (data: Omit<CustomPathModalState, 'opened'>) => {
+      setCustomPathModal({
+        opened: true,
+        ...data,
+      })
+    },
+    [],
+  )
+
+  const handleRemoveCustomPath = useCallback(
+    (data: { pluginId: string; definitionId: string; path: string }) => {
+      setRemoveCustomPathConfirm(data)
+    },
+    [],
+  )
+
+  const handleAddCustomPath = useCallback((pluginId: string) => {
+    setCustomPathModal({
+      opened: true,
+      pluginId,
+      label: '',
+      path: '',
+      requirement: 'optional',
+      notes: '',
+    })
+  }, [])
 
   const handleDeleteProject = useCallback(async () => {
     if (!id || !project) {
@@ -1917,7 +2081,7 @@ useEffect(() => {
             </Tabs.Panel>
 
             <Tabs.Panel value="plugins">
-              <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="lg" pt="lg">
+              <Stack gap="lg" pt="lg">
                 <Card>
                   <CardContent>
                     <Stack gap="md">
@@ -1928,76 +2092,24 @@ useEffect(() => {
                           variant="primary"
                           onClick={openAddPluginPanel}
                           disabled={addPluginBusy}
+                          icon={<Plus size={18} weight="fill" aria-hidden="true" />}
                         >
                           Add plugin
                         </Button>
                       </Group>
                       {project.plugins && project.plugins.length > 0 ? (
                         <Stack gap="md">
-                          {project.plugins.map((plugin) => {
-                            const supportRange = formatMinecraftRange(
-                              plugin.minecraftVersionMin ?? plugin.source?.minecraftVersionMin,
-                              plugin.minecraftVersionMax ?? plugin.source?.minecraftVersionMax,
-                            )
-                            const sourceKind = getStoredPluginSourceKind(plugin)
-                            return (
-                              <Card key={`${plugin.id}:${plugin.version}`}>
-                                <CardContent>
-                                  <Stack gap="sm">
-                                    <Group justify="space-between" align="flex-start">
-                                      <Stack gap={4}>
-                                        <Group gap="xs" wrap="wrap">
-                                          <Text fw={600}>{plugin.id}</Text>
-                                          <Badge variant="outline">{sourceBadgeLabel[sourceKind]}</Badge>
-                                          {plugin.provider && plugin.provider !== 'custom' && (
-                                            <Badge variant="accent">{plugin.provider}</Badge>
-                                          )}
-                                          <Text size="sm" c="dimmed">v{plugin.version}</Text>
-                                        </Group>
-                                        {supportRange && (
-                                          <Text size="sm" c="dimmed">Supports: {supportRange}</Text>
-                                        )}
-                                        {plugin.source?.projectUrl && (
-                                          <Anchor href={plugin.source.projectUrl} target="_blank" rel="noreferrer" size="sm">
-                                            View project
-                                          </Anchor>
-                                        )}
-                                        {plugin.source?.downloadUrl && (
-                                          <Anchor href={plugin.source.downloadUrl} target="_blank" rel="noreferrer" size="sm">
-                                            Download URL
-                                          </Anchor>
-                                        )}
-                                        {plugin.source?.uploadPath && (
-                                          <Text size="sm" c="dimmed">Uploaded jar: {plugin.source.uploadPath}</Text>
-                                        )}
-                                        {(plugin.cachePath ?? plugin.source?.cachePath) && (
-                                          <Text size="sm" c="dimmed">
-                                            Cache: {plugin.cachePath ?? plugin.source?.cachePath}
-                                          </Text>
-                                        )}
-                                      </Stack>
-                                      <Group gap="xs">
-                                        <Button
-                                          type="button"
-                                          variant="ghost"
-                                          onClick={() => handleRemovePlugin(plugin.id)}
-                                        >
-                                          Remove
-                                        </Button>
-                                        <Button
-                                          type="button"
-                                          variant="ghost"
-                                          onClick={() => void openPluginConfigManager(plugin.id)}
-                                        >
-                                          Manage config paths
-                                        </Button>
-                                      </Group>
-                                    </Group>
-                                  </Stack>
-                                </CardContent>
-                              </Card>
-                            )
-                          })}
+                          {project.plugins.map((plugin) => (
+                            <PluginCard
+                              key={`${plugin.id}:${plugin.version}`}
+                              plugin={plugin}
+                              pluginDefinitions={pluginDefinitionCache[plugin.id] ?? []}
+                              onRemove={handleRemovePlugin}
+                              onEditCustomPath={handleEditCustomPath}
+                              onRemoveCustomPath={handleRemoveCustomPath}
+                              onAddCustomPath={handleAddCustomPath}
+                            />
+                          ))}
                         </Stack>
                       ) : (
                         <Text size="sm" c="dimmed">No plugins configured yet.</Text>
@@ -2005,194 +2117,7 @@ useEffect(() => {
                     </Stack>
                   </CardContent>
                 </Card>
-
-                {pluginConfigManager && (
-                  <Card>
-                    <CardContent>
-                      <Stack gap="md">
-                        <Group justify="space-between" align="flex-start">
-                          <Stack gap={4}>
-                            <Title order={3}>
-                              Manage Config Paths · {pluginConfigManager.pluginId}{' '}
-                              <Text component="span" size="sm" c="dimmed" fw={400}>
-                                v{pluginConfigManager.pluginVersion ?? 'latest'}
-                              </Text>
-                            </Title>
-                            <Text size="sm" c="dimmed">
-                              Define per-project config path overrides and custom paths. These mappings guide where config files should be uploaded. To upload or manage files, use the Config Files tab.
-                            </Text>
-                          </Stack>
-                          <Group gap="xs">
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              onClick={() => void refreshPluginConfigManager()}
-                              disabled={pluginConfigManager.busy || pluginConfigManager.saving}
-                            >
-                              Refresh
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              onClick={closePluginConfigManager}
-                              disabled={pluginConfigManager.saving}
-                            >
-                              Close
-                            </Button>
-                          </Group>
-                        </Group>
-
-                        {pluginConfigManager.error && (
-                          <Alert color="red" title="Error">
-                            {pluginConfigManager.error}
-                          </Alert>
-                        )}
-                        {pluginConfigManager.busy && (
-                          <Group>
-                            <Loader size="sm" />
-                            <Text size="sm" c="dimmed">Loading plugin config paths…</Text>
-                          </Group>
-                        )}
-
-                        {!pluginConfigManager.busy && (
-                          <>
-                            <Stack gap="md">
-                              {pluginConfigManager.drafts.length === 0 && (
-                                <Text size="sm" c="dimmed">
-                                  No config mappings yet. Add a custom entry or define paths in the library.
-                                </Text>
-                              )}
-                              {pluginConfigManager.drafts.map((draft, index) => (
-                                <Card key={draft.key}>
-                                  <CardContent>
-                                    <Stack gap="md">
-                                      <Group justify="space-between" align="flex-start">
-                                        <Group gap="xs" wrap="wrap">
-                                          <Text fw={600}>{draft.label || draft.definitionId}</Text>
-                                          {draft.source === 'custom' && <Badge variant="accent">Custom</Badge>}
-                                          <Text size="sm" c="dimmed">#{index + 1}</Text>
-                                        </Group>
-                                        {draft.source === 'custom' && (
-                                          <Button
-                                            type="button"
-                                            variant="ghost"
-                                            onClick={() => removePluginConfigDraft(draft.key)}
-                                            disabled={pluginConfigManager.saving}
-                                          >
-                                            Remove
-                                          </Button>
-                                        )}
-                                      </Group>
-
-                                      <Grid>
-                                        <Grid.Col span={{ base: 12, md: 6 }}>
-                                          <TextInput
-                                            label="Resolved path"
-                                            id={`plugin-config-path-${draft.key}`}
-                                            value={draft.path}
-                                            onChange={(event) =>
-                                              updatePluginConfigDraft(draft.key, { path: event.target.value })
-                                            }
-                                            placeholder={draft.defaultPath || 'plugins/example/config.yml'}
-                                            disabled={pluginConfigManager.saving}
-                                          />
-                                          {draft.defaultPath && draft.defaultPath !== draft.path && (
-                                            <Text size="xs" c="dimmed" mt={4}>
-                                              Default: {draft.defaultPath}
-                                            </Text>
-                                          )}
-                                        </Grid.Col>
-                                        <Grid.Col span={{ base: 12, md: 3 }}>
-                                          <NativeSelect
-                                            label="Requirement"
-                                            id={`plugin-config-requirement-${draft.key}`}
-                                            value={draft.requirement}
-                                            onChange={(event) =>
-                                              updatePluginConfigDraft(draft.key, {
-                                                requirement: event.target.value as PluginConfigRequirement,
-                                              })
-                                            }
-                                            disabled={pluginConfigManager.saving}
-                                            data={[
-                                              { value: 'required', label: 'Required' },
-                                              { value: 'optional', label: 'Optional' },
-                                              { value: 'generated', label: 'Generated' },
-                                            ]}
-                                          />
-                                        </Grid.Col>
-                                        <Grid.Col span={{ base: 12, md: 3 }}>
-                                          <TextInput
-                                            label="Notes"
-                                            id={`plugin-config-notes-${draft.key}`}
-                                            value={draft.notes}
-                                            onChange={(event) =>
-                                              updatePluginConfigDraft(draft.key, { notes: event.target.value })
-                                            }
-                                            placeholder="Optional guidance"
-                                            disabled={pluginConfigManager.saving}
-                                          />
-                                        </Grid.Col>
-                                      </Grid>
-
-                                      {draft.uploaded ? (
-                                        <Text size="sm" c="dimmed">
-                                          Uploaded {formatBytes(draft.uploaded.size)} ·{' '}
-                                          {new Date(draft.uploaded.modifiedAt).toLocaleString()}
-                                        </Text>
-                                      ) : draft.missing ? (
-                                        <Text size="sm" c="dimmed">Not uploaded yet</Text>
-                                      ) : null}
-                                    </Stack>
-                                  </CardContent>
-                                </Card>
-                              ))}
-                            </Stack>
-
-                            <Group mt="md">
-                              <Button
-                                type="button"
-                                variant="primary"
-                                disabled={pluginConfigManager.saving}
-                                onClick={() => void handleSavePluginConfigManager()}
-                              >
-                                {pluginConfigManager.saving ? 'Saving…' : 'Save mappings'}
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                onClick={addCustomPluginConfigDraft}
-                                disabled={pluginConfigManager.saving}
-                              >
-                                Add custom config
-                              </Button>
-                            </Group>
-
-                            {pluginConfigManager.uploads.length > 0 && (
-                              <Stack gap="sm" mt="md">
-                                <Title order={4}>Other uploaded files</Title>
-                                <Stack gap="xs">
-                                  {pluginConfigManager.uploads.map((upload) => (
-                                    <Card key={upload.path}>
-                                      <CardContent>
-                                        <Stack gap={4}>
-                                          <Text fw={600}>{upload.path}</Text>
-                                          <Text size="sm" c="dimmed">
-                                            {formatBytes(upload.size)} · Updated {new Date(upload.modifiedAt).toLocaleString()}
-                                          </Text>
-                                        </Stack>
-                                      </CardContent>
-                                    </Card>
-                                  ))}
-                                </Stack>
-                              </Stack>
-                            )}
-                          </>
-                        )}
-                      </Stack>
-                    </CardContent>
-                  </Card>
-                )}
-              </SimpleGrid>
+              </Stack>
 
               <Modal
                 opened={addPluginOpen}
@@ -2385,8 +2310,17 @@ useEffect(() => {
                                         try {
                                           const next = await deleteProjectConfigFile(id, file.path)
                                           setConfigFiles(next)
-                                          if (pluginConfigManager) {
-                                            void refreshPluginConfigManager()
+                                          if (file.pluginId) {
+                                            void fetchProjectPluginConfigs(id, file.pluginId)
+                                              .then((data) => {
+                                                setPluginDefinitionCache((prev) => ({
+                                                  ...prev,
+                                                  [file.pluginId!]: data.definitions,
+                                                }))
+                                              })
+                                              .catch(() => {
+                                                // Ignore errors, cache will update on next load
+                                              })
                                           }
                                           toast({
                                             title: 'Config deleted',
@@ -2645,6 +2579,88 @@ useEffect(() => {
             </Button>
           </Group>
         </Stack>
+      </Modal>
+
+      <CustomPathModal
+        modal={customPathModal}
+        onClose={() => setCustomPathModal(null)}
+        onSubmit={handleCustomPathSubmit}
+      />
+
+      <Modal
+        opened={removeCustomPathConfirm !== null}
+        onClose={() => setRemoveCustomPathConfirm(null)}
+        title="Remove Custom Config Path"
+        size="sm"
+        centered
+      >
+        {removeCustomPathConfirm && (
+          <Stack gap="md">
+            <Text>
+              Remove custom config path <Code>{removeCustomPathConfirm.path}</Code>?
+            </Text>
+            <Text size="sm" c="dimmed">
+              This action cannot be undone.
+            </Text>
+            <Group justify="flex-end">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setRemoveCustomPathConfirm(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="danger"
+                onClick={async () => {
+                  if (!id || !removeCustomPathConfirm) return
+                  try {
+                    const plugin = project?.plugins?.find((p) => p.id === removeCustomPathConfirm.pluginId)
+                    if (!plugin) return
+                    const currentMappings = plugin.configMappings ?? []
+                    const updatedMappings = currentMappings.filter(
+                      (m) => m.definitionId !== removeCustomPathConfirm.definitionId,
+                    )
+                    const response = await updateProjectPluginConfigs(id, removeCustomPathConfirm.pluginId, {
+                      mappings: updatedMappings,
+                    })
+                    setPluginDefinitionCache((prev) => ({
+                      ...prev,
+                      [removeCustomPathConfirm.pluginId]: response.definitions,
+                    }))
+                    setProject((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            plugins: prev.plugins?.map((p) =>
+                              p.id === removeCustomPathConfirm.pluginId
+                                ? { ...p, configMappings: response.mappings }
+                                : p,
+                            ),
+                          }
+                        : prev,
+                    )
+                    toast({
+                      title: 'Custom path removed',
+                      description: `${removeCustomPathConfirm.path} removed.`,
+                      variant: 'success',
+                    })
+                    setRemoveCustomPathConfirm(null)
+                  } catch (err) {
+                    toast({
+                      title: 'Remove failed',
+                      description: err instanceof Error ? err.message : 'Failed to remove custom path.',
+                      variant: 'danger',
+                    })
+                  }
+                }}
+              >
+                Remove
+              </Button>
+            </Group>
+          </Stack>
+        )}
       </Modal>
   </>
   )

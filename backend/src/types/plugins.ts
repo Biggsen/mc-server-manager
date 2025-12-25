@@ -29,6 +29,7 @@ export interface PluginConfigDefinition {
 
 export interface ProjectPluginConfigMapping {
   definitionId: string;
+  label?: string;
   path?: string;
   requirement?: PluginConfigRequirement;
   notes?: string;
