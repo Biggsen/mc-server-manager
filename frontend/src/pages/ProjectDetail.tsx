@@ -746,17 +746,6 @@ function ProjectDetail() {
     }
   }, [id, pluginConfigManager, toast, updateProjectPluginConfigs])
 
-  const prepareConfigUpload = useCallback(
-    (pluginId: string, definitionId: string, path: string) => {
-      setConfigUploadPlugin(pluginId)
-      setConfigUploadDefinition(definitionId)
-      setConfigUploadPath(path ?? '')
-      setConfigUploadPathDirty(false)
-      setConfigUploadModalOpened(true)
-    },
-    [],
-  )
-
   useEffect(() => {
     if (configUploadPlugin && !pluginDefinitionOptions[configUploadPlugin]) {
       setConfigUploadPlugin('')
@@ -2030,8 +2019,7 @@ useEffect(() => {
                               </Text>
                             </Title>
                             <Text size="sm" c="dimmed">
-                              Define per-project config file paths and requirements. These mappings drive uploads,
-                              manifests, and status indicators.
+                              Define per-project config path overrides and custom paths. These mappings guide where config files should be uploaded. To upload or manage files, use the Config Files tab.
                             </Text>
                           </Stack>
                           <Group gap="xs">
@@ -2084,70 +2072,16 @@ useEffect(() => {
                                           {draft.source === 'custom' && <Badge variant="accent">Custom</Badge>}
                                           <Text size="sm" c="dimmed">#{index + 1}</Text>
                                         </Group>
-                                        <Group gap="xs">
+                                        {draft.source === 'custom' && (
                                           <Button
                                             type="button"
                                             variant="ghost"
-                                            onClick={() =>
-                                              prepareConfigUpload(
-                                                pluginConfigManager.pluginId,
-                                                draft.definitionId,
-                                                draft.path || draft.defaultPath,
-                                              )
-                                            }
+                                            onClick={() => removePluginConfigDraft(draft.key)}
+                                            disabled={pluginConfigManager.saving}
                                           >
-                                            Upload file
+                                            Remove
                                           </Button>
-                                          {draft.source === 'custom' && (
-                                            <Button
-                                              type="button"
-                                              variant="ghost"
-                                              onClick={() => removePluginConfigDraft(draft.key)}
-                                              disabled={pluginConfigManager.saving}
-                                            >
-                                              Remove
-                                            </Button>
-                                          )}
-                                          {draft.uploaded && (
-                                            <Button
-                                              type="button"
-                                              variant="ghost"
-                                              onClick={async () => {
-                                                if (!id) return
-                                                if (
-                                                  !window.confirm(
-                                                    `Delete config file ${draft.uploaded?.path ?? draft.path}? This cannot be undone.`,
-                                                  )
-                                                ) {
-                                                  return
-                                                }
-                                                try {
-                                                  const next = await deleteProjectConfigFile(
-                                                    id,
-                                                    draft.uploaded?.path ?? draft.path,
-                                                  )
-                                                  setConfigFiles(next)
-                                                  void refreshPluginConfigManager()
-                                                  toast({
-                                                    title: 'Config deleted',
-                                                    description: `${draft.uploaded?.path ?? draft.path} removed from project.`,
-                                                    variant: 'warning',
-                                                  })
-                                                } catch (err) {
-                                                  toast({
-                                                    title: 'Delete failed',
-                                                    description:
-                                                      err instanceof Error ? err.message : 'Failed to delete config file.',
-                                                    variant: 'danger',
-                                                  })
-                                                }
-                                              }}
-                                              disabled={pluginConfigManager.saving}
-                                            >
-                                              Delete file
-                                            </Button>
-                                          )}
-                                        </Group>
+                                        )}
                                       </Group>
 
                                       <Grid>
@@ -2201,29 +2135,10 @@ useEffect(() => {
                                       </Grid>
 
                                       {draft.uploaded ? (
-                                        <Group justify="space-between" align="center">
-                                          <Text size="sm" c="dimmed">
-                                            Uploaded {formatBytes(draft.uploaded.size)} ·{' '}
-                                            {new Date(draft.uploaded.modifiedAt).toLocaleString()}
-                                          </Text>
-                                          <Button
-                                            type="button"
-                                            variant="ghost"
-                                            size="xs"
-                                            onClick={() =>
-                                              handleReplaceConfig({
-                                                path: draft.uploaded!.path,
-                                                size: draft.uploaded!.size,
-                                                modifiedAt: draft.uploaded!.modifiedAt,
-                                                sha256: draft.uploaded!.sha256,
-                                                pluginId: pluginConfigManager.pluginId,
-                                                definitionId: draft.definitionId,
-                                              })
-                                            }
-                                          >
-                                            Replace
-                                          </Button>
-                                        </Group>
+                                        <Text size="sm" c="dimmed">
+                                          Uploaded {formatBytes(draft.uploaded.size)} ·{' '}
+                                          {new Date(draft.uploaded.modifiedAt).toLocaleString()}
+                                        </Text>
                                       ) : draft.missing ? (
                                         <Text size="sm" c="dimmed">Not uploaded yet</Text>
                                       ) : null}
