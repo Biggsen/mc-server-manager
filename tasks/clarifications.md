@@ -1,62 +1,6 @@
 # **Clarifications – MC Server Manager**
 
-## **1. Overlays: Merge / Override Rules**
-
-**Order of application:**
-
-1. `copyTrees`
-2. rendered templates
-3. base profile `overrides`
-4. overlay `overrides`
-
-**Rules:**
-
-* YAML/JSON → deep merge by key
-* Arrays → full replace unless `mergePolicy.arrays` is set to `append` or `uniqueAppend`
-* `.properties` files → key-by-key replacement
-* Paths use `:` to address keys
-
-  * Example: `server.properties:max-players`
-  * Example: `paper-global.yml:chunk-system.target-tick-distance`
-
-**Example**
-
-```yaml
-# profiles/base.yml
-configs:
-  files:
-    - template: server.properties.hbs
-      output: server.properties
-      data:
-        motd: "Charidh Dev"
-        maxPlayers: 20
-overrides:
-  - path: "server.properties:view-distance"
-    value: 16
-
-# overlays/live.yml
-overrides:
-  - path: "server.properties:max-players"
-    value: 60
-  - path: "paper-global.yml:chunk-system.target-tick-distance"
-    value: 6
-```
-
-**Result**
-
-* `max-players` = 60 (overlay wins)
-* `view-distance` = 16 (base kept)
-
-**Optional array policy**
-
-```yaml
-mergePolicy:
-  arrays: "replace"   # replace | append | uniqueAppend
-```
-
----
-
-## **2. Plugin Registry: Shape & Versioning**
+## **1. Plugin Registry: Shape & Versioning** ✅ Implemented
 
 **File:** `plugins/registry.yml`
 
@@ -86,71 +30,75 @@ plugins:
         resourceId: 17599
 ```
 
-**Pin versions in profile**
+**Pin versions in profile** ✅ Implemented
+
+Only exact versions are supported (no semver ranges). Specify the exact version string as provided by the plugin source.
 
 ```yaml
 plugins:
   - id: worldguard
     version: "7.0.10"
   - id: placeholderapi
-    version: "^2.11.6"
-```
-
-**Generated lockfile (`plugins/lock.yml`):**
-
-```yaml
-lockSchema: 1
-resolved:
-  worldguard:
-    version: "7.0.10"
-    url: "https://..."
-    sha256: "..."
-  placeholderapi:
     version: "2.11.6"
-    url: "https://..."
-    sha256: "..."
 ```
+
+**Note:** Plugin lockfile generation is planned as a future enhancement (see `tasks/enhancements/plugin-lockfile.md`).
 
 ---
 
-## **3. GitHub Quotas & Fallbacks**
+## **2. GitHub Quotas & Fallbacks** ✅ Partially Implemented
 
 **Normal usage:** minimal API calls — unlikely to hit limits.
 
-**Fallbacks:**
+**Implemented fallbacks:**
 
-* **Local-first mode:** keep working offline; queue commits for later push.
-* **Retry with backoff:** handle transient rate limits or 5xx errors.
-* **Manual export:** always allow “Download Project ZIP.”
-* **Deferred repo creation:** create locally first; connect to GitHub later.
+* ✅ **Retry with backoff:** handle transient rate limits or 5xx errors (via Octokit throttling plugin).
+* ✅ **Manual export:** always allow "Download Project ZIP."
+* ✅ **Deferred repo creation:** create locally first; connect to GitHub later.
 
 **Failure handling:**
 
-* Repo creation fail → keep local; show error; allow retry.
-* Commit fail → write to `pending-commits/` queue for later push.
-* Push conflict → auto-fetch & rebase or create fallback PR branch.
+* ✅ Repo creation fail → keep local; show error; allow retry.
+* ⚠️ Commit fail → build may fail or commit is lost (pending commits queue is planned as enhancement).
+
+**Planned enhancements:**
+
+* Local-first mode with pending commits queue (see `tasks/enhancements/github-pending-commits.md`).
+* Auto-fetch & rebase on push conflicts (see `tasks/enhancements/github-conflict-resolution.md`).
 
 ---
 
-## **4. Docker Support Scope**
+## **3. Docker Support Scope** ✅ Implemented
 
-**MVP setup:**
+**Implementation:**
 
-* Single Docker daemon on the manager host.
-* Each project runs in an isolated container (`<project>-run`).
-* Volumes map build ZIP → `/srv/server/` inside container.
-* No Docker install needed for users if the manager is hosted centrally.
+* ✅ Uses the `itzg/minecraft-server:latest` Docker image, which automatically handles server setup and execution.
+* ✅ Single Docker daemon on the manager host.
+* ✅ Each project runs in an isolated container (named `<project>-<runId>`).
+* ✅ Build artifact (ZIP) is extracted to a workspace directory, which is mounted to `/data` inside the container.
+* ✅ The image downloads and runs the server JAR automatically based on environment variables:
+  * `TYPE`: Server type (e.g., `PAPER`, `PURPUR`)
+  * `VERSION`: Minecraft version (e.g., `1.21.1`)
+  * `PAPERBUILD`: Paper build number (if specified, e.g., `54`)
+  * `EULA=TRUE`: Accepts Minecraft EULA
+  * `USE_AIKAR_FLAGS=true`: Uses optimized JVM flags
+  * `MEMORY=4G`: Allocated memory
+* ✅ Port mapping: Host port (auto-selected) → Container port 25565.
+* ✅ Container runs with `--rm` flag (automatically removed on exit).
 
 **Desktop mode:**
 
-* If manager runs locally, uses user’s Docker Desktop.
+* ✅ If manager runs locally, uses user's Docker Desktop.
+* ✅ Falls back to simulation mode if Docker is not found on PATH.
 
-**Runtime base image:**
-`eclipse-temurin:17-jre` + Paper JAR (mounted).
+**Workspace persistence:**
+
+* ✅ Workspace directory persists between runs for the same project.
+* ✅ Files are synced from the latest build artifact, preserving world data and config edits.
 
 ---
 
-## **5. Manifest Requirements & Checksums**
+## **4. Manifest Requirements & Checksums** ✅ Implemented
 
 **File:** `dist/manifest.json`
 
@@ -182,47 +130,23 @@ resolved:
 }
 ```
 
-**Checksum algorithm:**
+**Checksum algorithm:** ✅ Implemented
 
 * `SHA-256` for:
 
-  * Plugin JARs
-  * Config files
-  * Datapack folders (deterministic folder hash)
-  * Final ZIP artifact
+  * ✅ Plugin JARs
+  * ✅ Config files
+  * ✅ Datapack folders (deterministic folder hash)
+  * ✅ Final ZIP artifact
 
 **Determinism:**
 
-* Normalize to UTF-8 + LF before hashing text configs.
-* Sort file paths when hashing folders.
-* Zip with fixed timestamps to ensure consistent hashes.
+* ✅ Zip with fixed timestamps to ensure consistent hashes.
 
----
+**Planned enhancements:**
 
-## **6. Overlay Example**
-
-```yaml
-# overlays/dev.yml
-configs:
-  files:
-    - template: server.properties.hbs
-      output: server.properties
-      data:
-        motd: "[DEV] Charidh"
-        maxPlayers: 10
-overrides:
-  - path: "server.properties:enforce-secure-profile"
-    value: "false"
-
-# overlays/live.yml
-overrides:
-  - path: "server.properties:max-players"
-    value: 60
-  - path: "server.properties:online-mode"
-    value: "true"
-mergePolicy:
-  arrays: "replace"
-```
+* UTF-8 + LF normalization before hashing text configs (see `tasks/enhancements/deterministic-config-hashing.md`).
+* Sort file paths when hashing folders (see `tasks/enhancements/deterministic-folder-hashing.md`).
 
 ---
 
