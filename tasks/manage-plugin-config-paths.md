@@ -1,5 +1,20 @@
 # Manage Plugin Config Paths — Design
 
+**Status:** ✅ Implemented
+
+## Implementation Status
+
+All features described in this spec have been implemented. The implementation follows the design with one UX variation:
+
+- **Plugin Library**: Fully implemented as specified — "Manage config paths" button opens a modal with full CRUD for config definitions.
+- **Project Detail — Plugins Tab**: Implemented with an accordion-based UI within plugin cards instead of a dedicated side panel. The accordion shows:
+  - Library definitions with status badges (Missing/Uploaded/Generated)
+  - Custom path definitions with edit/remove actions
+  - "Add custom config" functionality
+  - All functionality from the spec is available, just presented in a more compact accordion format
+- **Config Files Tab**: Fully implemented — plugin selector, definition selector with path pre-filling, and config grouping by plugin.
+- **Backend**: All API endpoints, data models, validation, scanner integration, and config upload matching are fully implemented.
+
 ## Context
 
 Uploading plugin configuration files currently depends on ad-hoc relative paths.
