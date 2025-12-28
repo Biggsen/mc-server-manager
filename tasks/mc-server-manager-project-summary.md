@@ -9,7 +9,7 @@
   "status": "active",
   "domain": "minecraft",
   "type": "tool",
-  "lastUpdated": "2025-11-14",
+  "lastUpdated": "2025-12-28",
   "links": {
     "prod": null,
     "staging": null
@@ -56,14 +56,16 @@ You don't "run" a server first — you **define** it. You configure everything t
 - `frontend/` – React + Vite TypeScript UI
 - `backend/` – Express-based API with TypeScript build pipeline
 - `templates/server/` – Seed content for new server project repos
-- `docs/` – Additional design notes
-- `spec/` – Product & implementation specification
+- `tasks/` – Specifications, enhancements, and completed task documentation
 
 ---
 
 ## Current Focus
 
-Currently focused on **Local Run Improvements** and **Plugin Config Path Management**. These are high-priority enhancements that will improve the developer experience when testing servers locally and managing plugin configurations.
+Currently focused on **MVP gap features** to complete the core specification:
+- **World Setup UI** - Upload/generate worlds through UI (high priority MVP gap)
+- **Visual Configuration Forms** - Ongoing form-based editing for server configs (high priority MVP gap)
+- **Diff & History UI** - View commit history and build diffs (medium priority MVP gap)
 
 ---
 
@@ -73,11 +75,13 @@ Currently focused on **Local Run Improvements** and **Plugin Config Path Managem
 - [x] Plugin Library - Upload and manage plugin JARs, version tracking, plugin registry with caching system, plugin metadata storage
 - [x] Asset Management - Upload configuration files, datapacks, and world files with file organization and tracking
 - [x] Build System - Generate server packages (ZIP + manifest), plugin version resolution, plugin JAR downloading and caching, build queue management, artifact storage and retrieval
-- [x] Local Runs - Docker-based server execution, real-time log streaming via Server-Sent Events (SSE), run history tracking, run status management (running, succeeded, failed, stopped)
+- [x] Local Runs - Docker-based server execution, real-time log streaming via Server-Sent Events (SSE), run history tracking, run status management (running, succeeded, failed, stopped), persistent project workspaces, interactive console access
 - [x] Deployments - Deploy to local folders and remote hosts via SFTP, deployment target management, build-to-deployment workflow
 - [x] UI/UX System - Modern, cohesive interface with design tokens, component system (Button, Card, Badge, Tabs, Table, Toast, Skeleton), layout primitives (AppShell, MainCanvas, ContentSection), async action handling with loading states, toast notifications, responsive design (1280px+ desktop, tablet support)
-- [x] UI/UX Overhaul - Complete redesign per `spec/completed/ui-ux-overhaul.md`
+- [x] UI/UX Overhaul - Complete redesign per `tasks/completed/ui-ux-overhaul.md`
 - [x] Design Token System - Comprehensive design system with component library
+- [x] Local Run Improvements - Persistent project workspaces, interactive console access, workspace reset capabilities (see `tasks/completed/local-run-improvements.md`)
+- [x] Plugin Config Path Management - Plugin library config definitions, project-level config mappings, guided config upload flows (see `tasks/completed/manage-plugin-config-paths.md`)
 
 ### Detailed Completed Features
 
@@ -101,10 +105,13 @@ Currently focused on **Local Run Improvements** and **Plugin Config Path Managem
 - Artifact storage and retrieval
 
 #### Local Runs
-- Docker container integration
+- Docker container integration (`itzg/minecraft-server` image)
 - Real-time log streaming via SSE
 - Run history tracking
 - Status management (running, succeeded, failed, stopped)
+- Persistent project workspaces (preserves world data between runs)
+- Interactive console access (command sending via stdin)
+- Workspace reset capabilities
 
 #### UI Pages
 - **Dashboard**: Project overview, activity feed, quick actions
@@ -119,148 +126,102 @@ Currently focused on **Local Run Improvements** and **Plugin Config Path Managem
 
 ## Features (In Progress)
 
-- [ ] Interactive Console Access - Basic console command sending exists but needs enhancement for full interactivity
-- [ ] Persistent Project Workspaces - Runs currently use temporary workspaces, need project-scoped persistence
-- [ ] Enhanced Config Management - Upload works, but lacks plugin association and guided flows
+- [ ] World Setup UI - Upload existing world ZIPs or generate new worlds through UI (MVP gap)
+- [ ] Visual Configuration Forms - Ongoing form-based editing for `server.properties` and `paper-global.yml` in Project Detail page (MVP gap)
+- [ ] Diff & History UI - View GitHub commit history and build diffs in UI (MVP gap)
 
 ### Detailed In-Progress Features
 
-#### Interactive Console Access
-- **Current status**: Basic console command sending implemented
-- **Remaining work**: Full interactivity with command channel, real-time response streaming, enhanced SSE/WS log streaming
-- **Estimated completion**: Part of Local Run Improvements enhancement
+#### World Setup UI
+- **Status**: MVP gap - listed as step 2 in project creation flow
+- **Current state**: World configuration exists in profiles, but no UI for upload/generation
+- **Required work**: Upload interface, world generation form, world management UI
+- **See**: `tasks/enhancements/world-setup-ui.md`
 
-#### Persistent Project Workspaces
-- **Current status**: Runs extract build artifacts into temporary workspaces (`data/runs/workspaces/<runId>`)
-- **Remaining work**: Implement project-scoped working directories, preserve world data and config edits between runs
-- **Estimated completion**: Part of Local Run Improvements enhancement
+#### Visual Configuration Forms
+- **Status**: MVP gap - listed as main feature and step 4 in project creation flow
+- **Current state**: One-time profile generation exists via `GenerateProfile` page
+- **Required work**: Ongoing form-based editing in Project Detail page, real-time preview, profile integration
+- **See**: `tasks/enhancements/visual-config-forms.md`
 
-#### Enhanced Config Management
-- **Current status**: Config file uploads work but depend on ad-hoc relative paths
-- **Remaining work**: Plugin association, config path definitions, guided upload flows
-- **Estimated completion**: Part of Plugin Config Path Management enhancement
+#### Diff & History UI
+- **Status**: MVP gap - listed as main feature in spec
+- **Current state**: Builds commit to GitHub, but no UI to view history or diffs
+- **Required work**: Commit history view, build comparison, manifest diff display, file diff view
+- **See**: `tasks/enhancements/diff-history-ui.md`
 
 ---
 
 ## Enhancements
 
-- [ ] Local Run Improvements - Persistent project workspaces, interactive console access, ergonomics and safety improvements
-- [ ] Plugin Config Path Management - Plugin library extensions, project-level config mappings, API endpoints, UI enhancements, backend integration
+### High Priority Enhancements (MVP Gaps)
 
-### High Priority Enhancements
+- [ ] **World Setup UI** - Upload existing world ZIPs or generate new worlds through UI
+  - **Priority**: High (MVP gap)
+  - **Status**: Planned
+  - **See**: `tasks/enhancements/world-setup-ui.md`
 
-#### Local Run Improvements
-**Source**: `spec/local-run-improvements.md`
+- [ ] **Visual Configuration Forms** - Ongoing form-based editing for `server.properties` and `paper-global.yml`
+  - **Priority**: High (MVP gap)
+  - **Status**: Planned
+  - **See**: `tasks/enhancements/visual-config-forms.md`
 
-**Current State**: 
-- Runs extract build artifacts into temporary workspaces (`data/runs/workspaces/<runId>`)
-- Each run creates a fresh workspace, losing all world progress and config edits
-- Docker container runs detached with stdout/stderr tailing only
-- Basic console command sending exists but needs enhancement
-
-**Required Enhancements**:
-- **Persistent Project Workspace**
-  - Reuse project-scoped working directory (`data/runs/workspaces/<projectId>`) across runs
-  - On first run, populate from latest build artifact
-  - Subsequent runs reuse existing files, only updating changed files
-  - Preserve world data, plugin uploads, and edited config files between runs
-  - Provide UI/API action to reset workspace to latest build artifact
-
-- **Interactive Console Access**
-  - Maintain container running in background with command channel
-  - Support sending console commands from UI (e.g., `/op`, `/reload`, `/stop`)
-  - Stream console output back to UI in near real-time
-  - Extend existing SSE/WS log streaming to include command responses
-
-- **Ergonomics & Safety**
-  - Clearly communicate workspace location for easy backup
-  - Handle concurrent run requests (block new runs if one active, or reuse running container)
-  - Provide UI indicators when workspace has un-synced changes
-  - Allow manual stop/reset commands to terminate container and optionally delete workspace
-
-#### Plugin Config Path Management
-**Source**: `spec/manage-plugin-config-paths.md`
-
-**Current State**: 
-- Config file uploads depend on ad-hoc relative paths
-- Cannot tell which configs belong to which plugin
-- Cannot detect missing required configs
-- No guided flow for config uploads
-
-**Required Enhancements**:
-- **Plugin Library Extensions**
-  - Extend `StoredPluginRecord` with optional `configDefinitions` array
-  - Define canonical config paths per plugin (required/optional/generated)
-  - Add labels, descriptions, and tags for config definitions
-
-- **Project-Level Config Mappings**
-  - Extend `ProjectPlugin` with optional `configMappings`
-  - Allow project-specific path overrides
-  - Support requirement overrides and notes
-
-- **API Endpoints**
-  - `GET /projects/:id/plugins/:pluginId/configs` - return definitions with status
-  - `PUT /projects/:id/plugins/:pluginId/configs` - update config mappings
-  - `PUT /plugins/library/:id/:version/configs` - update plugin config definitions
-
-- **UI Enhancements**
-  - "Manage config paths" modal in Plugin Library
-  - "Manage config paths" action per plugin in Project Detail
-  - Surface missing configs with upload links
-  - Group configs by plugin in Config Files tab
-  - Pre-fill paths when uploading configs based on definitions
-
-- **Backend Integration**
-  - Update `scanProjectAssets` to associate configs with definitions
-  - Match uploaded configs to definitions by path
-  - Persist `pluginId` and `definitionId` on stored config entries
+- [ ] **Diff & History UI** - View GitHub commit history and build diffs
+  - **Priority**: Medium (MVP gap)
+  - **Status**: Planned
+  - **See**: `tasks/enhancements/diff-history-ui.md`
 
 ### Medium Priority Enhancements
 
-- [ ] Visual Configuration Forms - Form-based editing for `server.properties` and `paper-global.yml`, MOTD, player limits, view/simulation distance configuration, settings validation and preview
-- [ ] Overlays System - Environment variations (dev/live) without duplicating config files, overlay management UI, overlay application during builds (templates exist but UI integration needed)
-- [ ] World Generation - UI for generating new worlds, world name, seed (text or numeric), world type configuration, structures on/off toggle, world generation integration with build system
-- [ ] Enhanced GitHub Integration - View commit history in UI, diff viewing between builds via GitHub commits, manifest diff comparison, enhanced commit messages and metadata (basic integration exists)
+- [ ] **Overlays System** - Complete path-based override system for environment variations (dev/live)
+  - **Status**: Partially implemented (files exist, arrays merge, but path-based overrides pending)
+  - **See**: `tasks/enhancements/overlays-spec.md`
+
+- [ ] **GitHub Pending Commits Queue** - Local queue system for failed GitHub commits with automatic retry
+  - **Status**: Planned
+  - **See**: `tasks/enhancements/github-pending-commits.md`
 
 ---
 
 ## Outstanding Tasks
 
-### High Priority
+### High Priority (MVP Gaps)
 
-- [ ] Local Run Improvements - Implement persistent project workspaces and interactive console access
-- [ ] Plugin Config Path Management - Add plugin config path definitions and management UI
+- [ ] World Setup UI - Upload/generate worlds through UI
+- [ ] Visual Configuration Forms - Ongoing form-based editing for server configs
 
 ### Medium Priority
 
-- [ ] Visual Configuration Forms - Form-based editing for server configuration files
-- [ ] Overlays System - UI integration for environment variations
-- [ ] World Generation - UI for generating new worlds
-- [ ] Enhanced GitHub Integration - Commit history and diff viewing in UI
+- [ ] Diff & History UI - View commit history and build diffs
+- [ ] Overlays System - Complete path-based override implementation
+- [ ] GitHub Pending Commits Queue - Local queue with automatic retry
 
 ### Low Priority / Future Extensions
 
-- [ ] Plugin Registry Auto-Update - Automatic checking for plugin updates, update notifications, one-click update workflow
+- [ ] Plugin Lockfile Generation - Record exact resolved plugin versions and checksums
+- [ ] Deterministic Config/Folder Hashing - Normalize configs and sort paths for consistent hashes
+- [ ] GitHub Conflict Resolution - Auto-handle push conflicts with fetch/rebase
+- [ ] Plugin Registry Auto-Update - Automatic checking for plugin updates, update notifications
 - [ ] Additional Server Types - Fabric loader support, Forge loader support (currently supports Paper only)
-- [ ] Webhooks & Notifications - Webhooks for "build succeeded" notifications, integration with external services, email/Slack notifications
-- [ ] Shared Presets - Pre-configured server templates (e.g., "Exploration Server", "Creative Hub"), preset library, one-click preset application
-- [ ] Team Collaboration - Multi-user support, role-based access control, team project sharing, collaboration features
+- [ ] Webhooks & Notifications - Webhooks for "build succeeded" notifications, integration with external services
+- [ ] Shared Presets - Pre-configured server templates (e.g., "Exploration Server", "Creative Hub")
+- [ ] Team Collaboration - Multi-user support, role-based access control, team project sharing
 
 ---
 
 ## Project Status
 
 **Overall Status**: Active Development  
-**Completion**: ~75%  
-**Last Major Update**: November 2025
+**Completion**: ~85% (MVP core complete, 3 MVP gaps remaining)  
+**Last Major Update**: December 2025
 
 ### Metrics
 
-- **Completed Features**: 8 major feature areas
-- **In Progress Features**: 3 features
-- **High Priority Enhancements**: 2
-- **Medium Priority Enhancements**: 4
-- **Future Extensions**: 5
+- **Completed Features**: 10 major feature areas (including Local Run Improvements and Plugin Config Path Management)
+- **In Progress Features**: 3 MVP gap features
+- **High Priority Enhancements (MVP Gaps)**: 3
+- **Medium Priority Enhancements**: 2
+- **Low Priority / Future Extensions**: 8
 
 ---
 
@@ -268,16 +229,14 @@ Currently focused on **Local Run Improvements** and **Plugin Config Path Managem
 
 ### Immediate (Next 1-2 weeks)
 
-1. Implement persistent project workspaces for local runs
-2. Add plugin config path definitions and management UI
-3. Enhance console interactivity and command support
+1. World Setup UI - Implement upload and generation interfaces
+2. Visual Configuration Forms - Add ongoing form-based editing to Project Detail page
 
 ### Short-term (Next 1-3 months)
 
-1. Visual configuration forms for server.properties and paper-global.yml
-2. Overlays system UI integration
-3. World generation UI
-4. Enhanced GitHub integration (commit history and diff viewing)
+1. Diff & History UI - Commit history and build diff viewing
+2. Overlays System - Complete path-based override implementation
+3. GitHub Pending Commits Queue - Local queue with automatic retry
 
 ### Long-term (3+ months)
 
@@ -318,10 +277,12 @@ Currently focused on **Local Run Improvements** and **Plugin Config Path Managem
 - `backend/data/deployments.json` - Deployment targets
 
 #### Specifications
-- `spec/MC_Server_Manager_Spec.md` - Main product specification
-- `spec/local-run-improvements.md` - Local run enhancement plan
-- `spec/manage-plugin-config-paths.md` - Config path management design
-- `spec/completed/ui-ux-overhaul.md` - Completed UI overhaul documentation
+- `tasks/completed/MC_Server_Manager_Spec.md` - Main product specification (v1.0)
+- `tasks/completed/clarifications.md` - Implementation details and decisions
+- `tasks/completed/local-run-improvements.md` - Completed local run enhancements
+- `tasks/completed/manage-plugin-config-paths.md` - Completed config path management
+- `tasks/completed/ui-ux-overhaul.md` - Completed UI overhaul documentation
+- `tasks/enhancements/README.md` - Planned enhancements and MVP gaps
 
 ### Architecture Decisions
 
