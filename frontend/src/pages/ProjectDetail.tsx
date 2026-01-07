@@ -594,7 +594,19 @@ function ProjectDetail() {
       if (!id) {
         throw new Error('Project identifier missing.')
       }
-      return scanProjectAssets(id)
+      const assets = await scanProjectAssets(id)
+      // Update project state with scanned assets
+      setProject((prev) => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          plugins: assets.plugins,
+          configs: assets.configs,
+        }
+      })
+      // Clear configFiles so it falls back to project.configs which we just updated
+      setConfigFiles([])
+      return assets
     },
     {
       label: 'Scanning assets',
@@ -2334,14 +2346,14 @@ useEffect(() => {
                           ))}
                         </Stack>
                       )}
-                      {!configsLoading && configFiles.length === 0 && (
+                      {!configsLoading && pluginConfigFiles.length === 0 && (
                         <Text size="sm" c="dimmed">
                           No plugin configs uploaded yet. Upload files to be included in your builds.
                         </Text>
                       )}
-                      {!configsLoading && configFiles.length > 0 && (
+                      {!configsLoading && pluginConfigFiles.length > 0 && (
                         <Stack gap="md">
-                          {configFiles.map((file) => (
+                          {pluginConfigFiles.map((file) => (
                             <Card key={file.path}>
                               <CardContent>
                                 <Group justify="space-between" align="flex-start">
@@ -2350,9 +2362,11 @@ useEffect(() => {
                                       {file.pluginId || 'No plugin'}
                                     </Badge>
                                     <Text fw={600}>{file.path}</Text>
-                                    <Text size="sm" c="dimmed">
-                                      {formatBytes(file.size)} · Updated {new Date(file.modifiedAt).toLocaleString()}
-                                    </Text>
+                                    {file.size !== undefined && file.modifiedAt && (
+                                      <Text size="sm" c="dimmed">
+                                        {formatBytes(file.size)} · Updated {new Date(file.modifiedAt).toLocaleString()}
+                                      </Text>
+                                    )}
                                     {file.definitionId && (
                                       <Text size="sm" c="dimmed">
                                         Definition: {file.definitionId}

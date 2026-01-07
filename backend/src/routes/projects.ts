@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import { Router } from "express";
-import { writeFile } from "fs/promises";
+import { writeFile, stat } from "fs/promises";
+import { join } from "path";
 import multer from "multer";
 import { createHash } from "crypto";
 import {
@@ -29,6 +30,7 @@ import type {
 import { renderManifest, type ManifestOverrides } from "../services/manifestService";
 import { enqueueBuild } from "../services/buildQueue";
 import { scanProjectAssets } from "../services/projectScanner";
+import { getProjectsRoot } from "../config";
 import { commitFiles, getOctokitForRequest } from "../services/githubClient";
 import {
   collectProjectDefinitionFiles,
@@ -1195,7 +1197,70 @@ router.get("/:id/plugins/:pluginId/configs", async (req: Request, res: Response)
     }
     const stored = plugin.version ? await findStoredPlugin(plugin.id, plugin.version) : undefined;
     const libraryDefinitions = stored?.configDefinitions ?? [];
-    const summaries = await listUploadedConfigFiles(project);
+    const uploadedSummaries = await listUploadedConfigFiles(project);
+    
+    // Also include scanned configs from project.configs that match this plugin
+    const scannedSummaries: ConfigFileSummary[] = [];
+    for (const config of project.configs ?? []) {
+      if (config.pluginId === pluginId || (config.definitionId && libraryDefinitions.some(d => d.id === config.definitionId))) {
+        // Check if it's already in uploadedSummaries
+        if (!uploadedSummaries.some(s => s.path === config.path)) {
+          // Try to get file stats - check both project directory and dev directory
+          const projectRoot = join(getProjectsRoot(), project.id);
+          const projectPath = join(projectRoot, config.path);
+          
+          let filePath: string | undefined;
+          let stats: Awaited<ReturnType<typeof stat>> | undefined;
+          
+          // Check project directory first
+          try {
+            stats = await stat(projectPath);
+            filePath = projectPath;
+          } catch (error) {
+            // If not in project directory, check dev directory (for Electron mode)
+            if (process.env.ELECTRON_MODE === "true") {
+              const devPaths = [
+                join(process.cwd(), "backend", "data", "projects", project.id, config.path),
+                join(__dirname, "..", "..", "..", "backend", "data", "projects", project.id, config.path),
+              ];
+              for (const devPath of devPaths) {
+                try {
+                  stats = await stat(devPath);
+                  filePath = devPath;
+                  break;
+                } catch {
+                  continue;
+                }
+              }
+            }
+          }
+          
+          if (stats && filePath) {
+            scannedSummaries.push({
+              path: config.path,
+              size: Number(stats.size),
+              modifiedAt: stats.mtime.toISOString(),
+              sha256: config.sha256,
+              pluginId: config.pluginId,
+              definitionId: config.definitionId,
+            });
+          } else {
+            // File doesn't exist, but still include it as a summary for matching purposes
+            scannedSummaries.push({
+              path: config.path,
+              size: 0,
+              modifiedAt: new Date().toISOString(),
+              sha256: config.sha256,
+              pluginId: config.pluginId,
+              definitionId: config.definitionId,
+            });
+          }
+        }
+      }
+    }
+    
+    const summaries = [...uploadedSummaries, ...scannedSummaries];
+    
     const { definitions, unmatchedUploads } = buildPluginConfigViews(pluginId, plugin, libraryDefinitions, summaries);
     res.json({
       plugin: {

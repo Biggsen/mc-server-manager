@@ -6,6 +6,8 @@ import { parse } from "yaml";
 import type { StoredProject } from "../types/storage";
 import { resolveProjectRoot } from "./projectFiles";
 import { deleteUploadedConfigFile, getUploadsRoot, listUploadedConfigFiles, sanitizeRelativePath } from "./configUploads";
+import { findStoredPlugin } from "../storage/pluginsStore";
+import { getProjectsRoot } from "../config";
 
 interface ProfileFileEntry {
   template?: string;
@@ -69,6 +71,8 @@ export interface ScannedAssets {
 
 export async function scanProjectAssets(project: StoredProject): Promise<ScannedAssets> {
   const root = resolveProjectRoot(project);
+  const expectedProjectRoot = join(getProjectsRoot(), project.id);
+  
   const profile = await readYamlDocument(join(root, "profiles", "base.yml"));
 
   const overlayDir = join(root, "overlays");
@@ -135,6 +139,62 @@ export async function scanProjectAssets(project: StoredProject): Promise<Scanned
     }
   }
 
+  // Scan project directory for config files matching plugin definition paths
+  const pluginDefinitionConfigs: Array<{ path: string; sha256: string; pluginId: string; definitionId: string }> = [];
+  for (const plugin of project.plugins ?? []) {
+    if (!plugin.version) continue;
+    
+    const stored = await findStoredPlugin(plugin.id, plugin.version);
+    if (!stored?.configDefinitions) continue;
+    
+    for (const definition of stored.configDefinitions) {
+      const mapping = plugin.configMappings?.find((m) => m.definitionId === definition.id);
+      const resolvedPath = mapping?.path ?? definition.path;
+      if (!resolvedPath) continue;
+      
+      // Check in the actual project directory first, not the template
+      const projectRoot = join(getProjectsRoot(), project.id);
+      const projectPath = join(projectRoot, resolvedPath);
+      
+      // Also check development directory if in Electron mode
+      let filePath: string | undefined;
+      let fileExists = false;
+      
+      if (existsSync(projectPath)) {
+        filePath = projectPath;
+        fileExists = true;
+      } else {
+        // Always check development directory (both dev and Electron modes)
+        const devPaths = [
+          join(process.cwd(), "backend", "data", "projects", project.id, resolvedPath),
+          join(__dirname, "..", "..", "..", "backend", "data", "projects", project.id, resolvedPath),
+          join(process.cwd(), "..", "backend", "data", "projects", project.id, resolvedPath),
+        ];
+        
+        for (const devPath of devPaths) {
+          const exists = existsSync(devPath);
+          if (exists) {
+            filePath = devPath;
+            fileExists = true;
+            break;
+          }
+        }
+      }
+      
+      if (fileExists && filePath) {
+        const hash = await computeFileHash(filePath);
+        if (hash) {
+          pluginDefinitionConfigs.push({
+            path: resolvedPath,
+            sha256: hash,
+            pluginId: plugin.id,
+            definitionId: definition.id,
+          });
+        }
+      }
+    }
+  }
+  
   const configs = await Promise.all(
     configEntries.map(async (entry) => {
       const output = entry.output ?? "";
@@ -176,6 +236,17 @@ export async function scanProjectAssets(project: StoredProject): Promise<Scanned
   for (const config of configs) {
     activePaths.add(config.path);
     configMap.set(config.path, config);
+  }
+  
+  // Add configs found from plugin definitions
+  for (const config of pluginDefinitionConfigs) {
+    // Always ensure it's in activePaths (even if already in map from project.configs)
+    activePaths.add(config.path);
+    
+    // Only update map if not already present (profile YAML configs take precedence)
+    if (!configMap.has(config.path)) {
+      configMap.set(config.path, config);
+    }
   }
 
   const uploadedSummaries = await listUploadedConfigFiles(project);
