@@ -97,7 +97,20 @@ export async function fetchPluginVersions(
 
 import { emitProjectsUpdated } from './events'
 
-const API_BASE = import.meta.env.VITE_API_BASE ?? '/api'
+// In Electron production (file:// protocol), use localhost
+// In development or web mode, use relative path or env variable
+export function getApiBase(): string {
+  if (import.meta.env.VITE_API_BASE) {
+    return import.meta.env.VITE_API_BASE;
+  }
+  // Check if we're in Electron with file:// protocol
+  if (typeof window !== 'undefined' && window.location.protocol === 'file:') {
+    return 'http://localhost:4000/api';
+  }
+  return '/api';
+}
+
+const API_BASE = getApiBase()
 
 interface ApiOptions extends RequestInit {
   parseJson?: boolean

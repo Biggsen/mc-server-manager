@@ -4,9 +4,10 @@ import { dirname, join } from "path";
 import Handlebars from "handlebars";
 import { parse } from "yaml";
 import type { StoredProject } from "../types/storage";
+import { getProjectsRoot, getTemplatesRoot } from "../config";
 
-export const PROJECTS_ROOT = join(process.cwd(), "data", "projects");
-export const TEMPLATE_ROOT = join(process.cwd(), "..", "templates", "server");
+export const PROJECTS_ROOT = getProjectsRoot();
+export const TEMPLATE_ROOT = getTemplatesRoot();
 
 interface ProfileFileEntry {
   template?: string;

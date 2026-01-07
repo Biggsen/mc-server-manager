@@ -8,8 +8,9 @@ import type {
   StoredProject,
 } from "../types/storage";
 import type { ProjectPlugin } from "../types/plugins";
+import { getDataRoot } from "../config";
 
-const DATA_DIR = join(process.cwd(), "data");
+const DATA_DIR = getDataRoot();
 const MANIFEST_DIR = join(DATA_DIR, "manifests");
 const PROJECTS_PATH = join(DATA_DIR, "projects.json");
 

@@ -17,7 +17,7 @@ export const ContentSection = forwardRef<HTMLElement, ContentSectionProps>(funct
   return (
     <Paper
       ref={ref}
-      component={as}
+      component={as as 'section'}
       className={className}
       shadow={tone === 'default' ? 'sm' : 'xs'}
       radius="md"

@@ -23,8 +23,9 @@ import { commitFiles, getOctokitWithToken } from "./githubClient";
 import { fetchPluginArtifact } from "./pluginRegistry";
 import type { ProjectPlugin } from "../types/plugins";
 import { collectUploadedConfigMaterials } from "./configUploads";
+import { getBuildsRoot } from "../config";
 
-const DATA_DIR = join(process.cwd(), "data", "builds");
+const DATA_DIR = getBuildsRoot();
 const LOG_PATH = join(DATA_DIR, "builds.json");
 const DIST_DIR = join(DATA_DIR, "dist");
 

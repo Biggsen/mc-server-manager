@@ -10,8 +10,9 @@ import type { Writable } from "stream";
 import type { StoredProject } from "../types/storage";
 import type { RunJob, RunLogEntry, RunLogStream, RunWorkspaceStatus } from "../types/run";
 import { listBuilds } from "./buildQueue";
+import { getRunsRoot } from "../config";
 
-const DATA_DIR = join(process.cwd(), "data", "runs");
+const DATA_DIR = getRunsRoot();
 const LOG_PATH = join(DATA_DIR, "runs.json");
 const WORKSPACE_ROOT = join(DATA_DIR, "workspaces");
 const WORKSPACE_STATE_FILENAME = ".workspace-state.json";

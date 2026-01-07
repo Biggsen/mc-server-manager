@@ -1,4 +1,5 @@
 import { config as loadEnv } from "dotenv";
+import { join } from "path";
 
 loadEnv({ path: process.env.ENV_FILE ?? "./.env" });
 
@@ -16,3 +17,56 @@ export function requireAuthConfig(): void {
   }
 }
 
+/**
+ * Get the root directory for application data.
+ * In Electron mode, uses app.getPath('userData').
+ * In web mode, uses process.cwd().
+ */
+export function getDataRoot(): string {
+  if (process.env.ELECTRON_MODE === "true" && process.env.USER_DATA_PATH) {
+    return process.env.USER_DATA_PATH;
+  }
+  return process.cwd();
+}
+
+/**
+ * Get the projects root directory.
+ */
+export function getProjectsRoot(): string {
+  return join(getDataRoot(), "data", "projects");
+}
+
+/**
+ * Get the builds root directory.
+ */
+export function getBuildsRoot(): string {
+  return join(getDataRoot(), "data", "builds");
+}
+
+/**
+ * Get the runs root directory.
+ */
+export function getRunsRoot(): string {
+  return join(getDataRoot(), "data", "runs");
+}
+
+/**
+ * Get the cache root directory.
+ */
+export function getCacheRoot(): string {
+  return join(getDataRoot(), "data", "cache");
+}
+
+/**
+ * Get the templates root directory.
+ * In Electron mode, templates are bundled with the app.
+ * In web mode, templates are relative to project root.
+ */
+export function getTemplatesRoot(): string {
+  if (process.env.ELECTRON_MODE === "true") {
+    // In Electron, templates are bundled with the app
+    // __dirname will be in backend/dist, so go up to root
+    return join(__dirname, "../../templates/server");
+  }
+  return join(process.cwd(), "..", "templates", "server");
+}

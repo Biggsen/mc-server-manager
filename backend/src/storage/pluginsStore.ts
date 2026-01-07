@@ -1,8 +1,9 @@
 import { mkdir, readFile, writeFile } from "fs/promises";
 import { join } from "path";
 import type { StoredPluginRecord } from "../types/plugins";
+import { getDataRoot } from "../config";
 
-const DATA_DIR = join(process.cwd(), "data");
+const DATA_DIR = getDataRoot();
 const PLUGINS_PATH = join(DATA_DIR, "plugins.json");
 
 interface PluginsSnapshot {

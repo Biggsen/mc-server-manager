@@ -34,7 +34,8 @@ import {
   type StoredPluginRecord,
 } from '../lib/api'
 
-const API_BASE = import.meta.env.VITE_API_BASE ?? '/api'
+import { getApiBase } from '../lib/api'
+const API_BASE = getApiBase()
 
 const sourceLabel: Record<'download' | 'upload', string> = {
   download: 'Download URL',

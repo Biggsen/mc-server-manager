@@ -4,6 +4,7 @@ import Handlebars from "handlebars";
 import type { StoredProject } from "../types/storage";
 import { findStoredPlugin } from "../storage/pluginsStore";
 import type { PluginSourceReference } from "../types/plugins";
+import { getTemplatesRoot } from "../config";
 
 Handlebars.registerHelper("json", (value: unknown) => JSON.stringify(value, null, 2));
 
@@ -64,7 +65,7 @@ export async function renderManifest(
   buildId: string,
   overrides: ManifestOverrides = {},
 ): Promise<string> {
-  const templatePath = join(process.cwd(), "..", "templates", "server", "manifest.template.json");
+  const templatePath = join(getTemplatesRoot(), "manifest.template.json");
   const templateSource = await readFile(templatePath, "utf-8");
   const template = Handlebars.compile<ManifestContext>(templateSource);
 

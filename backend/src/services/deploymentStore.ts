@@ -8,8 +8,9 @@ import type {
   FolderDeploymentTarget,
   SftpDeploymentTarget,
 } from "../types/deployment";
+import { getDataRoot } from "../config";
 
-const DATA_DIR = join(process.cwd(), "data");
+const DATA_DIR = getDataRoot();
 const DEPLOYMENTS_PATH = join(DATA_DIR, "deployments.json");
 
 async function ensureStore(): Promise<void> {

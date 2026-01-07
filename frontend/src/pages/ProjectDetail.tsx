@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, memo, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { Play, FileText, MagnifyingGlass, Package as PackageIcon, Upload, PencilSimple, ArrowsClockwise, Trash, X, FloppyDisk, Plus } from '@phosphor-icons/react'
+import { Play, FileText, MagnifyingGlass, Package as PackageIcon, Upload, PencilSimple, ArrowsClockwise, Trash, FloppyDisk, Plus } from '@phosphor-icons/react'
 import CodeMirror from '@uiw/react-codemirror'
 import { yaml } from '@codemirror/lang-yaml'
 import { oneDark } from '@codemirror/theme-one-dark'
@@ -30,7 +30,6 @@ import {
   uploadProjectConfig,
   type BuildJob,
   type PluginConfigDefinitionView,
-  type PluginConfigRequirement,
   type ProjectConfigSummary,
   type ProjectPluginConfigMapping,
   type ProjectSummary,
@@ -38,14 +37,15 @@ import {
   type RunLogEntry,
   type StoredPluginRecord,
 } from '../lib/api'
-import { Accordion, Alert, Anchor, Checkbox, Code, Grid, Group, Loader, NativeSelect, ScrollArea, SimpleGrid, Stack, Table, Tabs, Text, Textarea, TextInput, Title } from '@mantine/core'
+import { Accordion, Alert, Anchor, Checkbox, Code, Group, Loader, NativeSelect, ScrollArea, SimpleGrid, Stack, Table, Tabs, Text, Textarea, TextInput, Title } from '@mantine/core'
 import { Badge, Button, Card, CardContent, CardHeader, Modal, Skeleton } from '../components/ui'
 import { useToast } from '../components/ui/toast'
 import { ContentSection } from '../components/layout'
 import { useAsyncAction } from '../lib/useAsyncAction'
 import { CustomPathModal, type CustomPathModalState } from '../components/CustomPathModal'
 
-const API_BASE = import.meta.env.VITE_API_BASE ?? '/api'
+import { getApiBase } from '../lib/api'
+const API_BASE = getApiBase()
 const sourceBadgeLabel: Record<'download' | 'upload', string> = {
   download: 'Download URL',
   upload: 'Uploaded jar',
@@ -80,65 +80,6 @@ interface ManifestPreview {
   content: unknown
 }
 
-type PluginConfigDraft = {
-  key: string
-  definitionId: string
-  source: 'library' | 'custom'
-  label: string
-  description: string
-  defaultPath: string
-  path: string
-  requirement: PluginConfigRequirement
-  notes: string
-  missing: boolean
-  uploaded?: ProjectConfigSummary
-  hasExistingMapping: boolean
-}
-
-type PluginConfigManagerState = {
-  pluginId: string
-  pluginVersion: string
-  busy: boolean
-  saving: boolean
-  error: string | null
-  drafts: PluginConfigDraft[]
-  uploads: ProjectConfigSummary[]
-}
-
-function toPluginConfigDraft(view: PluginConfigDefinitionView, index: number): PluginConfigDraft {
-  return {
-    key: `${view.id}-${index}-${Math.random().toString(36).slice(2)}`,
-    definitionId: view.id,
-    source: view.source,
-    label: view.label ?? '',
-    description: view.description ?? '',
-    defaultPath: view.defaultPath,
-    path: view.mapping?.path ?? view.resolvedPath ?? view.defaultPath,
-    requirement: view.mapping?.requirement ?? view.requirement ?? 'optional',
-    notes: view.mapping?.notes ?? '',
-    missing: view.missing,
-    uploaded: view.uploaded,
-    hasExistingMapping: Boolean(view.mapping),
-  }
-}
-
-function createCustomPluginConfigDraft(): PluginConfigDraft {
-  const definitionId = `custom/${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
-  return {
-    key: `${definitionId}-${Math.random().toString(36).slice(2)}`,
-    definitionId,
-    source: 'custom',
-    label: '',
-    description: '',
-    defaultPath: '',
-    path: '',
-    requirement: 'optional',
-    notes: '',
-    missing: true,
-    uploaded: undefined,
-    hasExistingMapping: false,
-  }
-}
 
 function formatMinecraftRange(min?: string | null, max?: string | null): string | null {
   if (!min && !max) {
@@ -331,12 +272,12 @@ const PluginCard = memo(function PluginCard({
                   </Text>
                   <Group gap="xs">
                     {totalCount > 0 && (
-                      <Badge variant="default" size="sm">
+                      <Badge variant="default">
                         {totalCount} path{totalCount !== 1 ? 's' : ''}
                       </Badge>
                     )}
                     {missingCount > 0 && (
-                      <Badge variant="warning" size="sm">
+                      <Badge variant="warning">
                         {missingCount} missing
                       </Badge>
                     )}
@@ -365,16 +306,15 @@ const PluginCard = memo(function PluginCard({
                                       ? 'outline'
                                       : 'accent'
                                 }
-                                size="xs"
                               >
                                 {definition.requirement}
                               </Badge>
                               {definition.uploaded ? (
-                                <Badge variant="success" size="xs">
+                                <Badge variant="success">
                                   Uploaded
                                 </Badge>
                               ) : definition.missing ? (
-                                <Badge variant="warning" size="xs">
+                                <Badge variant="warning">
                                   Missing
                                 </Badge>
                               ) : null}
@@ -415,16 +355,15 @@ const PluginCard = memo(function PluginCard({
                                       ? 'outline'
                                       : 'accent'
                                 }
-                                size="xs"
                               >
                                 {definition.requirement}
                               </Badge>
                               {definition.uploaded ? (
-                                <Badge variant="success" size="xs">
+                                <Badge variant="success">
                                   Uploaded
                                 </Badge>
                               ) : definition.missing ? (
-                                <Badge variant="warning" size="xs">
+                                <Badge variant="warning">
                                   Missing
                                 </Badge>
                               ) : null}
@@ -442,7 +381,7 @@ const PluginCard = memo(function PluginCard({
                             <Button
                               type="button"
                               variant="ghost"
-                              size="xs"
+                              size="sm"
                               onClick={() => {
                                 onEditCustomPath({
                                   pluginId: plugin.id,
@@ -460,7 +399,7 @@ const PluginCard = memo(function PluginCard({
                             <Button
                               type="button"
                               variant="ghost"
-                              size="xs"
+                              size="sm"
                               onClick={() => {
                                 onRemoveCustomPath({
                                   pluginId: plugin.id,
@@ -482,7 +421,7 @@ const PluginCard = memo(function PluginCard({
                     <Button
                       type="button"
                       variant="ghost"
-                      size="xs"
+                      size="sm"
                       onClick={() => onAddCustomPath(plugin.id)}
                       icon={<Plus size={16} weight="fill" aria-hidden="true" />}
                     >
@@ -1586,12 +1525,12 @@ useEffect(() => {
                       style={{ flex: 1 }}
                     />
                     <Button
-                      size="xs"
+                      size="sm"
                       variant="primary"
                       loading={versionBusy}
                       onClick={async () => {
                         if (!versionValue.trim()) {
-                          toast.error('Version cannot be empty')
+                          toast({ variant: 'danger', description: 'Version cannot be empty' })
                           return
                         }
                         try {
@@ -1601,9 +1540,9 @@ useEffect(() => {
                           })
                           setProject(updated)
                           setEditingVersion(false)
-                          toast.success('Version updated')
+                          toast({ variant: 'success', description: 'Version updated' })
                         } catch (err) {
-                          toast.error(err instanceof Error ? err.message : 'Failed to update version')
+                          toast({ variant: 'danger', description: err instanceof Error ? err.message : 'Failed to update version' })
                         } finally {
                           setVersionBusy(false)
                         }
@@ -1612,7 +1551,7 @@ useEffect(() => {
                       Save
                     </Button>
                     <Button
-                      size="xs"
+                      size="sm"
                       variant="ghost"
                       onClick={() => {
                         setEditingVersion(false)
@@ -1626,7 +1565,7 @@ useEffect(() => {
                   <Group gap="xs" align="center">
                     <Text fw={600}>{project.minecraftVersion}</Text>
                     <Button
-                      size="xs"
+                      size="sm"
                       variant="ghost"
                       onClick={() => {
                         setVersionValue(project.minecraftVersion)
@@ -1721,7 +1660,7 @@ useEffect(() => {
                       <Group justify="space-between" align="flex-start">
                         <Title order={3}>Description</Title>
                         <Button
-                          size="xs"
+                          size="sm"
                           variant="ghost"
                           onClick={() => setDescriptionModalOpen(true)}
                         >
@@ -1745,7 +1684,7 @@ useEffect(() => {
                       <Group justify="space-between" align="flex-start">
                         <Title order={3}>Plugins</Title>
                         <Button
-                          size="xs"
+                          size="sm"
                           variant="ghost"
                           onClick={() => setActiveTab('plugins')}
                         >
@@ -1767,7 +1706,7 @@ useEffect(() => {
                                 v{plugin.version}
                               </Text>
                               {plugin.provider && plugin.provider !== 'custom' && (
-                                <Badge variant="accent" size="xs">
+                                <Badge variant="accent">
                                   {plugin.provider}
                                 </Badge>
                               )}
@@ -2407,7 +2346,7 @@ useEffect(() => {
                               <CardContent>
                                 <Group justify="space-between" align="flex-start">
                                   <Stack gap={4}>
-                                    <Badge variant="outline" size="sm">
+                                    <Badge variant="outline">
                                       {file.pluginId || 'No plugin'}
                                     </Badge>
                                     <Text fw={600}>{file.path}</Text>
@@ -2544,9 +2483,9 @@ useEffect(() => {
               })
               setProject(updated)
               setDescriptionModalOpen(false)
-              toast.success('Description updated')
+              toast({ variant: 'success', description: 'Description updated' })
             } catch (err) {
-              toast.error(err instanceof Error ? err.message : 'Failed to update description')
+              toast({ variant: 'danger', description: err instanceof Error ? err.message : 'Failed to update description' })
             } finally {
               setDescriptionBusy(false)
             }
@@ -2702,7 +2641,7 @@ useEffect(() => {
             <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
               <CodeMirror
                 value={configEditor.content}
-                onChange={(value) =>
+                onChange={(value: string) =>
                   setConfigEditor((prev) => (prev ? { ...prev, content: value } : null))
                 }
                 extensions={[yaml()]}

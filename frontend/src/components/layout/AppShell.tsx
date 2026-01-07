@@ -33,7 +33,7 @@ export function AppShell({
       }}
     >
       <MantineAppShell.Header className={topbarClassName}>
-        <Box h="100%" px="lg" display="flex" align="center">
+        <Box h="100%" px="lg" display="flex" style={{ alignItems: 'center' }}>
           {topbar}
         </Box>
       </MantineAppShell.Header>

@@ -28,7 +28,8 @@ const pluginUpload = multer({
   },
 });
 
-const CACHE_ROOT = join(process.cwd(), "data", "cache", "plugins");
+import { getCacheRoot } from "../config";
+const CACHE_ROOT = join(getCacheRoot(), "plugins");
 
 function sanitizeFileName(name: string): string {
   return name.replace(/[^a-zA-Z0-9._-]/g, "_");

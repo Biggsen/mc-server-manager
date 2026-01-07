@@ -1,5 +1,6 @@
 import { type ReactNode } from 'react'
-import { Modal as MantineModal, type MantineStyleProp } from '@mantine/core'
+import { Modal as MantineModal, type ModalBaseStylesNames } from '@mantine/core'
+import type { CSSProperties } from 'react'
 
 export interface ModalProps {
   opened: boolean
@@ -8,10 +9,7 @@ export interface ModalProps {
   children: ReactNode
   size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl' | string | number
   centered?: boolean
-  styles?: {
-    body?: MantineStyleProp
-    content?: MantineStyleProp
-  }
+  styles?: Partial<Record<ModalBaseStylesNames, CSSProperties>>
 }
 
 export function Modal({ opened, onClose, title, children, size = 'md', centered = false, styles }: ModalProps) {

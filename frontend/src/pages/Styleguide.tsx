@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Stack, Group, Text, Title, Divider, Code } from '@mantine/core'
 import { Button, Badge, Tabs, TabList, TabTrigger, TabPanels, TabPanel, Table, TableHeader, TableBody, TableRow, TableHead, TableCell, Skeleton } from '../components/ui'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '../components/ui/card'
-import { Package, RocketLaunch, Buildings } from '@phosphor-icons/react'
+import { Package, RocketLaunch } from '@phosphor-icons/react'
 
 function Styleguide() {
   const [loading, setLoading] = useState(false)

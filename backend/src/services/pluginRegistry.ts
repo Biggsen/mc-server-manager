@@ -5,6 +5,7 @@ import { parse } from "yaml";
 import type { StoredProject } from "../types/storage";
 import { readProjectFile, resolveProjectRoot, writeProjectFileBuffer } from "./projectFiles";
 import type { ProjectPlugin } from "../types/plugins";
+import { getCacheRoot } from "../config";
 
 interface PluginSourceGithub {
   type: "github";
@@ -42,7 +43,7 @@ export interface DownloadedPluginArtifact {
 }
 
 const REGISTRY_PATH = "plugins/registry.yml";
-const CACHE_ROOT = join(process.cwd(), "data", "cache", "plugins");
+const CACHE_ROOT = join(getCacheRoot(), "plugins");
 
 export async function loadPluginRegistry(project: StoredProject): Promise<PluginRegistry> {
   const contents = await readProjectFile(project, REGISTRY_PATH);

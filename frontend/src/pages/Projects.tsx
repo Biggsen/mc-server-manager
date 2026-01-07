@@ -21,7 +21,8 @@ import { Button, Card, CardContent, CardHeader, CardTitle, CardDescription } fro
 
 type ProjectMessage = { type: 'success' | 'error'; text: string }
 
-const API_BASE = import.meta.env.VITE_API_BASE ?? '/api'
+import { getApiBase } from '../lib/api'
+const API_BASE = getApiBase()
 
 const ACTIVE_STATUSES = new Set<RunJob['status']>(['pending', 'running', 'stopping'])
 

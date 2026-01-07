@@ -10,4 +10,5 @@ temp/
 frontend/dist/
 backend/dist/
 backend/data/
+dist-electron/
 

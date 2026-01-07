@@ -6,14 +6,27 @@
     "frontend",
     "backend"
   ],
+  "main": "electron/dist/main.js",
   "scripts": {
     "dev:fe": "npm run dev --workspace frontend",
     "dev:be": "npm run dev --workspace backend",
-    "build": "npm run build --workspace frontend && npm run build --workspace backend"
+    "build": "npm run build --workspace frontend && npm run build --workspace backend && npm run build:electron",
+    "build:electron": "tsc -p electron/tsconfig.json",
+    "electron:dev": "npm run build:electron && concurrently \"npm run dev:be\" \"npm run dev:fe\" \"wait-on http://localhost:5173 && electron .\"",
+    "electron:build": "npm run build && electron-builder",
+    "electron:build:win": "npm run build && electron-builder --win",
+    "electron:build:mac": "npm run build && electron-builder --mac",
+    "electron:build:linux": "npm run build && electron-builder --linux"
   },
   "dependencies": {
     "@octokit/plugin-throttling": "^11.0.3",
     "@octokit/rest": "^22.0.1",
     "yaml": "^2.8.1"
+  },
+  "devDependencies": {
+    "electron": "^30.0.0",
+    "electron-builder": "^24.9.1",
+    "concurrently": "^8.2.2",
+    "wait-on": "^7.2.0"
   }
 }
