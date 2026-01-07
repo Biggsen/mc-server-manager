@@ -67,6 +67,13 @@ Complete implementation of overlay override system. Currently overlay files are 
 **Priority:** Medium  
 **Status:** Partially Implemented
 
+### 10. [Electron App Conversion](electron-app-conversion.md)
+Convert the web application to a standalone Electron desktop app. Package the entire application as a single executable that runs the backend server internally and displays the frontend in a native window.
+
+**Priority:** Medium  
+**Status:** Planned  
+**MVP Gap:** No
+
 ## Notes
 
 - **MVP Gaps** (items 1-3) are mentioned in the main spec and should be prioritized for MVP completion
