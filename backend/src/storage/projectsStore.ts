@@ -1,5 +1,6 @@
-import { mkdir, readFile, writeFile } from "fs/promises";
+import { mkdir, readFile, writeFile, access } from "fs/promises";
 import { join } from "path";
+import { constants } from "fs";
 import type { ProjectSummary } from "../types/projects";
 import type {
   ManifestMetadata,
@@ -20,8 +21,37 @@ async function ensureStore(): Promise<void> {
 
   try {
     await readFile(PROJECTS_PATH, "utf-8");
+    // File exists, no migration needed
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      // File doesn't exist - check if we should migrate from development directory
+      if (process.env.ELECTRON_MODE === "true") {
+        // In Electron mode, try to migrate from development backend/data directory
+        // Try multiple possible locations for the development data
+        const possibleDevPaths = [
+          join(process.cwd(), "backend", "data", "projects.json"),
+          join(__dirname, "..", "..", "..", "backend", "data", "projects.json"),
+        ];
+        
+        for (const devProjectsPath of possibleDevPaths) {
+          try {
+            await access(devProjectsPath, constants.F_OK);
+            // Development file exists, copy it
+            const devData = await readFile(devProjectsPath, "utf-8");
+            const devSnapshot = JSON.parse(devData) as ProjectsSnapshot;
+            if (devSnapshot.projects && devSnapshot.projects.length > 0) {
+              await writeFile(PROJECTS_PATH, devData, "utf-8");
+              console.log(`[Migration] Copied ${devSnapshot.projects.length} projects from ${devProjectsPath}`);
+              return;
+            }
+          } catch (migrationError) {
+            // This path doesn't exist, try next one
+            continue;
+          }
+        }
+      }
+      
+      // Create empty file
       const empty: ProjectsSnapshot = { projects: [] };
       await writeFile(PROJECTS_PATH, JSON.stringify(empty, null, 2), "utf-8");
       return;
@@ -34,7 +64,32 @@ async function ensureStore(): Promise<void> {
 async function loadSnapshot(): Promise<ProjectsSnapshot> {
   await ensureStore();
   const contents = await readFile(PROJECTS_PATH, "utf-8");
-  return JSON.parse(contents) as ProjectsSnapshot;
+  const snapshot = JSON.parse(contents) as ProjectsSnapshot;
+  
+  // If file is empty and we're in Electron mode, try to migrate from dev directory
+  if (process.env.ELECTRON_MODE === "true" && snapshot.projects.length === 0 && contents.length < 50) {
+    const possibleDevPaths = [
+      join(process.cwd(), "backend", "data", "projects.json"),
+      join(__dirname, "..", "..", "..", "backend", "data", "projects.json"),
+    ];
+    
+    for (const devProjectsPath of possibleDevPaths) {
+      try {
+        await access(devProjectsPath, constants.F_OK);
+        const devData = await readFile(devProjectsPath, "utf-8");
+        const devSnapshot = JSON.parse(devData) as ProjectsSnapshot;
+        if (devSnapshot.projects && devSnapshot.projects.length > 0) {
+          await writeFile(PROJECTS_PATH, devData, "utf-8");
+          console.log(`[Migration] Copied ${devSnapshot.projects.length} projects from ${devProjectsPath} (file was empty)`);
+          return devSnapshot;
+        }
+      } catch (migrationError) {
+        continue;
+      }
+    }
+  }
+  
+  return snapshot;
 }
 
 async function persistSnapshot(snapshot: ProjectsSnapshot): Promise<void> {

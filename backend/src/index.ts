@@ -59,11 +59,17 @@ export function createApp(): express.Application {
 
 export async function startServer(port: number = 4000): Promise<void> {
   const app = createApp();
-  return new Promise((resolve) => {
-    app.listen(port, '127.0.0.1', () => {
-      console.log(`MC Server Manager backend listening on http://127.0.0.1:${port}`);
-      resolve();
-    });
+  return new Promise((resolve, reject) => {
+    try {
+      app.listen(port, '127.0.0.1', () => {
+        console.log(`MC Server Manager backend listening on http://127.0.0.1:${port}`);
+        resolve();
+      }).on('error', (err: Error) => {
+        reject(err);
+      });
+    } catch (err) {
+      reject(err);
+    }
   });
 }
 

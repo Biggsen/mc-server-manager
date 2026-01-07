@@ -27,27 +27,65 @@ async function startBackendServer(): Promise<void> {
     process.env.PORT = '4000';
 
     // Import backend server dynamically
-    // Path resolution: from electron/dist/main.js, go up to root, then into backend/dist
-    const backendPath = join(__dirname, '../../backend/dist/index.js');
+    // In packaged app, app.getAppPath() returns the path to app.asar or app directory
+    // Always use app.getAppPath() in production for consistent path resolution
+    const appPath = app.getAppPath();
+    
+    // Set NODE_PATH to include root node_modules for module resolution
+    // This allows the backend to find dependencies from the root node_modules (workspace hoisting)
+    const nodeModulesPath = join(appPath, 'node_modules');
+    if (!process.env.NODE_PATH) {
+      process.env.NODE_PATH = nodeModulesPath;
+    } else {
+      process.env.NODE_PATH = `${nodeModulesPath}${require('path').delimiter}${process.env.NODE_PATH}`;
+    }
+    
+    const backendPath = join(appPath, 'backend/dist/index.js');
+    
+    console.log('[Backend] App path:', appPath);
+    console.log('[Backend] Loading backend from:', backendPath);
+    console.log('[Backend] __dirname:', __dirname);
+    console.log('[Backend] app.isPackaged:', app.isPackaged);
+    
+    // Check if the backend file exists
+    const fs = require('fs');
+    const fileExists = fs.existsSync(backendPath);
+    if (!fileExists) {
+      throw new Error(`Backend file not found at: ${backendPath}`);
+    }
+    
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const backendModule = require(backendPath) as { startServer: (port: number) => Promise<void> };
+    
+    if (!backendModule || typeof backendModule.startServer !== 'function') {
+      throw new Error('Backend module does not export startServer function');
+    }
+    
+    console.log('[Backend] Starting server on port 4000...');
     await backendModule.startServer(4000);
     backendStarted = true;
-    console.log('Backend server started on port 4000');
+    console.log('[Backend] Server started successfully on port 4000');
   } catch (error) {
-    console.error('Failed to start backend server:', error);
-    app.quit();
+    console.error('[Backend] Failed to start backend server:', error);
+    console.error('[Backend] Error details:', error instanceof Error ? error.stack : error);
+    // Don't quit immediately - show error to user
+    if (mainWindow) {
+      mainWindow.webContents.openDevTools();
+    }
+    // Re-throw to prevent the app from continuing if backend fails
+    throw error;
   }
 }
 
 function getIconPath(): string {
   const platform = process.platform;
+  const appPath = app.getAppPath();
   if (platform === 'win32') {
-    return join(__dirname, '../assets/icon.ico');
+    return join(appPath, 'assets/icon.ico');
   } else if (platform === 'darwin') {
-    return join(__dirname, '../assets/icon.icns');
+    return join(appPath, 'assets/icon.icns');
   } else {
-    return join(__dirname, '../assets/icon.png');
+    return join(appPath, 'assets/icon.png');
   }
 }
 
@@ -79,7 +117,23 @@ function createWindow(): void {
     mainWindow.webContents.openDevTools();
   } else {
     // In production, load from built files
-    mainWindow.loadFile(join(__dirname, '../frontend/dist/index.html'));
+    // Use app.getAppPath() to get the correct path in packaged app
+    const appPath = app.getAppPath();
+    let frontendPath: string;
+    
+    if (appPath.endsWith('.asar')) {
+      // In asar, use the path directly
+      frontendPath = join(appPath, 'frontend/dist/index.html');
+    } else {
+      // Not in asar, use relative path
+      frontendPath = join(__dirname, '../frontend/dist/index.html');
+    }
+    
+    console.log('Loading frontend from:', frontendPath);
+    mainWindow.loadFile(frontendPath).catch((err) => {
+      console.error('Failed to load frontend:', err);
+      mainWindow?.webContents.openDevTools();
+    });
   }
 
   // Handle external links
@@ -94,11 +148,23 @@ function createWindow(): void {
 }
 
 app.whenReady().then(async () => {
-  // Start backend server first
-  await startBackendServer();
-  
-  // Then create window
-  createWindow();
+  try {
+    // Start backend server first
+    await startBackendServer();
+    
+    // Give backend a moment to be ready to accept connections
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    // Then create window
+    createWindow();
+  } catch (error) {
+    console.error('[App] Failed to initialize:', error);
+    // Create window anyway to show error to user
+    createWindow();
+    if (mainWindow) {
+      mainWindow.webContents.openDevTools();
+    }
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

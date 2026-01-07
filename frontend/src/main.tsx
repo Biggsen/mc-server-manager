@@ -1,6 +1,6 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { BrowserRouter } from 'react-router-dom'
+import { HashRouter } from 'react-router-dom'
 import '@mantine/core/styles.css'
 import '@mantine/notifications/styles.css'
 import { MantineProvider } from '@mantine/core'
@@ -9,11 +9,11 @@ import App from './App'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <BrowserRouter>
+    <HashRouter>
       <MantineProvider defaultColorScheme="dark">
         <Notifications position="top-right" />
         <App />
       </MantineProvider>
-    </BrowserRouter>
+    </HashRouter>
   </StrictMode>,
 )

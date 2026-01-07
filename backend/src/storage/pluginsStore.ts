@@ -1,5 +1,6 @@
-import { mkdir, readFile, writeFile } from "fs/promises";
+import { mkdir, readFile, writeFile, access } from "fs/promises";
 import { join } from "path";
+import { constants } from "fs";
 import type { StoredPluginRecord } from "../types/plugins";
 import { getDataRoot } from "../config";
 
@@ -15,8 +16,36 @@ async function ensureStore(): Promise<void> {
 
   try {
     await readFile(PLUGINS_PATH, "utf-8");
+    // File exists, no migration needed
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      // File doesn't exist - check if we should migrate from development directory
+      if (process.env.ELECTRON_MODE === "true") {
+        // In Electron mode, try to migrate from development backend/data directory
+        const possibleDevPaths = [
+          join(process.cwd(), "backend", "data", "plugins.json"),
+          join(__dirname, "..", "..", "..", "backend", "data", "plugins.json"),
+        ];
+        
+        for (const devPluginsPath of possibleDevPaths) {
+          try {
+            await access(devPluginsPath, constants.F_OK);
+            // Development file exists, copy it
+            const devData = await readFile(devPluginsPath, "utf-8");
+            const devSnapshot = JSON.parse(devData) as PluginsSnapshot;
+            if (devSnapshot.plugins && devSnapshot.plugins.length > 0) {
+              await writeFile(PLUGINS_PATH, devData, "utf-8");
+              console.log(`[Migration] Copied ${devSnapshot.plugins.length} plugins from ${devPluginsPath}`);
+              return;
+            }
+          } catch (migrationError) {
+            // This path doesn't exist, try next one
+            continue;
+          }
+        }
+      }
+      
+      // Create empty file
       const empty: PluginsSnapshot = { plugins: [] };
       await writeFile(PLUGINS_PATH, JSON.stringify(empty, null, 2), "utf-8");
       return;
@@ -28,7 +57,32 @@ async function ensureStore(): Promise<void> {
 async function loadSnapshot(): Promise<PluginsSnapshot> {
   await ensureStore();
   const contents = await readFile(PLUGINS_PATH, "utf-8");
-  return JSON.parse(contents) as PluginsSnapshot;
+  const snapshot = JSON.parse(contents) as PluginsSnapshot;
+  
+  // If file is empty and we're in Electron mode, try to migrate from dev directory
+  if (process.env.ELECTRON_MODE === "true" && snapshot.plugins.length === 0 && contents.length < 50) {
+    const possibleDevPaths = [
+      join(process.cwd(), "backend", "data", "plugins.json"),
+      join(__dirname, "..", "..", "..", "backend", "data", "plugins.json"),
+    ];
+    
+    for (const devPluginsPath of possibleDevPaths) {
+      try {
+        await access(devPluginsPath, constants.F_OK);
+        const devData = await readFile(devPluginsPath, "utf-8");
+        const devSnapshot = JSON.parse(devData) as PluginsSnapshot;
+        if (devSnapshot.plugins && devSnapshot.plugins.length > 0) {
+          await writeFile(PLUGINS_PATH, devData, "utf-8");
+          console.log(`[Migration] Copied ${devSnapshot.plugins.length} plugins from ${devPluginsPath} (file was empty)`);
+          return devSnapshot;
+        }
+      } catch (migrationError) {
+        continue;
+      }
+    }
+  }
+  
+  return snapshot;
 }
 
 async function persistSnapshot(snapshot: PluginsSnapshot): Promise<void> {
