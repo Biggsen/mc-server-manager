@@ -8,6 +8,27 @@ import { registerRoutes } from "./routes";
 export function createApp(): express.Application {
   const app = express();
 
+  // CORS middleware for Electron and web clients
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    const origin = req.headers.origin;
+    // Allow requests from Electron (localhost origins) and file:// protocol
+    if (origin && (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:'))) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    } else if (!origin || origin.startsWith('file://')) {
+      // Allow requests without origin or from file:// (Electron in production)
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    
+    if (req.method === 'OPTIONS') {
+      res.sendStatus(200);
+      return;
+    }
+    next();
+  });
+
   app.use(express.json());
   app.use(
     session({
@@ -39,8 +60,8 @@ export function createApp(): express.Application {
 export async function startServer(port: number = 4000): Promise<void> {
   const app = createApp();
   return new Promise((resolve) => {
-    app.listen(port, () => {
-      console.log(`MC Server Manager backend listening on port ${port}`);
+    app.listen(port, '127.0.0.1', () => {
+      console.log(`MC Server Manager backend listening on http://127.0.0.1:${port}`);
       resolve();
     });
   });

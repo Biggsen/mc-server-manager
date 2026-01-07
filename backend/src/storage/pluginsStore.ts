@@ -4,7 +4,7 @@ import type { StoredPluginRecord } from "../types/plugins";
 import { getDataRoot } from "../config";
 
 const DATA_DIR = getDataRoot();
-const PLUGINS_PATH = join(DATA_DIR, "plugins.json");
+const PLUGINS_PATH = join(DATA_DIR, "data", "plugins.json");
 
 interface PluginsSnapshot {
   plugins: StoredPluginRecord[];

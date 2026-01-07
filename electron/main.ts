@@ -12,6 +12,14 @@ async function startBackendServer(): Promise<void> {
     return;
   }
 
+  // In development, the backend is already started by npm run dev:be
+  // Only start it in production (packaged app)
+  if (isDev) {
+    console.log('Development mode: Using backend from dev:be script');
+    backendStarted = true;
+    return;
+  }
+
   try {
     // Set Electron mode environment variable
     process.env.ELECTRON_MODE = 'true';

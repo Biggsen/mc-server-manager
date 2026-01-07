@@ -1,3 +1,12 @@
+// Type definition for Electron API exposed via preload script
+declare global {
+  interface Window {
+    electronAPI?: {
+      isElectron?: boolean;
+    };
+  }
+}
+
 export interface PluginSearchResult {
   provider: 'hangar' | 'modrinth' | 'spiget'
   id: string
@@ -103,10 +112,15 @@ export function getApiBase(): string {
   if (import.meta.env.VITE_API_BASE) {
     return import.meta.env.VITE_API_BASE;
   }
-  // Check if we're in Electron with file:// protocol
-  if (typeof window !== 'undefined' && window.location.protocol === 'file:') {
-    return 'http://localhost:4000/api';
+  // Check if we're in Electron (via preload script or file:// protocol)
+  if (typeof window !== 'undefined') {
+    const isElectron = (window as any).electronAPI?.isElectron || window.location.protocol === 'file:';
+    if (isElectron) {
+      console.log('[API] Detected Electron mode, using http://localhost:4000/api');
+      return 'http://localhost:4000/api';
+    }
   }
+  console.log('[API] Using relative API path /api');
   return '/api';
 }
 
@@ -118,25 +132,35 @@ interface ApiOptions extends RequestInit {
 
 async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
   const { parseJson = true, headers, ...rest } = options
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...rest,
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(headers ?? {}),
-    },
-  })
+  const url = `${API_BASE}${path}`
+  
+  try {
+    const response = await fetch(url, {
+      ...rest,
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(headers ?? {}),
+      },
+    })
 
-  if (!response.ok) {
-    const message = await response.text()
-    throw new Error(message || `Request failed with status ${response.status}`)
+    if (!response.ok) {
+      const message = await response.text()
+      throw new Error(message || `Request failed with status ${response.status}`)
+    }
+
+    if (!parseJson) {
+      return undefined as unknown as T
+    }
+
+    return (await response.json()) as T
+  } catch (error) {
+    if (error instanceof TypeError && error.message === 'Failed to fetch') {
+      console.error(`Failed to fetch from ${url}. Is the backend running on ${API_BASE}?`)
+      throw new Error(`Failed to connect to backend at ${API_BASE}. Make sure the backend server is running.`)
+    }
+    throw error
   }
-
-  if (!parseJson) {
-    return undefined as unknown as T
-  }
-
-  return (await response.json()) as T
 }
 
 export interface RepoMetadata {

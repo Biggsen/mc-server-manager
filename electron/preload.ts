@@ -5,4 +5,5 @@ import { contextBridge } from 'electron';
 contextBridge.exposeInMainWorld('electronAPI', {
   // Add any IPC methods here if needed in the future
   // For now, we're using HTTP communication
+  isElectron: true,
 });
