@@ -481,7 +481,7 @@ async function pushBuildToRepository(
     return;
   }
 
-  const octokit = getOctokitWithToken(githubToken);
+  const octokit = await getOctokitWithToken(githubToken);
   const branch = repo.defaultBranch ?? params.project.defaultBranch ?? "main";
 
   const files = {

@@ -16,7 +16,7 @@ router.use(ensureAuthenticated);
 
 router.get("/user", async (req: Request, res: Response) => {
   try {
-    const octokit = getOctokitForRequest(req);
+    const octokit = await getOctokitForRequest(req);
     const { data } = await octokit.users.getAuthenticated();
     res.json({
       login: data.login,
@@ -32,7 +32,7 @@ router.get("/user", async (req: Request, res: Response) => {
 
 router.get("/repos", async (req: Request, res: Response) => {
   try {
-    const octokit = getOctokitForRequest(req);
+    const octokit = await getOctokitForRequest(req);
     const [user, repos, orgMemberships] = await Promise.all([
       octokit.users.getAuthenticated(),
       octokit.paginate(octokit.repos.listForAuthenticatedUser, {
@@ -71,7 +71,7 @@ router.get("/repos", async (req: Request, res: Response) => {
 
 router.post("/orgs/:org/repos", async (req: Request, res: Response) => {
   try {
-    const octokit = getOctokitForRequest(req);
+    const octokit = await getOctokitForRequest(req);
     const { org } = req.params;
     const { name, description, private: isPrivate } = req.body ?? {};
 
@@ -110,7 +110,7 @@ router.post("/orgs/:org/repos", async (req: Request, res: Response) => {
 
 router.post("/repos/:owner/:repo/commit", async (req: Request, res: Response) => {
   try {
-    const octokit = getOctokitForRequest(req);
+    const octokit = await getOctokitForRequest(req);
     const { owner, repo } = req.params;
     const { message, files, branch } = req.body ?? {};
 

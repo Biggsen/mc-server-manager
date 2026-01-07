@@ -19,8 +19,10 @@ async function startBackendServer(): Promise<void> {
     process.env.PORT = '4000';
 
     // Import backend server dynamically
+    // Path resolution: from electron/dist/main.js, go up to root, then into backend/dist
+    const backendPath = join(__dirname, '../../backend/dist/index.js');
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const backendModule = await import('../backend/dist/index') as { startServer: (port: number) => Promise<void> };
+    const backendModule = require(backendPath) as { startServer: (port: number) => Promise<void> };
     await backendModule.startServer(4000);
     backendStarted = true;
     console.log('Backend server started on port 4000');

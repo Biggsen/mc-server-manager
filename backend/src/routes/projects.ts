@@ -412,7 +412,7 @@ async function bootstrapProjectRepository(
   };
 
   if (current.repo) {
-    const octokit = getOctokitForRequest(req);
+    const octokit = await getOctokitForRequest(req);
     const branch = current.repo.defaultBranch ?? current.defaultBranch ?? "main";
     const filesToCommit: Record<string, string> = {
       [`manifests/${buildId}.json`]: manifestInitial,
@@ -1147,7 +1147,7 @@ router.delete("/:id", async (req: Request, res: Response) => {
 
     if (deleteRepo && project.repo) {
       try {
-        const octokit = getOctokitForRequest(req);
+        const octokit = await getOctokitForRequest(req);
         await octokit.repos.delete({
           owner: project.repo.owner,
           repo: project.repo.name,

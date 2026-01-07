@@ -1,10 +1,26 @@
-import { Octokit } from "@octokit/rest";
-import { throttling } from "@octokit/plugin-throttling";
+import type { Octokit } from "@octokit/rest";
 import type { Request } from "express";
 
-const ThrottledOctokit = Octokit.plugin(throttling as never);
+let ThrottledOctokitClass: typeof Octokit | null = null;
 
-export function getOctokitForRequest(req: Request): Octokit {
+async function getThrottledOctokitClass(): Promise<typeof Octokit> {
+  if (ThrottledOctokitClass) {
+    return ThrottledOctokitClass;
+  }
+
+  // Use Function constructor to create a dynamic import that won't be transformed by TypeScript
+  const dynamicImport = new Function("specifier", "return import(specifier)");
+  
+  const [{ Octokit }, { throttling }] = await Promise.all([
+    dynamicImport("@octokit/rest") as Promise<typeof import("@octokit/rest")>,
+    dynamicImport("@octokit/plugin-throttling") as Promise<typeof import("@octokit/plugin-throttling")>,
+  ]);
+
+  ThrottledOctokitClass = Octokit.plugin(throttling as never);
+  return ThrottledOctokitClass;
+}
+
+export async function getOctokitForRequest(req: Request): Promise<Octokit> {
   const accessToken = req.session.github?.accessToken;
   if (!accessToken) {
     throw new Error("GitHub session not available");
@@ -13,11 +29,12 @@ export function getOctokitForRequest(req: Request): Octokit {
   return createOctokit(accessToken);
 }
 
-export function getOctokitWithToken(token: string): Octokit {
+export async function getOctokitWithToken(token: string): Promise<Octokit> {
   return createOctokit(token);
 }
 
-function createOctokit(token: string): Octokit {
+async function createOctokit(token: string): Promise<Octokit> {
+  const ThrottledOctokit = await getThrottledOctokitClass();
   return new ThrottledOctokit({
     auth: token,
     userAgent: "mc-server-manager/0.1",
