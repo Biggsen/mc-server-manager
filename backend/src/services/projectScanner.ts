@@ -7,7 +7,7 @@ import type { StoredProject } from "../types/storage";
 import { resolveProjectRoot } from "./projectFiles";
 import { deleteUploadedConfigFile, getUploadsRoot, listUploadedConfigFiles, sanitizeRelativePath } from "./configUploads";
 import { findStoredPlugin } from "../storage/pluginsStore";
-import { getProjectsRoot } from "../config";
+import { getProjectsRoot, getDevDataPaths } from "../config";
 
 interface ProfileFileEntry {
   template?: string;
@@ -165,13 +165,10 @@ export async function scanProjectAssets(project: StoredProject): Promise<Scanned
         fileExists = true;
       } else {
         // Always check development directory (both dev and Electron modes)
-        const devPaths = [
-          join(process.cwd(), "backend", "data", "projects", project.id, resolvedPath),
-          join(__dirname, "..", "..", "..", "backend", "data", "projects", project.id, resolvedPath),
-          join(process.cwd(), "..", "backend", "data", "projects", project.id, resolvedPath),
-        ];
+        const devDataPaths = getDevDataPaths();
         
-        for (const devPath of devPaths) {
+        for (const devDataPath of devDataPaths) {
+          const devPath = join(devDataPath, "projects", project.id, resolvedPath);
           const exists = existsSync(devPath);
           if (exists) {
             filePath = devPath;

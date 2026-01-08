@@ -237,7 +237,7 @@ function getCacheDir(pluginId: string, version: string): string {
 }
 
 function toRelativeCachePath(absolutePath: string): string {
-  return toPosixPath(relative(process.cwd(), absolutePath));
+  return toPosixPath(relative(CACHE_ROOT, absolutePath));
 }
 
 async function ensurePluginCache(

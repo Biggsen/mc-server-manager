@@ -70,3 +70,22 @@ export function getTemplatesRoot(): string {
   }
   return join(process.cwd(), "..", "templates", "server");
 }
+
+/**
+ * Get possible development directory paths for migration purposes.
+ * Returns an array of paths to check for development data that might need migration.
+ * In Electron mode, checks various possible locations where dev data might exist.
+ * In web/dev mode, returns the current working directory.
+ */
+export function getDevDataPaths(): string[] {
+  if (process.env.ELECTRON_MODE === "true") {
+    // In Electron, check multiple possible locations for dev data
+    // __dirname is in backend/dist, so we need to go up to find the source
+    return [
+      join(__dirname, "..", "..", "..", "backend", "data"),
+      join(__dirname, "..", "..", "backend", "data"),
+    ];
+  }
+  // In dev mode, use current working directory
+  return [join(process.cwd(), "backend", "data")];
+}

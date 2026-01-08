@@ -30,7 +30,7 @@ import type {
 import { renderManifest, type ManifestOverrides } from "../services/manifestService";
 import { enqueueBuild } from "../services/buildQueue";
 import { scanProjectAssets } from "../services/projectScanner";
-import { getProjectsRoot } from "../config";
+import { getProjectsRoot, getDevDataPaths } from "../config";
 import { commitFiles, getOctokitForRequest } from "../services/githubClient";
 import {
   collectProjectDefinitionFiles,
@@ -1219,11 +1219,9 @@ router.get("/:id/plugins/:pluginId/configs", async (req: Request, res: Response)
           } catch (error) {
             // If not in project directory, check dev directory (for Electron mode)
             if (process.env.ELECTRON_MODE === "true") {
-              const devPaths = [
-                join(process.cwd(), "backend", "data", "projects", project.id, config.path),
-                join(__dirname, "..", "..", "..", "backend", "data", "projects", project.id, config.path),
-              ];
-              for (const devPath of devPaths) {
+              const devDataPaths = getDevDataPaths();
+              for (const devDataPath of devDataPaths) {
+                const devPath = join(devDataPath, "projects", project.id, config.path);
                 try {
                   stats = await stat(devPath);
                   filePath = devPath;

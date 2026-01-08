@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile, access } from "fs/promises";
 import { join } from "path";
 import { constants } from "fs";
 import type { StoredPluginRecord } from "../types/plugins";
-import { getDataRoot } from "../config";
+import { getDataRoot, getDevDataPaths } from "../config";
 
 const DATA_DIR = getDataRoot();
 const PLUGINS_PATH = join(DATA_DIR, "data", "plugins.json");
@@ -22,12 +22,10 @@ async function ensureStore(): Promise<void> {
       // File doesn't exist - check if we should migrate from development directory
       if (process.env.ELECTRON_MODE === "true") {
         // In Electron mode, try to migrate from development backend/data directory
-        const possibleDevPaths = [
-          join(process.cwd(), "backend", "data", "plugins.json"),
-          join(__dirname, "..", "..", "..", "backend", "data", "plugins.json"),
-        ];
+        const devDataPaths = getDevDataPaths();
         
-        for (const devPluginsPath of possibleDevPaths) {
+        for (const devDataPath of devDataPaths) {
+          const devPluginsPath = join(devDataPath, "plugins.json");
           try {
             await access(devPluginsPath, constants.F_OK);
             // Development file exists, copy it
@@ -61,12 +59,10 @@ async function loadSnapshot(): Promise<PluginsSnapshot> {
   
   // If file is empty and we're in Electron mode, try to migrate from dev directory
   if (process.env.ELECTRON_MODE === "true" && snapshot.plugins.length === 0 && contents.length < 50) {
-    const possibleDevPaths = [
-      join(process.cwd(), "backend", "data", "plugins.json"),
-      join(__dirname, "..", "..", "..", "backend", "data", "plugins.json"),
-    ];
+    const devDataPaths = getDevDataPaths();
     
-    for (const devPluginsPath of possibleDevPaths) {
+    for (const devDataPath of devDataPaths) {
+      const devPluginsPath = join(devDataPath, "plugins.json");
       try {
         await access(devPluginsPath, constants.F_OK);
         const devData = await readFile(devPluginsPath, "utf-8");
