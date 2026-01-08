@@ -26,10 +26,17 @@ export function AppShell({
       padding="xl"
       navbar={{
         width: 280,
-        breakpoint: 'lg',
+        breakpoint: 'xs',
       }}
       header={{
         height: 80,
+      }}
+      styles={{
+        navbar: {
+          width: '280px',
+          minWidth: '280px',
+          maxWidth: '280px',
+        },
       }}
     >
       <MantineAppShell.Header className={topbarClassName}>
