@@ -13,10 +13,10 @@
     "build": "npm run build --workspace frontend && npm run build --workspace backend && npm run build:electron",
     "build:electron": "tsc -p electron/tsconfig.json",
     "electron:dev": "npm run build:electron && concurrently \"npm run dev:be\" \"npm run dev:fe\" \"wait-on http://localhost:5173 && electron .\"",
-    "electron:build": "npm run build && electron-packager . mc-server-manager --platform=win32 --arch=x64 --out=release --overwrite --asar --prune=true --ignore=\\.git --ignore=frontend/node_modules --ignore=backend/node_modules --ignore=electron/node_modules --ignore=tasks --ignore=docs",
-    "electron:build:win": "npm run build && electron-packager . mc-server-manager --platform=win32 --arch=x64 --out=release --overwrite --asar --prune=true --ignore=\\.git --ignore=frontend/node_modules --ignore=backend/node_modules --ignore=electron/node_modules --ignore=tasks --ignore=docs",
-    "electron:build:mac": "npm run build && electron-packager . mc-server-manager --platform=darwin --arch=x64,arm64 --out=release --overwrite --asar --prune=true --ignore=\\.git --ignore=frontend/node_modules --ignore=backend/node_modules --ignore=electron/node_modules --ignore=tasks --ignore=docs",
-    "electron:build:linux": "npm run build && electron-packager . mc-server-manager --platform=linux --arch=x64 --out=release --overwrite --asar --prune=true --ignore=\\.git --ignore=frontend/node_modules --ignore=backend/node_modules --ignore=electron/node_modules --ignore=tasks --ignore=docs"
+    "electron:build": "npm run build && electron-packager . mc-server-manager --platform=win32 --arch=x64 --out=release --overwrite --asar --icon=assets/icon.ico --prune=true --ignore=\\.git --ignore=frontend/node_modules --ignore=backend/node_modules --ignore=electron/node_modules --ignore=tasks --ignore=docs",
+    "electron:build:win": "npm run build && electron-packager . mc-server-manager --platform=win32 --arch=x64 --out=release --overwrite --asar --icon=assets/icon.ico --prune=true --ignore=\\.git --ignore=frontend/node_modules --ignore=backend/node_modules --ignore=electron/node_modules --ignore=tasks --ignore=docs",
+    "electron:build:mac": "npm run build && electron-packager . mc-server-manager --platform=darwin --arch=x64,arm64 --out=release --overwrite --asar --icon=assets/icon.icns --prune=true --ignore=\\.git --ignore=frontend/node_modules --ignore=backend/node_modules --ignore=electron/node_modules --ignore=tasks --ignore=docs",
+    "electron:build:linux": "npm run build && electron-packager . mc-server-manager --platform=linux --arch=x64 --out=release --overwrite --asar --icon=assets/icon.png --prune=true --ignore=\\.git --ignore=frontend/node_modules --ignore=backend/node_modules --ignore=electron/node_modules --ignore=tasks --ignore=docs"
   },
   "dependencies": {
     "@octokit/plugin-throttling": "^11.0.3",

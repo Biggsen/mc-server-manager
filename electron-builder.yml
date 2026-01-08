@@ -23,10 +23,12 @@ files:
 
 win:
   target:
-    - target: nsis
+    - target: dir
       arch:
         - x64
   icon: assets/icon.ico
+  sign: null
+  verifyUpdateCodeSignature: false
 
 mac:
   target:

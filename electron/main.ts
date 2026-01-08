@@ -148,6 +148,11 @@ function createWindow(): void {
 }
 
 app.whenReady().then(async () => {
+  // Set app user model ID for Windows taskbar icon
+  if (process.platform === 'win32') {
+    app.setAppUserModelId('com.mcservermanager.app');
+  }
+  
   try {
     // Start backend server first
     await startBackendServer();
