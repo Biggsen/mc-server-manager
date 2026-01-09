@@ -1,10 +1,10 @@
 # GitHub OAuth Authentication in Electron App - Implementation Specification
 
 ## Document Status
-- **Version**: 1.2
+- **Version**: 2.0
 - **Date**: 2025-01-09
 - **Last Updated**: 2025-01-09
-- **Status**: Implementation Ready
+- **Status**: ✅ Implementation Complete
 - **Priority**: High
 
 ---
@@ -13,17 +13,18 @@
 
 The following key decisions were made to optimize for Electron app compatibility:
 
-1. **OAuth State Store**: Implement stateless in-memory Map (replaces session-based storage)
-2. **Cookie Domain**: Set `domain: 'localhost'` explicitly when setting cookies programmatically
-3. **Cookie sameSite**: Use `sameSite: 'lax'` (works for Electron localhost)
-4. **Cookie Reading URL**: Always read from `http://localhost:4000` (backend URL where cookie is set)
-5. **Session Partition**: Use shared partition (`persist:main`) with explicit cookie copying as fallback
-6. **Timing Strategy**: Poll/retry until cookie is available (with timeout) instead of fixed delay
-7. **Cookie Access**: Set cookie directly in main window's session (no IPC needed for cookie transfer)
-8. **Frontend Storage**: Store flag indicating "cookie was set" for debugging only (not cookie value)
-9. **API Client**: Keep using `credentials: 'include'` only (no manual Cookie headers)
-10. **Validation Endpoint**: Use existing `/api/auth/status` endpoint (no new endpoint needed)
-11. **OAuth Initiation**: Use IPC in Electron (required - `window.location.origin` is `file://` in production)
+1. **Authentication Method**: Token-based authentication using JWT (replaces cookie-based sessions)
+2. **Token Storage**: Use `keytar` for secure storage in OS credential vault (Windows Credential Manager, macOS Keychain, Linux Secret Service)
+3. **OAuth Flow**: System browser for OAuth (not Electron popup) - uses `shell.openExternal()`
+4. **OAuth State Store**: Stateless in-memory Map (no session dependency)
+5. **Production Callback**: Custom protocol handler (`mc-server-manager://auth`) for production
+6. **Development Callback**: Localhost polling endpoint (`/api/auth/callback/poll`) for development
+7. **Token Transfer**: Custom protocol redirect in production, polling in development
+8. **API Authentication**: Authorization headers (`Bearer <token>`) instead of cookies
+9. **Token Injection**: Electron main process retrieves token from keytar and includes in API requests via IPC
+10. **Native Module Support**: `electron-rebuild` for keytar, unpack from ASAR archive
+11. **Single Instance Lock**: Prevent multiple app instances on Windows
+12. **Backend Dependencies**: Include backend dependencies in production build (jsonwebtoken, etc.)
 
 ---
 
@@ -71,10 +72,13 @@ Multiple attempts were made to implement GitHub OAuth in the Electron app, encou
 ### 1.3 Current State
 
 - ✅ OAuth flow completes successfully (GitHub authentication works)
-- ✅ Backend correctly stores GitHub token in session
-- ✅ Popup window closes automatically after OAuth
-- ❌ Main window cannot access authenticated session
-- ❌ Cookies not shared between popup and main window
+- ✅ Token-based authentication implemented (JWT)
+- ✅ System browser OAuth flow works
+- ✅ Token storage in OS credential vault (keytar)
+- ✅ Custom protocol handler for production
+- ✅ Localhost polling fallback for development
+- ✅ Main window can access authenticated state
+- ✅ Token persists across app restarts
 
 ---
 
@@ -88,333 +92,139 @@ Multiple attempts were made to implement GitHub OAuth in the Electron app, encou
 4. **Stateless Where Possible**: Minimize dependency on session cookies for critical flows
 5. **Graceful Degradation**: Provide clear error messages and fallback behaviors
 
-### 2.2 Proposed Solution Architecture
+### 2.2 Implemented Solution Architecture
 
-The solution will use a **hybrid approach** combining:
+The solution uses a **token-based approach**:
 
-1. **Stateless OAuth State Store** (to be implemented)
+1. **Stateless OAuth State Store** ✅
    - In-memory Map for OAuth state validation
-   - No dependency on cookies for state validation
-   - Replaces current session-based state storage
+   - No dependency on cookies or sessions
+   - Automatic cleanup of expired states
 
-2. **Explicit Cookie Sharing** (new)
-   - After OAuth completes in popup, explicitly read the session cookie from popup window
-   - Set the cookie directly in main window's session using Electron's session API
-   - No IPC needed - cookie is set programmatically in main process
-   - Main window automatically includes cookie in requests via `credentials: 'include'`
+2. **JWT Token Authentication** ✅
+   - Backend issues JWT tokens after successful OAuth
+   - Token contains GitHub access token, login, and scopes
+   - Tokens expire after configured time (default 30 days)
 
-3. **Session Synchronization** (new)
-   - Main window validates session using existing `/api/auth/status` endpoint
-   - Periodic session validation to detect cookie expiration
-   - Clear error messages if session is lost
-   - Frontend stores flag indicating "cookie was set" for debugging/logging only
+3. **Secure Token Storage** ✅
+   - Tokens stored in OS credential vault using `keytar`
+   - Windows: Credential Manager
+   - macOS: Keychain
+   - Linux: Secret Service
+   - No tokens stored in plain text
+
+4. **System Browser OAuth Flow** ✅
+   - OAuth opens in user's default browser (not Electron popup)
+   - Better security and user experience
+   - Production: Redirects to custom protocol (`mc-server-manager://auth`)
+   - Development: Redirects to localhost polling endpoint
+
+5. **Token Injection** ✅
+   - Electron main process retrieves token from keytar
+   - Token included in Authorization header for all API requests
+   - Frontend uses IPC to make authenticated requests
 
 ### 2.3 Component Responsibilities
 
 #### Electron Main Process (`electron/main.ts`)
-- Create and manage OAuth popup window with shared session partition (`persist:main`)
-- Monitor popup navigation events
-- Extract session cookie from popup after OAuth completes
-- Set session cookie directly in main window's session
-- Log all window lifecycle and navigation events
+- Register custom protocol handler (`mc-server-manager://`)
+- Handle single-instance lock (Windows)
+- Open OAuth flow in system browser via `shell.openExternal()`
+- Handle custom protocol redirects (production)
+- Poll localhost endpoint for token (development fallback)
+- Store tokens securely using `keytar`
+- Retrieve tokens from keytar and inject into API requests via IPC
+- Log all authentication events
 
 #### Electron Renderer Process (`frontend/src/App.tsx`, `frontend/src/lib/api.ts`)
 - **Initiate OAuth flow via IPC** (required for Electron - `window.location.origin` is `file://` in production)
 - Detect Electron mode and use `electronAPI.startGitHubAuth()` instead of window navigation
-- Store flag indicating "cookie was set" for debugging/logging (not the cookie value)
-- Use `credentials: 'include'` in API requests (cookies sent automatically)
-- Validate session status periodically using `/api/auth/status`
-- Handle session expiration gracefully
+- Listen for `github-auth-complete` IPC event
+- Use `electronAPI.apiRequest()` for authenticated API calls (handles token injection)
+- Validate authentication status periodically using `/api/auth/status`
+- Handle token expiration gracefully
 
 #### Backend (`backend/src/routes/auth.ts`)
-- Process OAuth flow (already working)
-- Implement stateless in-memory OAuth state store (replaces session-based)
-- Set session cookie with `domain: 'localhost'` and `sameSite: 'lax'` for Electron
-- Use existing `/api/auth/status` endpoint for validation
-- Log all session operations
+- Process OAuth flow
+- Implement stateless in-memory OAuth state store
+- Issue JWT tokens after successful OAuth
+- Redirect to custom protocol (production) or localhost polling endpoint (development)
+- Validate JWT tokens from Authorization header
+- Use `/api/auth/status` endpoint for validation
+- Log all authentication operations
 
 ---
 
-## 3. Detailed Implementation Plan
+## 3. Implementation Summary
 
-### Phase 1: Logging Infrastructure
+### Phase 1: Logging Infrastructure ✅
 
-**Objective**: Establish comprehensive logging before making any functional changes.
+**Completed**: Comprehensive logging infrastructure established.
 
-#### Step 1.1: Define Logging Standards
-- **Location**: Create `docs/logging-standards.md`
-- **Content**:
-  - Log format specification (JSON with consistent fields)
-  - Log levels (DEBUG, INFO, WARN, ERROR)
-  - Required log fields: `timestamp`, `component`, `event`, `data`, `sessionId`, `windowId`
-  - Log aggregation strategy
+- ✅ Created `docs/logging-standards.md` with logging standards
+- ✅ Implemented structured JSON loggers for main, renderer, and backend processes
+- ✅ Added logging to all OAuth-related events
+- ✅ Backend includes file logging for production
 
-#### Step 1.2: Implement Logging Utilities
-- **Files to Create/Modify**:
-  - `electron/src/utils/logger.ts` - Main process logger
-  - `frontend/src/lib/logger.ts` - Renderer process logger
-  - `backend/src/utils/logger.ts` - Backend logger
-- **Features**:
-  - Structured JSON logging
-  - Log rotation
-  - Log level filtering
-  - Optional remote log aggregation endpoint
+### Phase 2: Token-Based Authentication ✅
 
-#### Step 1.3: Add Logging to Existing OAuth Flow
-- **Files to Modify**:
-  - `electron/main.ts` - Log all window events, IPC calls, navigation
-  - `frontend/src/lib/api.ts` - Log all API requests/responses, cookie state
-  - `backend/src/routes/auth.ts` - Log all OAuth steps, session operations
-- **Log Points**:
-  - Window creation/destruction
-  - Navigation events (all types)
-  - Cookie read/write operations
-  - Session creation/validation
-  - IPC message send/receive
-  - API request/response (with sanitized headers)
+**Completed**: Replaced cookie-based sessions with JWT tokens.
 
-**Success Criteria**: 
-- All OAuth-related events are logged with sufficient detail
-- Logs can be used to trace a complete OAuth flow end-to-end
-- Log format is consistent across all components
+- ✅ Implemented stateless in-memory OAuth state store in backend
+- ✅ Added JWT token issuance after successful OAuth
+- ✅ Created JWT authentication middleware (`backend/src/middleware/auth.ts`)
+- ✅ Updated backend routes to use JWT tokens from Authorization header
+- ✅ Removed `express-session` dependency
 
----
+### Phase 3: Secure Token Storage ✅
 
-### Phase 2: Cookie Management Infrastructure
+**Completed**: Implemented secure token storage using OS credential vault.
 
-**Objective**: Implement explicit cookie reading and setting capabilities.
+- ✅ Added `keytar` dependency for secure token storage
+- ✅ Implemented token storage/retrieval in Electron main process
+- ✅ Added `electron-rebuild` for native module support
+- ✅ Configured ASAR unpacking for keytar module
+- ✅ Tokens persist across app restarts
 
-#### Step 2.1: Add Cookie Reading to Electron Main Process
-- **File**: `electron/main.ts`
-- **Implementation**:
-  ```typescript
-  // After OAuth callback completes, read cookies from popup
-  // Always read from backend URL (localhost:4000) where cookie was set
-  async function getSessionCookieFromPopup(authWindow: BrowserWindow): Promise<string | null> {
-    // Log: Attempting to read cookies from popup
-    try {
-      const session = authWindow.webContents.session;
-      const cookies = await session.cookies.get({
-        url: 'http://localhost:4000',
-        name: 'connect.sid'
-      });
-      // Log: Cookie read result (sanitized)
-      return cookies.length > 0 ? cookies[0].value : null;
-    } catch (error) {
-      // Log: Cookie read error
-      return null;
-    }
-  }
-  ```
-- **Logging**: Log cookie read attempts, results, errors
-- **Note**: Always read from `http://localhost:4000` (backend URL) where the cookie is set, regardless of popup's current URL
+### Phase 4: System Browser OAuth Flow ✅
 
-#### Step 2.2: Add Cookie Setting to Electron Main Process
-- **File**: `electron/main.ts`
-- **Implementation**:
-  ```typescript
-  // Set session cookie in main window's session
-  // Cookie is set directly in session, so renderer doesn't need to manage it
-  async function setSessionCookieInMainWindow(cookieValue: string): Promise<boolean> {
-    // Log: Attempting to set cookie in main window
-    try {
-      if (!mainWindow) {
-        // Log: Main window not available
-        return false;
-      }
-      const session = mainWindow.webContents.session;
-      await session.cookies.set({
-        url: 'http://localhost:4000',
-        name: 'connect.sid',
-        value: cookieValue,
-        domain: 'localhost',  // Explicitly set for Electron compatibility
-        path: '/',
-        httpOnly: true,
-        secure: false,
-        sameSite: 'lax'  // Works for Electron localhost
-      });
-      // Log: Cookie set successfully
-      return true;
-    } catch (error) {
-      // Log: Cookie set error
-      return false;
-    }
-  }
-  ```
-- **Logging**: Log cookie set attempts, results, errors
-- **Note**: Cookie is set directly in main window's session. Renderer uses `credentials: 'include'` and cookie is automatically sent with requests.
+**Completed**: Replaced Electron popup with system browser OAuth.
 
-#### Step 2.3: Update Preload Script (required for Electron)
-- **File**: `electron/preload.ts`
-- **Note**: IPC is required for OAuth initiation because `window.location.origin` is `file://` in Electron production, which breaks URL construction
-- **Add**:
-  ```typescript
-  contextBridge.exposeInMainWorld('electronAPI', {
-    isElectron: true,
-    // Required: OAuth initiation via IPC (window.location.origin doesn't work in Electron)
-    startGitHubAuth: (returnTo?: string) => ipcRenderer.invoke('github-auth-start', returnTo),
-    onAuthComplete: (callback: () => void) => {
-      // Notify renderer that cookie was set (no cookie value sent)
-      ipcRenderer.on('github-auth-complete', () => callback());
-    }
-  });
-  ```
-- **Logging**: Log all exposed API calls
+- ✅ Removed Electron popup window approach
+- ✅ Implemented `shell.openExternal()` for system browser OAuth
+- ✅ Registered custom protocol handler (`mc-server-manager://`)
+- ✅ Added single-instance lock for Windows
+- ✅ Implemented custom protocol URL handling
 
-**Success Criteria**:
-- Can read session cookie from popup window (from `http://localhost:4000`)
-- Can set session cookie in main window's session
-- Cookie is automatically included in API requests via `credentials: 'include'`
-- All operations are logged
+### Phase 5: Development/Production Callback Handling ✅
 
----
+**Completed**: Dual-mode callback handling for dev and production.
 
-### Phase 3: OAuth Flow Integration
+- ✅ Production: Custom protocol redirect (`mc-server-manager://auth?token=...`)
+- ✅ Development: Localhost polling endpoint (`/api/auth/callback/poll`)
+- ✅ Backend detects environment and redirects accordingly
+- ✅ Electron polls for token in development mode
+- ✅ Polling enabled in both dev and production as fallback
 
-**Objective**: Integrate cookie management into the OAuth flow.
+### Phase 6: API Request Token Injection ✅
 
-#### Step 3.1: Add IPC Handler for OAuth Initiation
-- **File**: `electron/main.ts`
-- **Add IPC Handler**:
-  ```typescript
-  ipcMain.handle('github-auth-start', async (_event, returnTo?: string) => {
-    // Create OAuth popup window and handle flow
-    // Return when popup is created (popup handles OAuth flow)
-  });
-  ```
-- **Functionality**:
-  - Create popup window with shared session partition (`persist:main`)
-  - Navigate popup to OAuth URL: `http://localhost:4000/api/auth/github` (with returnTo if provided)
-  - Monitor popup for OAuth completion
-  - Return immediately after popup creation (async flow continues in background)
-- **Logging**: Log IPC call, popup creation, OAuth URL construction
+**Completed**: Automatic token injection in API requests.
 
-#### Step 3.2: Modify OAuth Popup Handler
-- **File**: `electron/main.ts`
-- **Changes**:
-  1. Create popup window with shared session partition (`persist:main`)
-  2. After detecting callback URL in `will-navigate`:
-     - Poll/retry to read session cookie from popup (with timeout, e.g., 5 seconds)
-     - Read from `http://localhost:4000` where cookie was set
-     - Log cookie read attempts and results
-  3. Once cookie is available:
-     - Set cookie directly in main window's session
-     - Log cookie set result
-     - Notify renderer via IPC that auth completed (no cookie value sent)
-  4. After closing popup:
-     - Verify cookie was set successfully in main window
-     - Log verification result
-- **Logging**: Log every step with detailed state information
-- **Note**: Use polling/retry with timeout instead of fixed delay for better reliability
+- ✅ Created IPC handler for authenticated API requests
+- ✅ Electron main process retrieves token from keytar
+- ✅ Token included in Authorization header automatically
+- ✅ Frontend uses `electronAPI.apiRequest()` for authenticated calls
+- ✅ Fallback to regular fetch for web mode
 
-#### Step 3.3: Update Frontend OAuth Initiation Function
-- **File**: `frontend/src/lib/api.ts`
-- **Function**: `startGitHubLogin(returnTo?: string)`
-- **Changes**:
-  1. Detect Electron mode: `window.electronAPI?.isElectron || window.location.protocol === 'file:'`
-  2. If Electron: Call `window.electronAPI.startGitHubAuth(returnTo)` via IPC
-  3. If not Electron: Use existing window navigation approach (for web compatibility)
-  4. **Critical**: Never use `window.location.origin` in Electron - it's `file://` in production
-- **Logging**: Log OAuth initiation method (IPC vs navigation), Electron detection result
+### Phase 7: Production Build Configuration ✅
 
-#### Step 3.4: Update Frontend OAuth Handler
-- **File**: `frontend/src/App.tsx`
-- **Changes**:
-  1. Listen for `github-auth-complete` IPC event (Electron) or detect via navigation (web)
-  2. Store flag indicating "cookie was set" for debugging/logging (not the cookie value)
-  3. Make auth status request using existing `/api/auth/status` endpoint
-  4. Cookie is automatically included via `credentials: 'include'`
-  5. If authentication fails, show error message
-- **Logging**: Log auth completion flag, auth status request, results
+**Completed**: Fixed production build issues.
 
-#### Step 3.4: Update API Client
-- **File**: `frontend/src/lib/api.ts`
-- **Changes**:
-  1. Keep using `credentials: 'include'` in all API requests
-  2. Cookie is automatically sent by browser/Electron from session
-  3. No manual cookie header management needed
-  4. Log API request/response status (cookie handling is automatic)
-- **Logging**: Log API requests/responses, authentication status
-- **Note**: No need to manually manage cookies - Electron session handles it automatically
-
-**Success Criteria**:
-- OAuth flow completes
-- Session cookie is transferred from popup to main window
-- Main window can make authenticated API requests
-- All steps are logged
-
----
-
-### Phase 4: Session Validation and Error Handling
-
-**Objective**: Ensure session persistence and handle edge cases.
-
-#### Step 4.1: Use Existing Session Status Endpoint
-- **File**: `backend/src/routes/auth.ts`
-- **Endpoint**: `GET /api/auth/status` (already exists)
-- **Functionality**:
-  - Returns authentication status, login, and configuration
-  - No new endpoint needed
-  - Log validation requests and results
-- **Logging**: Log all validation requests and results
-
-#### Step 4.2: Implement Periodic Session Validation
-- **File**: `frontend/src/App.tsx`
-- **Implementation**:
-  - Validate session every 30 seconds
-  - If session invalid, clear stored cookie and show error
-  - Log validation results
-- **Logging**: Log all validation checks
-
-#### Step 4.3: Add Error Recovery
-- **Files**: `frontend/src/App.tsx`, `electron/main.ts`
-- **Scenarios**:
-  1. Cookie not received after OAuth: Retry cookie read, show error
-  2. Cookie set fails: Retry with different settings, show error
-  3. Session expires: Clear cookie, prompt re-authentication
-  4. Cookie mismatch: Clear old cookie, request new one
-- **Logging**: Log all error scenarios and recovery attempts
-
-**Success Criteria**:
-- Session validation works correctly
-- Errors are detected and handled gracefully
-- User receives clear error messages
-- All error scenarios are logged
-
----
-
-### Phase 5: Backend Cookie Configuration
-
-**Objective**: Ensure backend sets cookies correctly for Electron.
-
-#### Step 5.1: Review Session Cookie Configuration
-- **File**: `backend/src/index.ts`
-- **Current Settings**:
-  - `httpOnly: true`
-  - `secure: false`
-  - `path: "/"`
-  - `sameSite: "lax"` (currently set)
-- **Required Changes**:
-  - Keep `sameSite: "lax"` (works for Electron localhost)
-  - Ensure `domain` is not set (allows localhost without port restriction)
-  - Verify `path` is `/` (allows all paths)
-  - Cookie will be read and set programmatically in Electron, so backend config is for initial setting
-- **Logging**: Log cookie configuration on server start
-
-#### Step 5.2: Add Cookie Debugging Endpoint
-- **File**: `backend/src/routes/auth.ts`
-- **Endpoint**: `GET /api/auth/debug/cookies`
-- **Functionality**:
-  - Return all cookies received in request
-  - Return session cookie configuration
-  - Return current session state
-  - **WARNING**: Only enable in development mode
-- **Logging**: Log all debug endpoint accesses
-
-**Success Criteria**:
-- Backend cookies are configured correctly
-- Cookie debugging is available
-- Configuration is logged
+- ✅ Added `jsonwebtoken` to root dependencies
+- ✅ Removed `--ignore=backend/node_modules` from build scripts
+- ✅ Added `electron-rebuild` to build process
+- ✅ Configured ASAR unpacking for keytar
+- ✅ All backend dependencies included in production build
 
 ---
 
@@ -422,38 +232,37 @@ The solution will use a **hybrid approach** combining:
 
 ### 4.1 Log Levels
 
-- **DEBUG**: Detailed information for debugging (cookie values, session IDs, navigation URLs)
-- **INFO**: Normal operational events (OAuth started, popup opened, authentication successful)
-- **WARN**: Warning conditions (cookie read failed, session validation failed, retry attempts)
-- **ERROR**: Error conditions (OAuth failed, cookie set failed, session lost)
+- **DEBUG**: Detailed information for debugging (token presence, OAuth state, navigation URLs)
+- **INFO**: Normal operational events (OAuth started, system browser opened, authentication successful)
+- **WARN**: Warning conditions (token read failed, token validation failed, retry attempts)
+- **ERROR**: Error conditions (OAuth failed, token storage failed, authentication lost)
 
 ### 4.2 Required Log Points
 
 #### Electron Main Process
-- [ ] Window creation (popup and main)
-- [ ] Window destruction
-- [ ] Navigation events (will-navigate, did-navigate, did-navigate-in-page)
-- [ ] IPC message send/receive
-- [ ] Cookie read operations (with sanitized values)
-- [ ] Cookie set operations (with sanitized values)
-- [ ] OAuth flow state changes
-- [ ] Error conditions
+- [x] Window creation (main window)
+- [x] Window destruction
+- [x] Custom protocol handler registration
+- [x] Protocol URL handling
+- [x] IPC message send/receive
+- [x] Token storage/retrieval from keytar
+- [x] OAuth flow state changes
+- [x] Error conditions
 
 #### Electron Renderer Process
-- [ ] OAuth initiation
-- [ ] IPC message send/receive
-- [ ] Cookie storage/retrieval
-- [ ] API request/response (with sanitized headers)
-- [ ] Session validation results
-- [ ] Error conditions
+- [x] OAuth initiation via IPC
+- [x] IPC message send/receive
+- [x] API request/response (with token injection)
+- [x] Authentication status validation
+- [x] Error conditions
 
 #### Backend
-- [ ] OAuth route access
-- [ ] OAuth state storage/validation
-- [ ] Session creation/update
-- [ ] Cookie set operations
-- [ ] Session validation requests
-- [ ] Error conditions
+- [x] OAuth route access
+- [x] OAuth state storage/validation
+- [x] JWT token issuance
+- [x] Token validation from Authorization header
+- [x] Authentication status requests
+- [x] Error conditions
 
 ### 4.3 Log Format
 
@@ -473,17 +282,18 @@ The solution will use a **hybrid approach** combining:
 ### 4.4 Log Sanitization
 
 **Never log**:
-- Full cookie values (log only presence/absence and first/last 4 chars)
-- Full session IDs (log only first/last 4 chars)
-- Passwords or tokens
+- Full JWT token values (log only presence/absence)
+- Full GitHub access tokens
+- Passwords
 - Full request/response bodies
 
 **Always log**:
-- Cookie presence/absence
-- Session ID presence/absence
+- Token presence/absence
+- Authentication status
 - Error messages
 - State transitions
 - Operation results (success/failure)
+- OAuth flow steps
 
 ---
 
@@ -491,61 +301,68 @@ The solution will use a **hybrid approach** combining:
 
 ### 5.1 Unit Tests
 
-- Cookie read/set operations
-- Session validation logic
+- Token storage/retrieval from keytar
+- JWT token creation and validation
 - OAuth state validation
 - Error handling
 
 ### 5.2 Integration Tests
 
 - Complete OAuth flow in Electron
-- Cookie transfer from popup to main window
-- Session persistence across app restarts
+- Token transfer via custom protocol (production)
+- Token transfer via localhost polling (development)
+- Token persistence across app restarts
 - Error recovery scenarios
 
 ### 5.3 Manual Testing Checklist
 
-- [ ] OAuth popup opens correctly
-- [ ] GitHub authentication completes
-- [ ] Popup closes automatically
-- [ ] Main window shows authenticated state
-- [ ] Session persists after app restart
-- [ ] Session expires correctly
-- [ ] Error messages are clear
-- [ ] Logs contain sufficient detail for debugging
+- [x] System browser opens for OAuth (not Electron popup)
+- [x] GitHub authentication completes in system browser
+- [x] Custom protocol redirect works in production
+- [x] Localhost polling works in development
+- [x] Main window shows authenticated state after OAuth
+- [x] Token persists after app restart (stored in keytar)
+- [x] Authenticated API requests work
+- [x] Token expiration handled gracefully
+- [x] Error messages are clear
+- [x] Logs contain sufficient detail for debugging
+- [x] Production build includes all dependencies
+- [x] Native module (keytar) works in production
 
 ---
 
 ## 6. Known Pitfalls and Mitigations
 
-### 6.1 Cookie Domain Mismatch
+### 6.1 Custom Protocol Registration
 
-**Pitfall**: Cookies set for `localhost:4000` may not be accessible from `localhost:5173`.
+**Pitfall**: Custom protocol handler may not work in development mode (app not installed).
 
 **Mitigation**: 
-- When setting cookies programmatically in Electron, use `domain: 'localhost'` (without port)
-- This allows cookie to work across all localhost ports
-- Always read cookies from `http://localhost:4000` (backend URL) where they're set
-- Log cookie domain/path in all operations
+- Use localhost polling endpoint for development mode
+- Custom protocol only used in production (when app is installed)
+- Backend detects environment and redirects accordingly
+- Polling enabled in both dev and production as fallback
 
-### 6.2 Timing Issues
+### 6.2 Native Module Loading
 
-**Pitfall**: Cookie may not be available immediately after OAuth callback.
-
-**Mitigation**:
-- Poll/retry reading cookie from popup with timeout (e.g., 5 seconds max)
-- Wait for cookie to be available before setting it in main window
-- Verify cookie was set successfully before closing popup
-- Log timing of all operations
-
-### 6.3 Session Expiration
-
-**Pitfall**: Session may expire between OAuth and first API request.
+**Pitfall**: `keytar` native module may not load in production build.
 
 **Mitigation**:
-- Set reasonable session expiration (24 hours)
-- Implement session refresh mechanism
-- Log session expiration events
+- Use `electron-rebuild` to rebuild native modules for Electron
+- Unpack `keytar` from ASAR archive (native modules can't be in ASAR)
+- Add `--asarUnpack=**/node_modules/keytar/**` to build script
+- Test token storage in production build
+
+### 6.3 Token Expiration
+
+**Pitfall**: JWT tokens may expire between OAuth and first API request.
+
+**Mitigation**:
+- Set reasonable token expiration (default 30 days, configurable via `JWT_EXPIRY`)
+- Frontend validates token periodically
+- Clear expired tokens from keytar
+- Prompt re-authentication when token expires
+- Log token expiration events
 
 ### 6.4 Multiple Windows
 
@@ -570,38 +387,53 @@ The solution will use a **hybrid approach** combining:
 
 ## 7. Implementation Checklist
 
-### Phase 1: Logging Infrastructure
-- [ ] Create logging standards document
-- [ ] Implement logger utilities (main, renderer, backend)
-- [ ] Add logging to existing OAuth flow
-- [ ] Verify logs are comprehensive
+### Phase 1: Logging Infrastructure ✅
+- [x] Create logging standards document
+- [x] Implement logger utilities (main, renderer, backend)
+- [x] Add logging to existing OAuth flow
+- [x] Verify logs are comprehensive
 
-### Phase 2: Cookie Management
-- [ ] Implement stateless in-memory OAuth state store in backend
-- [ ] Implement cookie reading in main process (from `http://localhost:4000`)
-- [ ] Implement cookie setting in main process (directly in main window session)
-- [ ] Update preload script (minimal, no cookie IPC needed)
-- [ ] Test cookie operations in isolation
+### Phase 2: Token-Based Authentication ✅
+- [x] Implement stateless in-memory OAuth state store in backend
+- [x] Implement JWT token issuance after OAuth
+- [x] Create JWT authentication middleware
+- [x] Update backend routes to use JWT tokens
+- [x] Remove express-session dependency
 
-### Phase 3: OAuth Integration
-- [ ] Add IPC handler for OAuth initiation in main process
-- [ ] Update preload script with `startGitHubAuth` IPC method
-- [ ] Modify OAuth popup handler in main process
-- [ ] Update `startGitHubLogin` function to detect Electron and use IPC
-- [ ] Update frontend OAuth handler to listen for IPC events
-- [ ] Update API client
-- [ ] Test complete OAuth flow in Electron
+### Phase 3: Secure Token Storage ✅
+- [x] Add keytar dependency for secure storage
+- [x] Implement token storage/retrieval in Electron main process
+- [x] Add electron-rebuild for native module support
+- [x] Configure ASAR unpacking for keytar
+- [x] Test token persistence across app restarts
 
-### Phase 4: Session Validation
-- [ ] Use existing `/api/auth/status` endpoint for validation
-- [ ] Implement periodic validation in frontend
-- [ ] Add error recovery
-- [ ] Test error scenarios
+### Phase 4: System Browser OAuth Flow ✅
+- [x] Remove Electron popup window approach
+- [x] Implement system browser OAuth via shell.openExternal()
+- [x] Register custom protocol handler
+- [x] Add single-instance lock for Windows
+- [x] Implement custom protocol URL handling
 
-### Phase 5: Backend Configuration
-- [ ] Review cookie configuration
-- [ ] Add cookie debugging endpoint
-- [ ] Verify configuration
+### Phase 5: Development/Production Callback ✅
+- [x] Implement custom protocol redirect for production
+- [x] Implement localhost polling for development
+- [x] Add backend callback detection logic
+- [x] Enable polling in both dev and production
+- [x] Test both callback methods
+
+### Phase 6: API Request Token Injection ✅
+- [x] Create IPC handler for authenticated API requests
+- [x] Implement token retrieval from keytar
+- [x] Add Authorization header injection
+- [x] Update frontend to use electronAPI.apiRequest()
+- [x] Test authenticated API requests
+
+### Phase 7: Production Build Configuration ✅
+- [x] Add jsonwebtoken to root dependencies
+- [x] Fix backend dependencies in build
+- [x] Add electron-rebuild to build process
+- [x] Configure ASAR unpacking
+- [x] Test production build
 
 ### Final Steps
 - [ ] Remove debug instrumentation (keep essential logs)
@@ -616,26 +448,40 @@ The solution will use a **hybrid approach** combining:
 The implementation is considered successful when:
 
 1. ✅ User can click "Sign in with GitHub" in Electron app
-2. ✅ OAuth popup opens and user authenticates with GitHub
-3. ✅ Popup closes automatically after authentication
-4. ✅ Main window immediately shows authenticated state
+2. ✅ System browser opens for GitHub OAuth (not Electron popup)
+3. ✅ User authenticates with GitHub in system browser
+4. ✅ Main window immediately shows authenticated state after OAuth
 5. ✅ User can make authenticated API requests
-6. ✅ Session persists across app restarts
+6. ✅ Token persists across app restarts (stored in OS credential vault)
 7. ✅ All operations are logged with sufficient detail
 8. ✅ Error scenarios are handled gracefully with clear messages
 9. ✅ No "Invalid OAuth state" errors
-10. ✅ No session cookie sharing issues
+10. ✅ No cookie-based session issues (using tokens instead)
+11. ✅ Production build works correctly with all dependencies
+12. ✅ Custom protocol handler works in production
+13. ✅ Localhost polling works in development
 
 ---
 
-## 9. Rollback Plan
+## 9. Implementation Notes
 
-If implementation fails:
+### Key Changes from Original Plan
 
-1. **Keep stateless OAuth state store** (to be implemented)
-2. **Revert cookie management changes** if they cause issues
-3. **Maintain extensive logging** for future debugging
-4. **Document all findings** for next attempt
+The implementation diverged from the original cookie-based approach due to fundamental issues with cookies in Electron OAuth flows. The final implementation uses:
+
+1. **Token-based authentication** instead of cookies
+2. **System browser** instead of Electron popup
+3. **OS credential vault** (keytar) instead of session cookies
+4. **Custom protocol handler** for production callbacks
+5. **Localhost polling** for development callbacks
+
+### Why This Approach Works Better
+
+- **No cookie domain/path issues**: Tokens are stored securely in OS vault
+- **Better security**: Tokens in OS credential vault vs cookies
+- **Better UX**: System browser is more familiar to users
+- **More reliable**: No cookie sharing issues between windows
+- **Cross-platform**: Works consistently on Windows, macOS, and Linux
 
 ---
 
@@ -669,20 +515,25 @@ frontend/
 backend/
   src/
     routes/
-      auth.ts          # OAuth routes, session validation
+      auth.ts          # OAuth routes, JWT token issuance
+    middleware/
+      auth.ts          # JWT authentication middleware
     utils/
       logger.ts        # Backend logger
-    index.ts           # Session configuration
+    index.ts           # Server configuration (no session middleware)
 ```
 
 ---
 
 ## Appendix B: Key Dependencies
 
-- `electron`: Window management, IPC, cookie API
-- `express-session`: Backend session management
+- `electron`: Window management, IPC, shell API
+- `keytar`: Secure token storage in OS credential vault
+- `jsonwebtoken`: JWT token creation and validation
 - `express`: Backend server
 - `crypto`: OAuth state generation
+- `electron-rebuild`: Rebuild native modules for Electron
+- `@types/jsonwebtoken`: TypeScript types for jsonwebtoken
 
 ---
 
