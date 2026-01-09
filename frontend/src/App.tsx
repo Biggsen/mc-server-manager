@@ -26,6 +26,7 @@ import {
   Avatar,
 } from '@mantine/core'
 import { fetchAuthStatus, logout, startGitHubLogin, type AuthStatus } from './lib/api'
+import { logger } from './lib/logger'
 import Dashboard from './pages/Dashboard'
 import ImportProject from './pages/ImportProject'
 import NewProject from './pages/NewProject'
@@ -107,6 +108,7 @@ function App() {
   const [authError, setAuthError] = useState<string | null>(null)
   const [signingOut, setSigningOut] = useState(false)
 
+  // Check auth status on mount and route changes
   useEffect(() => {
     fetchAuthStatus()
       .then((status) => {
@@ -118,6 +120,47 @@ function App() {
         setAuthError(error.message)
       })
   }, [location.pathname])
+
+  // Listen for OAuth completion in Electron
+  useEffect(() => {
+    const isElectron = window.electronAPI?.isElectron || window.location.protocol === 'file:';
+    
+    if (isElectron && window.electronAPI?.onAuthComplete) {
+      logger.info('oauth-listener-registered', {
+        isElectron: true,
+      });
+
+      // Set up IPC listener for auth completion
+      window.electronAPI.onAuthComplete(() => {
+        logger.info('oauth-complete-received', {
+          source: 'IPC',
+        });
+
+        // Store flag indicating cookie was set (for debugging/logging only)
+        logger.debug('oauth-cookie-set-flag', {
+          cookieSet: true,
+        });
+
+        // Check auth status after OAuth completes
+        fetchAuthStatus()
+          .then((status) => {
+            logger.info('auth-status-after-oauth', {
+              authenticated: status.authenticated,
+              login: status.login,
+            });
+            setAuthStatus(status);
+            setAuthError(null);
+          })
+          .catch((error: Error) => {
+            logger.error('auth-status-check-failed', {
+              reason: 'Failed to check auth status after OAuth',
+            }, error.message);
+            setAuthStatus(null);
+            setAuthError(error.message);
+          });
+      });
+    }
+  }, [])
 
   const currentTitle = useMemo(() => {
     if (location.pathname === '/') {

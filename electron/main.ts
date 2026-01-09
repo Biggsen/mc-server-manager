@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell } from 'electron';
+import { app, BrowserWindow, shell, ipcMain } from 'electron';
 import { join } from 'path';
 import { logger } from './src/utils/logger';
 
@@ -196,6 +196,201 @@ async function setSessionCookieInMainWindow(cookieValue: string): Promise<boolea
   }
 }
 
+/**
+ * Poll/retry reading cookie from popup with timeout
+ * Returns cookie value or null if timeout/error
+ */
+async function pollForSessionCookie(
+  authWindow: BrowserWindow,
+  timeoutMs: number = 5000,
+  intervalMs: number = 100
+): Promise<string | null> {
+  const windowId = authWindow.id.toString();
+  const startTime = Date.now();
+  let attempt = 0;
+
+  logger.debug('cookie-poll-start', {
+    timeoutMs,
+    intervalMs,
+  }, windowId);
+
+  while (Date.now() - startTime < timeoutMs) {
+    attempt++;
+    const cookie = await getSessionCookieFromPopup(authWindow);
+    
+    if (cookie) {
+      logger.info('cookie-poll-success', {
+        attempt,
+        elapsedMs: Date.now() - startTime,
+      }, windowId);
+      return cookie;
+    }
+
+    // Wait before next attempt
+    await new Promise(resolve => setTimeout(resolve, intervalMs));
+  }
+
+  logger.warn('cookie-poll-timeout', {
+    attempt,
+    elapsedMs: Date.now() - startTime,
+  }, windowId, 'Cookie not available after timeout');
+  return null;
+}
+
+/**
+ * Handle OAuth flow in popup window
+ * Creates popup, monitors for callback, transfers cookie to main window
+ */
+async function handleGitHubOAuth(returnTo?: string): Promise<void> {
+  logger.info('oauth-popup-created', {
+    returnTo,
+  }, 'oauth-popup');
+
+  // Build OAuth URL
+  const oauthUrl = new URL('http://localhost:4000/api/auth/github');
+  if (returnTo) {
+    oauthUrl.searchParams.set('returnTo', returnTo);
+  }
+
+  logger.debug('oauth-url-constructed', {
+    url: oauthUrl.toString(),
+    returnTo,
+  }, 'oauth-popup');
+
+  // Create popup window with temporary session partition
+  // Using temporary partition ensures popup starts fresh each time
+  // Cookie will be explicitly copied to main window after OAuth
+  const authWindow = new BrowserWindow({
+    width: 600,
+    height: 700,
+    show: false,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      partition: 'temp-oauth', // Temporary partition - cleared on restart
+    },
+  });
+
+  const windowId = authWindow.id.toString();
+
+  // Show window when ready
+  authWindow.once('ready-to-show', () => {
+    logger.debug('oauth-popup-ready', {}, windowId);
+    authWindow.show();
+  });
+
+  // Flag to track if callback was detected
+  let callbackDetected = false;
+
+  // Monitor for OAuth callback URL (don't prevent navigation)
+  authWindow.webContents.on('will-navigate', (event, url) => {
+    logger.debug('oauth-popup-navigation', {
+      type: 'will-navigate',
+      url,
+    }, windowId);
+
+    // Check if this is the OAuth callback
+    if (url.includes('/api/auth/github/callback')) {
+      logger.info('oauth-callback-detected', {
+        url,
+      }, windowId);
+      
+      // Set flag but allow navigation to complete
+      // Backend needs to process the callback and set the cookie
+      callbackDetected = true;
+      // Don't prevent navigation - let it complete so backend can set cookie
+    }
+  });
+
+  // Handle navigation completion - read cookie after backend has set it
+  authWindow.webContents.on('did-finish-load', async () => {
+    if (callbackDetected) {
+      logger.debug('oauth-callback-page-loaded', {
+        url: authWindow.webContents.getURL(),
+      }, windowId);
+
+      // Poll for cookie with timeout (5 seconds)
+      // Backend should have set the cookie by now
+      const cookie = await pollForSessionCookie(authWindow, 5000, 100);
+
+      if (cookie) {
+        // Set cookie in main window
+        const setSuccess = await setSessionCookieInMainWindow(cookie);
+
+        if (setSuccess) {
+          logger.info('oauth-cookie-transferred', {
+            cookieSet: true,
+          }, windowId);
+
+          // Verify cookie was set in main window
+          if (mainWindow) {
+            const mainSession = mainWindow.webContents.session;
+            const mainCookies = await mainSession.cookies.get({
+              url: 'http://localhost:4000',
+              name: 'connect.sid',
+            });
+
+            if (mainCookies.length > 0) {
+              logger.info('cookie-verify-success', {
+                cookiePresent: true,
+              }, 'main');
+            } else {
+              logger.warn('cookie-verify-failed', {
+                cookiePresent: false,
+              }, 'main');
+            }
+          }
+
+          // Notify renderer that auth completed
+          if (mainWindow) {
+            mainWindow.webContents.send('github-auth-complete');
+            logger.info('oauth-complete-notification-sent', {}, 'main');
+          }
+        } else {
+          logger.error('oauth-cookie-transfer-failed', {
+            cookieSet: false,
+          }, windowId, 'Failed to set cookie in main window');
+        }
+      } else {
+        logger.error('oauth-cookie-read-failed', {
+          cookieRead: false,
+        }, windowId, 'Failed to read cookie from popup');
+      }
+
+      // Close popup
+      authWindow.close();
+    }
+  });
+
+  // Handle popup closed
+  authWindow.on('closed', () => {
+    logger.info('oauth-popup-closed', {}, windowId);
+  });
+
+  // Load OAuth URL
+  logger.debug('oauth-popup-loading', {
+    url: oauthUrl.toString(),
+  }, windowId);
+  await authWindow.loadURL(oauthUrl.toString());
+}
+
+// IPC handler for OAuth initiation
+ipcMain.handle('github-auth-start', async (_event, returnTo?: string) => {
+  logger.info('ipc-oauth-start', {
+    returnTo,
+  }, 'main');
+
+  // Start OAuth flow (async, don't wait for completion)
+  handleGitHubOAuth(returnTo).catch((error) => {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    logger.error('oauth-flow-error', {
+      returnTo,
+    }, 'main', errorMsg);
+  });
+
+  // Return immediately after popup creation
+  return;
+});
 
 function createWindow(): void {
   logger.info('window-created', {

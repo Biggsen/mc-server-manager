@@ -982,16 +982,32 @@ export function startGitHubLogin(returnTo?: string): void {
     returnTo,
     protocol: window.location.protocol,
     origin: window.location.origin,
+    method: isElectron ? 'IPC' : 'navigation',
   });
   
-  // In Electron, we'll use IPC (to be implemented in Phase 3)
-  // For now, use window navigation (will be updated in Phase 3)
+  // In Electron, use IPC (required - window.location.origin is file:// in production)
   if (isElectron) {
-    logger.warn('oauth-initiation', {
-      reason: 'Using window navigation in Electron (will be replaced with IPC)',
-    });
+    if (window.electronAPI?.startGitHubAuth) {
+      logger.debug('oauth-initiation-ipc', {
+        returnTo,
+      });
+      window.electronAPI.startGitHubAuth(returnTo).catch((error: Error) => {
+        logger.error('oauth-initiation-failed', {
+          reason: 'IPC call failed',
+        }, error.message);
+      });
+      return;
+    } else {
+      logger.error('oauth-initiation-failed', {
+        reason: 'IPC method not available',
+      }, 'startGitHubAuth not found on electronAPI');
+    }
   }
   
+  // Fallback to window navigation (web mode or Electron without IPC)
+  logger.debug('oauth-initiation-navigation', {
+    returnTo,
+  });
   const url = new URL(`${API_BASE}/auth/github`, window.location.origin)
   if (returnTo) {
     url.searchParams.set('returnTo', returnTo)
