@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import { Router } from "express";
 import { randomBytes } from "crypto";
+import jwt from "jsonwebtoken";
 import {
   appBaseUrl,
   authCallbackUrl,
@@ -10,9 +11,14 @@ import {
   requireAuthConfig,
 } from "../config";
 import { createLogger } from "../utils/logger";
+import type { AuthTokenPayload } from "../middleware/auth";
 
 const router = Router();
 const logger = createLogger("backend-auth");
+import { jwtSecret, jwtExpiry } from "../config";
+
+const JWT_SECRET = jwtSecret;
+const JWT_EXPIRY = jwtExpiry;
 
 // Stateless in-memory OAuth state store
 // Replaces session-based storage to avoid cookie issues in Electron OAuth flows
@@ -44,38 +50,52 @@ setInterval(() => {
 }, 5 * 60 * 1000); // Run cleanup every 5 minutes
 
 router.get("/status", (req: Request, res: Response) => {
-  const sessionId = req.sessionID;
-  const configured = Boolean(githubClientId && githubClientSecret);
-  const authenticated = Boolean(req.session.github);
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.replace(/^Bearer\s+/i, "");
   
-  logger.info("session-validated", {
+  const configured = Boolean(githubClientId && githubClientSecret);
+  let authenticated = false;
+  let login: string | null = null;
+  
+  if (token) {
+    try {
+      const decoded = jwt.verify(token, JWT_SECRET) as AuthTokenPayload;
+      authenticated = true;
+      login = decoded.login;
+    } catch (error) {
+      // Token invalid or expired
+      logger.debug("auth-status-token-invalid", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  
+  logger.info("auth-status-checked", {
     configured,
     authenticated,
-    login: req.session.github?.login ?? null,
-  }, sessionId);
+    login,
+  });
   
   res.json({
     provider: "github",
     configured,
     authenticated,
-    login: req.session.github?.login ?? null,
+    login,
     authorizeUrl: configured ? "/auth/github" : null,
   });
 });
 
 router.get("/github", (req: Request, res: Response) => {
-  const sessionId = req.sessionID;
-  
   logger.info("oauth-started", {
     returnTo: typeof req.query.returnTo === "string" ? req.query.returnTo : undefined,
-  }, sessionId);
+  });
   
   requireAuthConfig();
 
   if (!githubClientId || !githubClientSecret) {
     logger.error("oauth-failed", {
       reason: "GitHub OAuth environment variables are missing",
-    }, sessionId, "GitHub OAuth environment variables are missing");
+    }, "GitHub OAuth environment variables are missing");
     res.status(500).json({ error: "GitHub OAuth environment variables are missing" });
     return;
   }
@@ -96,24 +116,22 @@ router.get("/github", (req: Request, res: Response) => {
   authorizeUrl.searchParams.set("scope", githubScope);
   authorizeUrl.searchParams.set("state", state);
 
-  logger.debug("oauth-state-created", {
-    state: state.slice(0, 4) + "..." + state.slice(-4),
-    returnTo: returnToParam,
-    storeSize: oauthStateStore.size,
-    authorizeUrl: authorizeUrl.toString(),
-  }, sessionId);
+    logger.debug("oauth-state-created", {
+      state: state.slice(0, 4) + "..." + state.slice(-4),
+      returnTo: returnToParam,
+      storeSize: oauthStateStore.size,
+      authorizeUrl: authorizeUrl.toString(),
+    });
 
   res.redirect(authorizeUrl.toString());
 });
 
 router.get("/github/callback", async (req: Request, res: Response) => {
-  const sessionId = req.sessionID;
-  
   logger.info("oauth-callback-detected", {
     hasCode: typeof req.query.code === "string",
     hasState: typeof req.query.state === "string",
     storeSize: oauthStateStore.size,
-  }, sessionId);
+  });
   
   try {
     const { code, state } = req.query;
@@ -123,7 +141,7 @@ router.get("/github/callback", async (req: Request, res: Response) => {
         reason: "Missing OAuth code or state",
         hasCode: typeof code === "string",
         hasState: typeof state === "string",
-      }, sessionId, "Missing OAuth code or state");
+      }, "Missing OAuth code or state");
       res.status(400).json({ error: "Missing OAuth code or state" });
       return;
     }
@@ -135,7 +153,7 @@ router.get("/github/callback", async (req: Request, res: Response) => {
         reason: "Invalid OAuth state - not found in store",
         receivedState: state.slice(0, 4) + "..." + state.slice(-4),
         storeSize: oauthStateStore.size,
-      }, sessionId, "Invalid OAuth state");
+      }, "Invalid OAuth state");
       res.status(400).json({ error: "Invalid OAuth state" });
       return;
     }
@@ -148,7 +166,7 @@ router.get("/github/callback", async (req: Request, res: Response) => {
         reason: "Invalid OAuth state - expired",
         receivedState: state.slice(0, 4) + "..." + state.slice(-4),
         age: now - stateEntry.createdAt,
-      }, sessionId, "Invalid OAuth state - expired");
+      }, "Invalid OAuth state - expired");
       res.status(400).json({ error: "Invalid OAuth state" });
       return;
     }
@@ -156,19 +174,19 @@ router.get("/github/callback", async (req: Request, res: Response) => {
     logger.debug("oauth-state-validated", {
       state: state.slice(0, 4) + "..." + state.slice(-4),
       returnTo: stateEntry.returnTo,
-    }, sessionId);
+    });
 
     if (!githubClientId || !githubClientSecret) {
       logger.error("oauth-failed", {
         reason: "GitHub OAuth environment variables are missing",
-      }, sessionId, "GitHub OAuth environment variables are missing");
+      }, "GitHub OAuth environment variables are missing");
       res.status(500).json({ error: "GitHub OAuth environment variables are missing" });
       return;
     }
 
     logger.debug("oauth-token-exchange-start", {
       codeLength: code.length,
-    }, sessionId);
+    });
 
     const tokenResponse = await fetch("https://github.com/login/oauth/access_token", {
       method: "POST",
@@ -189,7 +207,7 @@ router.get("/github/callback", async (req: Request, res: Response) => {
       logger.error("oauth-failed", {
         reason: "Token exchange failed",
         status: tokenResponse.status,
-      }, sessionId, errorMsg);
+      }, errorMsg);
       throw new Error(errorMsg);
     }
 
@@ -205,16 +223,16 @@ router.get("/github/callback", async (req: Request, res: Response) => {
       logger.error("oauth-failed", {
         reason: "No access token in response",
         error: tokenJson.error,
-      }, sessionId, errorMsg);
+      }, errorMsg);
       throw new Error(errorMsg);
     }
 
     logger.debug("oauth-token-received", {
       hasToken: Boolean(tokenJson.access_token),
       scope: tokenJson.scope,
-    }, sessionId);
+    });
 
-    logger.debug("oauth-user-fetch-start", {}, sessionId);
+    logger.debug("oauth-user-fetch-start", {});
 
     const userResponse = await fetch("https://api.github.com/user", {
       headers: {
@@ -230,7 +248,7 @@ router.get("/github/callback", async (req: Request, res: Response) => {
       logger.error("oauth-failed", {
         reason: "User profile fetch failed",
         status: userResponse.status,
-      }, sessionId, errorMsg);
+      }, errorMsg);
       throw new Error(errorMsg);
     }
 
@@ -242,65 +260,148 @@ router.get("/github/callback", async (req: Request, res: Response) => {
     logger.debug("oauth-user-received", {
       login: userJson.login,
       hasAvatar: Boolean(userJson.avatar_url),
-    }, sessionId);
+    });
 
-    req.session.github = {
-      accessToken: tokenJson.access_token,
+    // Create JWT token instead of session
+    const tokenPayload = {
       login: userJson.login,
-      avatarUrl: userJson.avatar_url,
+      accessToken: tokenJson.access_token,
       scopes: tokenJson.scope ? tokenJson.scope.split(",") : undefined,
     };
 
-    logger.info("session-created", {
+    const jwtToken = jwt.sign(
+      tokenPayload as object,
+      JWT_SECRET,
+      {
+        expiresIn: JWT_EXPIRY,
+      } as jwt.SignOptions
+    );
+
+    logger.info("oauth-token-issued", {
       login: userJson.login,
       scopes: tokenJson.scope ? tokenJson.scope.split(",") : undefined,
-    }, sessionId);
+    });
 
-    // Get returnTo from state entry (stateless, no session dependency)
-    const redirectTarget = stateEntry.returnTo ?? appBaseUrl;
-    
     // Clean up used state from store
     oauthStateStore.delete(state);
 
     logger.info("oauth-completed", {
-      redirectTarget,
       login: userJson.login,
       storeSize: oauthStateStore.size,
-    }, sessionId);
+    });
 
-    res.redirect(redirectTarget);
+    // In development, use localhost callback (Electron can access this)
+    // In production, use custom protocol
+    const isDev = process.env.NODE_ENV === 'development' || (process.env.ELECTRON_MODE !== 'true');
+    
+    if (isDev) {
+      // Development: Redirect to localhost callback with token in query params
+      // Electron will open this URL in a hidden window to extract the token
+      const callbackUrl = new URL("http://localhost:4000/api/auth/callback");
+      callbackUrl.searchParams.set("token", jwtToken);
+      callbackUrl.searchParams.set("login", userJson.login);
+      
+      res.redirect(callbackUrl.toString());
+    } else {
+      // Production: Use custom protocol
+      const redirectUrl = new URL("mc-server-manager://auth");
+      redirectUrl.searchParams.set("token", jwtToken);
+      redirectUrl.searchParams.set("login", userJson.login);
+
+      // Send HTML page that tries to open the protocol, with fallback message
+      res.send(`
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <title>Authentication Complete</title>
+            <meta http-equiv="refresh" content="0;url=${redirectUrl.toString()}">
+            <script>
+              // Try to open the custom protocol
+              window.location.href = "${redirectUrl.toString()}";
+              
+              // If still here after 2 seconds, show message
+              setTimeout(function() {
+                document.body.innerHTML = '<h1>Authentication Complete</h1><p>If the application did not open automatically, please return to the MC Server Manager application.</p><p>You can close this window.</p>';
+              }, 2000);
+            </script>
+          </head>
+          <body>
+            <p>Redirecting to application...</p>
+          </body>
+        </html>
+      `);
+    }
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
     logger.error("oauth-failed", {
       reason: "OAuth callback processing failed",
-    }, req.sessionID, errorMsg);
+    }, errorMsg);
     res.status(500).json({ error: "GitHub OAuth callback failed" });
   }
 });
 
-router.post("/logout", (req: Request, res: Response) => {
-  const sessionId = req.sessionID;
-  const login = req.session.github?.login;
+// Temporary token store for development mode (stores most recent token)
+let devTokenStore: { token: string; login: string; expires: number } | null = null;
+
+// Development callback endpoint - shows success page and stores token for Electron to poll
+router.get("/callback", (req: Request, res: Response) => {
+  const token = req.query.token as string | undefined;
+  const login = req.query.login as string | undefined;
   
-  logger.info("session-destroy-start", {
-    login,
-  }, sessionId);
-  
-  req.session.destroy((err) => {
-    if (err) {
-      const errorMsg = err instanceof Error ? err.message : String(err);
-      logger.error("session-destroy-failed", {
-        login,
-      }, sessionId, errorMsg);
-      res.status(500).json({ error: "Failed to logout" });
-      return;
-    }
-    
-    logger.info("session-destroyed", {
+  if (token && login) {
+    logger.info("dev-callback-token-received", {
       login,
-    }, sessionId);
-    res.json({ success: true });
-  });
+    });
+    
+    // Store token temporarily (expires in 2 minutes)
+    devTokenStore = {
+      token,
+      login,
+      expires: Date.now() + 2 * 60 * 1000,
+    };
+    
+    // Return success page
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Authentication Complete</title>
+          <style>
+            body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+            .success { color: green; }
+          </style>
+        </head>
+        <body>
+          <h1 class="success">✓ Authentication Complete</h1>
+          <p>You can close this window and return to the application.</p>
+        </body>
+      </html>
+    `);
+  } else {
+    res.status(400).json({ error: "Missing token or login" });
+  }
+});
+
+// Endpoint for Electron to poll and get the token (development only)
+router.get("/callback/poll", (req: Request, res: Response) => {
+  if (devTokenStore && Date.now() < devTokenStore.expires) {
+    const { token, login } = devTokenStore;
+    // Clear token after returning it (one-time use)
+    devTokenStore = null;
+    logger.info("dev-token-polled", {
+      login,
+    });
+    res.json({ token, login });
+  } else {
+    res.json({ token: null, login: null });
+  }
+});
+
+router.post("/logout", (req: Request, res: Response) => {
+  // Token-based auth doesn't need server-side logout
+  // Client just discards the token
+  logger.info("logout-requested", {});
+  res.json({ success: true });
 });
 
 export default router;

@@ -176,24 +176,20 @@ function App() {
       });
 
       // Set up IPC listener for auth completion
-      window.electronAPI.onAuthComplete(() => {
+      window.electronAPI.onAuthComplete((status) => {
         logger.info('oauth-complete-received', {
           source: 'IPC',
-        });
-
-        // Store flag indicating cookie was set (for debugging/logging only)
-        logger.debug('oauth-cookie-set-flag', {
-          cookieSet: true,
+          login: status?.login,
         });
 
         // Check auth status after OAuth completes
         fetchAuthStatus()
-          .then((status) => {
+          .then((authStatus) => {
             logger.info('auth-status-after-oauth', {
-              authenticated: status.authenticated,
-              login: status.login,
+              authenticated: authStatus.authenticated,
+              login: authStatus.login,
             });
-            setAuthStatus(status);
+            setAuthStatus(authStatus);
             setAuthError(null);
           })
           .catch((error: Error) => {

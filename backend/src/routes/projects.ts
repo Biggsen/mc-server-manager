@@ -1063,7 +1063,7 @@ router.post("/:id/build", async (req: Request, res: Response) => {
     }
 
     const job = await enqueueBuild(project, overrides, {
-      githubToken: req.session.github?.accessToken,
+      githubToken: req.user?.accessToken,
     });
     res.status(202).json({ build: job });
   } catch (error) {
@@ -1141,7 +1141,7 @@ router.delete("/:id", async (req: Request, res: Response) => {
         res.status(400).json({ error: "Project does not have a linked repository" });
         return;
       }
-      if (!req.session.github?.accessToken) {
+      if (!req.user?.accessToken) {
         res.status(401).json({ error: "GitHub authentication required to delete repository" });
         return;
       }

@@ -1,18 +1,11 @@
 import type { Request, Response } from "express";
 import { Router } from "express";
 import { commitFiles, getOctokitForRequest } from "../services/githubClient";
+import { requireAuth } from "../middleware/auth";
 
 const router = Router();
 
-function ensureAuthenticated(req: Request, res: Response, next: () => void) {
-  if (!req.session.github?.accessToken) {
-    res.status(401).json({ error: "GitHub authentication required" });
-    return;
-  }
-  next();
-}
-
-router.use(ensureAuthenticated);
+router.use(requireAuth);
 
 router.get("/user", async (req: Request, res: Response) => {
   try {

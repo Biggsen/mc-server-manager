@@ -1,6 +1,22 @@
-import { app, BrowserWindow, shell, ipcMain } from 'electron';
+import { app, BrowserWindow, shell, ipcMain, net } from 'electron';
 import { join } from 'path';
 import { logger } from './src/utils/logger';
+
+// Dynamic import for keytar to handle native module loading
+let keytar: typeof import('keytar') | null = null;
+async function getKeytar() {
+  if (keytar) return keytar;
+  try {
+    keytar = await import('keytar');
+    return keytar;
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    logger.error('keytar-import-failed', {
+      error: errorMsg,
+    }, 'main', `Failed to import keytar: ${errorMsg}`);
+    throw error;
+  }
+}
 
 let mainWindow: BrowserWindow | null = null;
 let backendStarted = false;
@@ -91,348 +107,236 @@ function getIconPath(): string {
 }
 
 /**
- * Read session cookie from a window's session
- * Always reads from http://localhost:4000 (backend URL where cookie is set)
+ * Handle auth callback from custom protocol
  */
-async function getSessionCookieFromPopup(authWindow: BrowserWindow): Promise<string | null> {
-  const windowId = authWindow.id.toString();
-  
-  logger.debug('cookie-read-attempt', {
-    url: 'http://localhost:4000',
-    cookieName: 'connect.sid',
-  }, windowId);
-  
+async function handleAuthCallback(url: string): Promise<void> {
   try {
-    const session = authWindow.webContents.session;
-    const cookies = await session.cookies.get({
-      url: 'http://localhost:4000',
-      name: 'connect.sid',
-    });
+    const parsed = new URL(url);
     
-    if (cookies.length > 0) {
-      const cookie = cookies[0];
-      const cookieValue = cookie.value;
-      
-      logger.info('cookie-read-success', {
-        url: 'http://localhost:4000',
-        cookieName: 'connect.sid',
-        cookiePresent: true,
-        cookieValue: cookieValue.length > 8 
-          ? `${cookieValue.slice(0, 4)}...${cookieValue.slice(-4)}`
-          : '***',
-      }, windowId);
-      
-      return cookieValue;
-    } else {
-      logger.warn('cookie-read-failed', {
-        url: 'http://localhost:4000',
-        cookieName: 'connect.sid',
-        cookiePresent: false,
-        reason: 'Cookie not found',
-      }, windowId);
-      return null;
-    }
-  } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : String(error);
-    logger.error('cookie-read-failed', {
-      url: 'http://localhost:4000',
-      cookieName: 'connect.sid',
-      reason: 'Exception during cookie read',
-    }, windowId, errorMsg);
-    return null;
-  }
-}
-
-/**
- * Set session cookie in main window's session
- * Cookie is set directly in session, so renderer doesn't need to manage it
- */
-async function setSessionCookieInMainWindow(cookieValue: string): Promise<boolean> {
-  logger.debug('cookie-set-attempt', {
-    url: 'http://localhost:4000',
-    cookieName: 'connect.sid',
-    cookieValue: cookieValue.length > 8 
-      ? `${cookieValue.slice(0, 4)}...${cookieValue.slice(-4)}`
-      : '***',
-  }, 'main');
-  
-  try {
-    if (!mainWindow) {
-      logger.error('cookie-set-failed', {
-        reason: 'Main window not available',
-      }, 'main', 'Main window is null');
-      return false;
+    if (parsed.protocol !== 'mc-server-manager:') {
+      logger.warn('auth-callback-invalid-protocol', {
+        protocol: parsed.protocol,
+      }, 'main');
+      return;
     }
     
-    const session = mainWindow.webContents.session;
-    await session.cookies.set({
-      url: 'http://localhost:4000',
-      name: 'connect.sid',
-      value: cookieValue,
-      domain: 'localhost',  // Explicitly set for Electron compatibility
-      path: '/',
-      httpOnly: true,
-      secure: false,
-      sameSite: 'lax',  // Works for Electron localhost
-    });
+    const token = parsed.searchParams.get('token');
+    const login = parsed.searchParams.get('login');
     
-    logger.info('cookie-set-success', {
-      url: 'http://localhost:4000',
-      cookieName: 'connect.sid',
-      domain: 'localhost',
-      path: '/',
-      sameSite: 'lax',
+    if (!token || !login) {
+      logger.error('auth-callback-missing-data', {
+        hasToken: Boolean(token),
+        hasLogin: Boolean(login),
+      }, 'main', 'Missing token or login in callback');
+      return;
+    }
+    
+    // Store token securely
+    const keytarModule = await getKeytar();
+    await keytarModule.setPassword('mc-server-manager', 'github-token', token);
+    
+    logger.info('auth-token-stored', {
+      login,
     }, 'main');
     
-    return true;
+    // Notify renderer
+    if (mainWindow) {
+      mainWindow.webContents.send('github-auth-complete', { login });
+    }
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
-    logger.error('cookie-set-failed', {
-      url: 'http://localhost:4000',
-      cookieName: 'connect.sid',
-      reason: 'Exception during cookie set',
-    }, 'main', errorMsg);
-    return false;
-  }
-}
-
-/**
- * Poll/retry reading cookie from popup with timeout
- * Returns cookie value or null if timeout/error
- */
-async function pollForSessionCookie(
-  authWindow: BrowserWindow,
-  timeoutMs: number = 5000,
-  intervalMs: number = 100
-): Promise<string | null> {
-  const windowId = authWindow.id.toString();
-  const startTime = Date.now();
-  let attempt = 0;
-
-  logger.debug('cookie-poll-start', {
-    timeoutMs,
-    intervalMs,
-  }, windowId);
-
-  while (Date.now() - startTime < timeoutMs) {
-    attempt++;
-    const cookie = await getSessionCookieFromPopup(authWindow);
+    logger.error('auth-callback-failed', {
+      error: errorMsg,
+    }, 'main', `Failed to handle auth callback: ${errorMsg}`);
     
-    if (cookie) {
-      logger.info('cookie-poll-success', {
-        attempt,
-        elapsedMs: Date.now() - startTime,
-      }, windowId);
-      return cookie;
+    if (mainWindow) {
+      mainWindow.webContents.send('github-auth-error', {
+        error: 'Failed to complete authentication',
+      });
     }
-
-    // Wait before next attempt
-    await new Promise(resolve => setTimeout(resolve, intervalMs));
   }
-
-  logger.warn('cookie-poll-timeout', {
-    attempt,
-    elapsedMs: Date.now() - startTime,
-  }, windowId, 'Cookie not available after timeout');
-  return null;
 }
 
-/**
- * Handle OAuth flow in popup window
- * Creates popup, monitors for callback, transfers cookie to main window
- */
-async function handleGitHubOAuth(returnTo?: string): Promise<void> {
-  logger.info('oauth-popup-created', {
+// IPC handler for OAuth initiation - opens system browser
+ipcMain.handle('github-auth-start', async (_event, returnTo?: string) => {
+  logger.info('oauth-start-system-browser', {
     returnTo,
-  }, 'oauth-popup');
-
+    isDev,
+  }, 'main');
+  
   // Build OAuth URL
   const oauthUrl = new URL('http://localhost:4000/api/auth/github');
   if (returnTo) {
     oauthUrl.searchParams.set('returnTo', returnTo);
   }
+  
+  // Always start polling as fallback (works in both dev and prod)
+  // In dev: polls localhost callback endpoint
+  // In prod: polls as fallback if custom protocol doesn't work
+  startPollingForToken();
+  
+  // Open in system browser (not Electron window)
+  shell.openExternal(oauthUrl.toString());
+  
+  return { opened: true };
+});
 
-  logger.debug('oauth-url-constructed', {
-    url: oauthUrl.toString(),
-    returnTo,
-  }, 'oauth-popup');
+// Poll for token in development mode
+let tokenPollInterval: NodeJS.Timeout | null = null;
 
-  // Create popup window with temporary session partition
-  // Using temporary partition ensures popup starts fresh each time
-  // Cookie will be explicitly copied to main window after OAuth
-  const authWindow = new BrowserWindow({
-    width: 600,
-    height: 700,
-    show: false,
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      partition: 'temp-oauth', // Temporary partition - cleared on restart
-    },
-  });
-
-  const windowId = authWindow.id.toString();
-
-  // Show window when ready
-  authWindow.once('ready-to-show', () => {
-    logger.debug('oauth-popup-ready', {}, windowId);
-    authWindow.show();
-  });
-
-  // Flag to track if callback was detected
-  let callbackDetected = false;
-
-  // Monitor for OAuth callback URL (don't prevent navigation)
-  authWindow.webContents.on('will-navigate', (event, url) => {
-    logger.debug('oauth-popup-navigation', {
-      type: 'will-navigate',
-      url,
-    }, windowId);
-
-    // Check if this is the OAuth callback
-    if (url.includes('/api/auth/github/callback')) {
-      logger.info('oauth-callback-detected', {
-        url,
-      }, windowId);
+function startPollingForToken(): void {
+  if (tokenPollInterval) {
+    return; // Already polling
+  }
+  
+  logger.info('token-poll-started', {}, 'main');
+  
+  let pollCount = 0;
+  const maxPolls = 120; // Poll for up to 2 minutes (1 second intervals)
+  
+  tokenPollInterval = setInterval(async () => {
+    pollCount++;
+    
+    if (pollCount > maxPolls) {
+      logger.warn('token-poll-timeout', {}, 'main', 'Token polling timed out');
+      if (tokenPollInterval) {
+        clearInterval(tokenPollInterval);
+        tokenPollInterval = null;
+      }
+      return;
+    }
+    
+    try {
+      // Poll the backend endpoint for pending token
+      const request = net.request({
+        method: 'GET',
+        url: 'http://localhost:4000/api/auth/callback/poll',
+      });
       
-      // Set flag but allow navigation to complete
-      // Backend needs to process the callback and set the cookie
-      callbackDetected = true;
-      // Don't prevent navigation - let it complete so backend can set cookie
-    }
-  });
-
-  // Handle navigation completion - read cookie after backend has set it
-  authWindow.webContents.on('did-finish-load', async () => {
-    if (callbackDetected) {
-      logger.debug('oauth-callback-page-loaded', {
-        url: authWindow.webContents.getURL(),
-      }, windowId);
-
-      // Poll for cookie with timeout (5 seconds)
-      // Backend should have set the cookie by now
-      let cookie = await pollForSessionCookie(authWindow, 5000, 100);
-
-      // Error recovery: Retry cookie read if first attempt failed
-      if (!cookie) {
-        logger.warn('oauth-cookie-read-retry', {
-          attempt: 1,
-        }, windowId, 'Cookie not found on first attempt, retrying...');
+      let responseData = '';
+      
+      request.on('response', (response) => {
+        response.on('data', (chunk: Buffer) => {
+          responseData += chunk.toString();
+        });
         
-        // Wait a bit longer and retry
-        await new Promise(resolve => setTimeout(resolve, 500));
-        cookie = await pollForSessionCookie(authWindow, 3000, 100);
-      }
-
-      if (cookie) {
-        // Set cookie in main window
-        let setSuccess = await setSessionCookieInMainWindow(cookie);
-
-        // Error recovery: Retry cookie set if first attempt failed
-        if (!setSuccess) {
-          logger.warn('oauth-cookie-set-retry', {
-            attempt: 1,
-          }, windowId, 'Cookie set failed on first attempt, retrying...');
-          
-          // Retry with a small delay
-          await new Promise(resolve => setTimeout(resolve, 200));
-          setSuccess = await setSessionCookieInMainWindow(cookie);
-        }
-
-        if (setSuccess) {
-          logger.info('oauth-cookie-transferred', {
-            cookieSet: true,
-          }, windowId);
-
-          // Verify cookie was set in main window
-          if (mainWindow) {
-            const mainSession = mainWindow.webContents.session;
-            const mainCookies = await mainSession.cookies.get({
-              url: 'http://localhost:4000',
-              name: 'connect.sid',
-            });
-
-            if (mainCookies.length > 0) {
-              logger.info('cookie-verify-success', {
-                cookiePresent: true,
+        response.on('end', async () => {
+          try {
+            const result = JSON.parse(responseData);
+            
+            if (result.token && result.login) {
+              logger.info('token-poll-success', {
+                login: result.login,
+                pollCount,
               }, 'main');
-            } else {
-              logger.warn('cookie-verify-failed', {
-                cookiePresent: false,
-              }, 'main');
-              // Error recovery: Cookie set but not verified - notify anyway
-              // The cookie might still work, just not immediately visible
-              logger.warn('cookie-verify-retry', {
-                reason: 'Cookie set but not immediately visible',
-              }, 'main');
+              
+              // Store token
+              const keytarModule = await getKeytar();
+              await keytarModule.setPassword('mc-server-manager', 'github-token', result.token);
+              
+              // Notify renderer
+              if (mainWindow) {
+                mainWindow.webContents.send('github-auth-complete', { login: result.login });
+              }
+              
+              // Stop polling
+              if (tokenPollInterval) {
+                clearInterval(tokenPollInterval);
+                tokenPollInterval = null;
+              }
             }
+          } catch (error) {
+            // Ignore parse errors
           }
-
-          // Notify renderer that auth completed
-          if (mainWindow) {
-            mainWindow.webContents.send('github-auth-complete');
-            logger.info('oauth-complete-notification-sent', {}, 'main');
-          }
-        } else {
-          logger.error('oauth-cookie-transfer-failed', {
-            cookieSet: false,
-            retries: 1,
-          }, windowId, 'Failed to set cookie in main window after retry');
-          
-          // Error recovery: Notify renderer of failure
-          if (mainWindow) {
-            mainWindow.webContents.send('github-auth-error', {
-              error: 'Failed to transfer authentication cookie. Please try signing in again.',
-            });
-          }
-        }
-      } else {
-        logger.error('oauth-cookie-read-failed', {
-          cookieRead: false,
-          retries: 1,
-        }, windowId, 'Failed to read cookie from popup after retry');
-        
-        // Error recovery: Notify renderer of failure
-        if (mainWindow) {
-          mainWindow.webContents.send('github-auth-error', {
-            error: 'Failed to read authentication cookie. Please try signing in again.',
-          });
-        }
-      }
-
-      // Close popup
-      authWindow.close();
+        });
+      });
+      
+      request.on('error', () => {
+        // Ignore request errors - continue polling
+      });
+      
+      request.end();
+    } catch (error) {
+      // Ignore errors - continue polling
     }
-  });
-
-  // Handle popup closed
-  authWindow.on('closed', () => {
-    logger.info('oauth-popup-closed', {}, windowId);
-  });
-
-  // Load OAuth URL
-  logger.debug('oauth-popup-loading', {
-    url: oauthUrl.toString(),
-  }, windowId);
-  await authWindow.loadURL(oauthUrl.toString());
+  }, 1000); // Poll every second
 }
 
-// IPC handler for OAuth initiation
-ipcMain.handle('github-auth-start', async (_event, returnTo?: string) => {
-  logger.info('ipc-oauth-start', {
-    returnTo,
-  }, 'main');
-
-  // Start OAuth flow (async, don't wait for completion)
-  handleGitHubOAuth(returnTo).catch((error) => {
-    const errorMsg = error instanceof Error ? error.message : String(error);
-    logger.error('oauth-flow-error', {
-      returnTo,
-    }, 'main', errorMsg);
+// IPC handler to make API requests via Electron net module (includes token)
+ipcMain.handle('api-request', async (_event, url: string, options?: { 
+  method?: string; 
+  headers?: Record<string, string>; 
+  body?: string 
+}) => {
+  // Get token from keytar
+  let token: string | null = null;
+  try {
+    const keytarModule = await getKeytar();
+    token = await keytarModule.getPassword('mc-server-manager', 'github-token');
+  } catch (error) {
+    logger.warn('token-read-failed', {
+      error: error instanceof Error ? error.message : String(error),
+    }, 'main');
+  }
+  
+  return new Promise((resolve, reject) => {
+    const request = net.request({
+      method: options?.method || 'GET',
+      url,
+    });
+    
+    // Set headers
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...(options?.headers ?? {}),
+    };
+    
+    // Add Authorization header if token exists
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    
+    for (const [key, value] of Object.entries(headers)) {
+      request.setHeader(key, value);
+    }
+    
+    let responseData = '';
+    
+    request.on('response', (response) => {
+      response.on('data', (chunk: Buffer) => {
+        responseData += chunk.toString();
+      });
+      
+      response.on('end', () => {
+        try {
+          const jsonData = JSON.parse(responseData);
+          resolve({
+            ok: response.statusCode >= 200 && response.statusCode < 300,
+            status: response.statusCode,
+            data: jsonData,
+            text: responseData,
+          });
+        } catch {
+          resolve({
+            ok: response.statusCode >= 200 && response.statusCode < 300,
+            status: response.statusCode,
+            data: null,
+            text: responseData,
+            error: 'Invalid JSON response',
+          });
+        }
+      });
+    });
+    
+    request.on('error', (error: Error) => {
+      reject(error);
+    });
+    
+    if (options?.body) {
+      request.write(options.body);
+    }
+    request.end();
   });
-
-  // Return immediately after popup creation
-  return;
 });
 
 function createWindow(): void {
@@ -525,6 +429,31 @@ function createWindow(): void {
   mainWindow.on('closed', () => {
     logger.info('window-closed', {}, 'main');
     mainWindow = null;
+  });
+}
+
+// Register custom protocol handler
+app.setAsDefaultProtocolClient('mc-server-manager');
+
+// Handle protocol URL (macOS/Linux)
+app.on('open-url', (event, url) => {
+  event.preventDefault();
+  handleAuthCallback(url);
+});
+
+// Handle protocol URL (Windows - second instance)
+if (process.platform === 'win32') {
+  const gotTheLock = app.requestSingleInstanceLock();
+  if (!gotTheLock) {
+    app.quit();
+    process.exit(0);
+  }
+  
+  app.on('second-instance', (event, commandLine) => {
+    const url = commandLine.find(arg => arg.startsWith('mc-server-manager://'));
+    if (url) {
+      handleAuthCallback(url);
+    }
   });
 }
 

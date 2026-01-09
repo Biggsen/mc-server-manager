@@ -4,8 +4,9 @@ declare global {
     electronAPI?: {
       isElectron?: boolean;
       startGitHubAuth?: (returnTo?: string) => Promise<void>;
-      onAuthComplete?: (callback: () => void) => void;
+      onAuthComplete?: (callback: (status?: { login: string }) => void) => void;
       onAuthError?: (callback: (error: { error: string }) => void) => void;
+      apiRequest?: (url: string, options?: { method?: string; headers?: Record<string, string>; body?: string }) => Promise<{ ok: boolean; status: number; data: any; text: string; error?: string }>;
     };
   }
 }
@@ -139,17 +140,73 @@ async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
   const { parseJson = true, headers, ...rest } = options
   const url = `${API_BASE}${path}`
   
-  logger.debug('api-request', {
+  const isElectron = window.electronAPI?.isElectron || window.location.protocol === 'file:';
+  
+  // In Electron with file:// protocol, use Electron's net module to ensure token is sent
+  if (isElectron && window.electronAPI?.apiRequest) {
+    logger.debug('api-request-electron-net', {
+      method: rest.method || 'GET',
+      path,
+      url,
+    });
+    
+    try {
+      const response = await window.electronAPI.apiRequest(url, {
+        method: rest.method || 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(headers as Record<string, string> ?? {}),
+        },
+        body: rest.body as string | undefined,
+      });
+      
+      logger.debug('api-response-electron-net', {
+        method: rest.method || 'GET',
+        path,
+        status: response.status,
+        ok: response.ok,
+      });
+      
+      if (!response.ok) {
+        const message = response.text || response.error || `Request failed with status ${response.status}`;
+        logger.error('api-error-electron-net', {
+          method: rest.method || 'GET',
+          path,
+          status: response.status,
+          message: message.substring(0, 200),
+        }, message);
+        throw new Error(message);
+      }
+      
+      if (!parseJson) {
+        return undefined as unknown as T;
+      }
+      
+      if (response.error) {
+        throw new Error(response.error);
+      }
+      
+      return response.data as T;
+    } catch (error) {
+      logger.error('api-error-electron-net', {
+        method: rest.method || 'GET',
+        path,
+        reason: 'Electron net request failed',
+      }, error instanceof Error ? error.message : String(error));
+      throw error;
+    }
+  }
+  
+  // Fallback to fetch for web mode or if Electron net is not available
+  logger.debug('api-request-fetch', {
     method: rest.method || 'GET',
     path,
     url,
-    hasCredentials: true,
   });
   
   try {
     const response = await fetch(url, {
       ...rest,
-      credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
         ...(headers ?? {}),

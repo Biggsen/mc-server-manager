@@ -1,7 +1,5 @@
 import type { Request, Response, NextFunction } from "express";
 import express from "express";
-import session from "express-session";
-import { sessionSecret } from "./config";
 import "./config";
 import { registerRoutes } from "./routes";
 
@@ -14,7 +12,6 @@ export function createApp(): express.Application {
     // Allow requests from Electron (localhost origins) and file:// protocol
     if (origin && (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:'))) {
       res.setHeader('Access-Control-Allow-Origin', origin);
-      res.setHeader('Access-Control-Allow-Credentials', 'true');
     } else if (!origin || origin.startsWith('file://')) {
       // Allow requests without origin or from file:// (Electron in production)
       res.setHeader('Access-Control-Allow-Origin', '*');
@@ -30,18 +27,6 @@ export function createApp(): express.Application {
   });
 
   app.use(express.json());
-  app.use(
-    session({
-      secret: sessionSecret,
-      resave: false,
-      saveUninitialized: false,
-      cookie: {
-        httpOnly: true,
-        sameSite: "lax",
-        secure: false,
-      },
-    }),
-  );
 
   registerRoutes(app);
 

@@ -21,9 +21,9 @@ async function getThrottledOctokitClass(): Promise<typeof Octokit> {
 }
 
 export async function getOctokitForRequest(req: Request): Promise<Octokit> {
-  const accessToken = req.session.github?.accessToken;
+  const accessToken = req.user?.accessToken;
   if (!accessToken) {
-    throw new Error("GitHub session not available");
+    throw new Error("GitHub token not available in request");
   }
 
   return createOctokit(accessToken);
