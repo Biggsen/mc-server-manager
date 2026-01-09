@@ -1,10 +1,28 @@
 # GitHub OAuth Authentication in Electron App - Implementation Specification
 
 ## Document Status
-- **Version**: 1.0
+- **Version**: 1.1
 - **Date**: 2025-01-09
+- **Last Updated**: 2025-01-09
 - **Status**: Implementation Ready
 - **Priority**: High
+
+---
+
+## 0. Implementation Decisions Summary
+
+The following key decisions were made to optimize for Electron app compatibility:
+
+1. **OAuth State Store**: Implement stateless in-memory Map (replaces session-based storage)
+2. **Cookie Domain**: Set `domain: 'localhost'` explicitly when setting cookies programmatically
+3. **Cookie sameSite**: Use `sameSite: 'lax'` (works for Electron localhost)
+4. **Cookie Reading URL**: Always read from `http://localhost:4000` (backend URL where cookie is set)
+5. **Session Partition**: Use shared partition (`persist:main`) with explicit cookie copying as fallback
+6. **Timing Strategy**: Poll/retry until cookie is available (with timeout) instead of fixed delay
+7. **Cookie Access**: Set cookie directly in main window's session (no IPC needed for cookie transfer)
+8. **Frontend Storage**: Store flag indicating "cookie was set" for debugging only (not cookie value)
+9. **API Client**: Keep using `credentials: 'include'` only (no manual Cookie headers)
+10. **Validation Endpoint**: Use existing `/api/auth/status` endpoint (no new endpoint needed)
 
 ---
 
@@ -73,41 +91,44 @@ Multiple attempts were made to implement GitHub OAuth in the Electron app, encou
 
 The solution will use a **hybrid approach** combining:
 
-1. **Stateless OAuth State Store** (already working)
+1. **Stateless OAuth State Store** (to be implemented)
    - In-memory Map for OAuth state validation
    - No dependency on cookies for state validation
+   - Replaces current session-based state storage
 
 2. **Explicit Cookie Sharing** (new)
-   - After OAuth completes in popup, explicitly read the session cookie
-   - Send session cookie to main window via IPC
-   - Main window sets the cookie before making authenticated requests
+   - After OAuth completes in popup, explicitly read the session cookie from popup window
+   - Set the cookie directly in main window's session using Electron's session API
+   - No IPC needed - cookie is set programmatically in main process
+   - Main window automatically includes cookie in requests via `credentials: 'include'`
 
 3. **Session Synchronization** (new)
-   - Main window validates it has the correct session cookie
+   - Main window validates session using existing `/api/auth/status` endpoint
    - Periodic session validation to detect cookie expiration
    - Clear error messages if session is lost
+   - Frontend stores flag indicating "cookie was set" for debugging/logging only
 
 ### 2.3 Component Responsibilities
 
 #### Electron Main Process (`electron/main.ts`)
-- Create and manage OAuth popup window
+- Create and manage OAuth popup window with shared session partition (`persist:main`)
 - Monitor popup navigation events
-- Extract session cookie from popup after OAuth
-- Send session cookie to renderer via IPC
+- Extract session cookie from popup after OAuth completes
+- Set session cookie directly in main window's session
 - Log all window lifecycle and navigation events
 
 #### Electron Renderer Process (`frontend/src/App.tsx`, `frontend/src/lib/api.ts`)
-- Initiate OAuth flow via IPC
-- Receive and store session cookie from main process
-- Include session cookie in all API requests
-- Validate session status periodically
+- Initiate OAuth flow (via window navigation or IPC if needed)
+- Store flag indicating "cookie was set" for debugging/logging (not the cookie value)
+- Use `credentials: 'include'` in API requests (cookies sent automatically)
+- Validate session status periodically using `/api/auth/status`
 - Handle session expiration gracefully
 
 #### Backend (`backend/src/routes/auth.ts`)
 - Process OAuth flow (already working)
-- Validate OAuth state using in-memory store (already working)
-- Set session cookie with explicit domain/path for Electron
-- Provide session validation endpoint
+- Implement stateless in-memory OAuth state store (replaces session-based)
+- Set session cookie with `domain: 'localhost'` and `sameSite: 'lax'` for Electron
+- Use existing `/api/auth/status` endpoint for validation
 - Log all session operations
 
 ---
@@ -166,6 +187,7 @@ The solution will use a **hybrid approach** combining:
 - **Implementation**:
   ```typescript
   // After OAuth callback completes, read cookies from popup
+  // Always read from backend URL (localhost:4000) where cookie was set
   async function getSessionCookieFromPopup(authWindow: BrowserWindow): Promise<string | null> {
     // Log: Attempting to read cookies from popup
     try {
@@ -183,12 +205,14 @@ The solution will use a **hybrid approach** combining:
   }
   ```
 - **Logging**: Log cookie read attempts, results, errors
+- **Note**: Always read from `http://localhost:4000` (backend URL) where the cookie is set, regardless of popup's current URL
 
 #### Step 2.2: Add Cookie Setting to Electron Main Process
 - **File**: `electron/main.ts`
 - **Implementation**:
   ```typescript
-  // Set session cookie in main window
+  // Set session cookie in main window's session
+  // Cookie is set directly in session, so renderer doesn't need to manage it
   async function setSessionCookieInMainWindow(cookieValue: string): Promise<boolean> {
     // Log: Attempting to set cookie in main window
     try {
@@ -201,11 +225,11 @@ The solution will use a **hybrid approach** combining:
         url: 'http://localhost:4000',
         name: 'connect.sid',
         value: cookieValue,
-        domain: 'localhost',
+        domain: 'localhost',  // Explicitly set for Electron compatibility
         path: '/',
         httpOnly: true,
         secure: false,
-        sameSite: 'lax'
+        sameSite: 'lax'  // Works for Electron localhost
       });
       // Log: Cookie set successfully
       return true;
@@ -216,35 +240,29 @@ The solution will use a **hybrid approach** combining:
   }
   ```
 - **Logging**: Log cookie set attempts, results, errors
+- **Note**: Cookie is set directly in main window's session. Renderer uses `credentials: 'include'` and cookie is automatically sent with requests.
 
-#### Step 2.3: Add IPC Handlers for Cookie Operations
-- **File**: `electron/main.ts`
-- **IPC Handlers**:
-  - `github-auth-complete` - Send session cookie to renderer
-  - `get-session-cookie` - Request current session cookie
-  - `set-session-cookie` - Set session cookie from renderer
-- **Logging**: Log all IPC messages (sanitized)
-
-#### Step 2.4: Update Preload Script
+#### Step 2.3: Update Preload Script (if needed)
 - **File**: `electron/preload.ts`
-- **Add**:
+- **Note**: Since cookies are set directly in main window's session, no IPC is needed for cookie transfer
+- **Add** (if OAuth initiation via IPC is desired):
   ```typescript
   contextBridge.exposeInMainWorld('electronAPI', {
     isElectron: true,
+    // Add OAuth initiation via IPC if needed, otherwise use window navigation
     startGitHubAuth: () => ipcRenderer.invoke('github-auth-start'),
-    onAuthComplete: (callback: (cookie: string) => void) => {
-      ipcRenderer.on('github-auth-complete', (_event, cookie) => callback(cookie));
-    },
-    getSessionCookie: () => ipcRenderer.invoke('get-session-cookie'),
-    setSessionCookie: (cookie: string) => ipcRenderer.invoke('set-session-cookie', cookie)
+    onAuthComplete: (callback: () => void) => {
+      // Notify renderer that cookie was set (no cookie value sent)
+      ipcRenderer.on('github-auth-complete', () => callback());
+    }
   });
   ```
 - **Logging**: Log all exposed API calls
 
 **Success Criteria**:
-- Can read session cookie from popup window
-- Can set session cookie in main window
-- IPC communication works for cookie operations
+- Can read session cookie from popup window (from `http://localhost:4000`)
+- Can set session cookie in main window's session
+- Cookie is automatically included in API requests via `credentials: 'include'`
 - All operations are logged
 
 ---
@@ -256,40 +274,40 @@ The solution will use a **hybrid approach** combining:
 #### Step 3.1: Modify OAuth Popup Handler
 - **File**: `electron/main.ts`
 - **Changes**:
-  1. After detecting callback URL in `will-navigate`:
-     - Wait for backend to process callback (500ms delay)
-     - Read session cookie from popup
-     - Log cookie read result
-  2. Before closing popup:
-     - Set cookie in main window
+  1. Create popup window with shared session partition (`persist:main`)
+  2. After detecting callback URL in `will-navigate`:
+     - Poll/retry to read session cookie from popup (with timeout, e.g., 5 seconds)
+     - Read from `http://localhost:4000` where cookie was set
+     - Log cookie read attempts and results
+  3. Once cookie is available:
+     - Set cookie directly in main window's session
      - Log cookie set result
-     - Send cookie to renderer via IPC
-  3. After closing popup:
-     - Verify cookie was set successfully
+     - Notify renderer via IPC that auth completed (no cookie value sent)
+  4. After closing popup:
+     - Verify cookie was set successfully in main window
      - Log verification result
 - **Logging**: Log every step with detailed state information
+- **Note**: Use polling/retry with timeout instead of fixed delay for better reliability
 
 #### Step 3.2: Update Frontend OAuth Handler
 - **File**: `frontend/src/App.tsx`
 - **Changes**:
-  1. Listen for `github-auth-complete` IPC event
-  2. Store received session cookie
-  3. Verify cookie is set before making auth status request
-  4. If cookie not received, show error message
-- **Logging**: Log cookie receipt, storage, verification
+  1. Listen for `github-auth-complete` IPC event (or detect via navigation)
+  2. Store flag indicating "cookie was set" for debugging/logging (not the cookie value)
+  3. Make auth status request using existing `/api/auth/status` endpoint
+  4. Cookie is automatically included via `credentials: 'include'`
+  5. If authentication fails, show error message
+- **Logging**: Log auth completion flag, auth status request, results
 
 #### Step 3.3: Update API Client
 - **File**: `frontend/src/lib/api.ts`
 - **Changes**:
-  1. Before each API request:
-     - Check if session cookie is available
-     - Log cookie availability
-     - Include cookie in request if available
-  2. After each API response:
-     - Check for Set-Cookie header
-     - Update stored cookie if changed
-     - Log cookie updates
-- **Logging**: Log all cookie operations in API requests
+  1. Keep using `credentials: 'include'` in all API requests
+  2. Cookie is automatically sent by browser/Electron from session
+  3. No manual cookie header management needed
+  4. Log API request/response status (cookie handling is automatic)
+- **Logging**: Log API requests/responses, authentication status
+- **Note**: No need to manually manage cookies - Electron session handles it automatically
 
 **Success Criteria**:
 - OAuth flow completes
@@ -303,13 +321,13 @@ The solution will use a **hybrid approach** combining:
 
 **Objective**: Ensure session persistence and handle edge cases.
 
-#### Step 4.1: Add Session Validation Endpoint
+#### Step 4.1: Use Existing Session Status Endpoint
 - **File**: `backend/src/routes/auth.ts`
-- **Endpoint**: `GET /api/auth/validate`
+- **Endpoint**: `GET /api/auth/status` (already exists)
 - **Functionality**:
-  - Validate session exists and is authenticated
-  - Return session metadata (login, expiration)
-  - Log validation attempts
+  - Returns authentication status, login, and configuration
+  - No new endpoint needed
+  - Log validation requests and results
 - **Logging**: Log all validation requests and results
 
 #### Step 4.2: Implement Periodic Session Validation
@@ -347,11 +365,12 @@ The solution will use a **hybrid approach** combining:
   - `httpOnly: true`
   - `secure: false`
   - `path: "/"`
-  - `sameSite: "lax"` (only in production, not Electron)
+  - `sameSite: "lax"` (currently set)
 - **Required Changes**:
-  - Ensure `domain` is not set (allows localhost)
+  - Keep `sameSite: "lax"` (works for Electron localhost)
+  - Ensure `domain` is not set (allows localhost without port restriction)
   - Verify `path` is `/` (allows all paths)
-  - Confirm `sameSite` is not set in Electron mode
+  - Cookie will be read and set programmatically in Electron, so backend config is for initial setting
 - **Logging**: Log cookie configuration on server start
 
 #### Step 5.2: Add Cookie Debugging Endpoint
@@ -476,17 +495,19 @@ The solution will use a **hybrid approach** combining:
 **Pitfall**: Cookies set for `localhost:4000` may not be accessible from `localhost:5173`.
 
 **Mitigation**: 
-- Set cookies with `domain: 'localhost'` (without port)
-- Or use `127.0.0.1` consistently
+- When setting cookies programmatically in Electron, use `domain: 'localhost'` (without port)
+- This allows cookie to work across all localhost ports
+- Always read cookies from `http://localhost:4000` (backend URL) where they're set
 - Log cookie domain/path in all operations
 
 ### 6.2 Timing Issues
 
-**Pitfall**: Cookie may not be set before API request is made.
+**Pitfall**: Cookie may not be available immediately after OAuth callback.
 
 **Mitigation**:
-- Wait for cookie confirmation before making requests
-- Implement retry logic with exponential backoff
+- Poll/retry reading cookie from popup with timeout (e.g., 5 seconds max)
+- Wait for cookie to be available before setting it in main window
+- Verify cookie was set successfully before closing popup
 - Log timing of all operations
 
 ### 6.3 Session Expiration
@@ -518,10 +539,10 @@ The solution will use a **hybrid approach** combining:
 - [ ] Verify logs are comprehensive
 
 ### Phase 2: Cookie Management
-- [ ] Implement cookie reading in main process
-- [ ] Implement cookie setting in main process
-- [ ] Add IPC handlers for cookie operations
-- [ ] Update preload script
+- [ ] Implement stateless in-memory OAuth state store in backend
+- [ ] Implement cookie reading in main process (from `http://localhost:4000`)
+- [ ] Implement cookie setting in main process (directly in main window session)
+- [ ] Update preload script (minimal, no cookie IPC needed)
 - [ ] Test cookie operations in isolation
 
 ### Phase 3: OAuth Integration
@@ -531,8 +552,8 @@ The solution will use a **hybrid approach** combining:
 - [ ] Test complete OAuth flow
 
 ### Phase 4: Session Validation
-- [ ] Add session validation endpoint
-- [ ] Implement periodic validation
+- [ ] Use existing `/api/auth/status` endpoint for validation
+- [ ] Implement periodic validation in frontend
 - [ ] Add error recovery
 - [ ] Test error scenarios
 
@@ -570,7 +591,7 @@ The implementation is considered successful when:
 
 If implementation fails:
 
-1. **Keep existing stateless OAuth state store** (this is working)
+1. **Keep stateless OAuth state store** (to be implemented)
 2. **Revert cookie management changes** if they cause issues
 3. **Maintain extensive logging** for future debugging
 4. **Document all findings** for next attempt
