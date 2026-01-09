@@ -311,11 +311,33 @@ async function handleGitHubOAuth(returnTo?: string): Promise<void> {
 
       // Poll for cookie with timeout (5 seconds)
       // Backend should have set the cookie by now
-      const cookie = await pollForSessionCookie(authWindow, 5000, 100);
+      let cookie = await pollForSessionCookie(authWindow, 5000, 100);
+
+      // Error recovery: Retry cookie read if first attempt failed
+      if (!cookie) {
+        logger.warn('oauth-cookie-read-retry', {
+          attempt: 1,
+        }, windowId, 'Cookie not found on first attempt, retrying...');
+        
+        // Wait a bit longer and retry
+        await new Promise(resolve => setTimeout(resolve, 500));
+        cookie = await pollForSessionCookie(authWindow, 3000, 100);
+      }
 
       if (cookie) {
         // Set cookie in main window
-        const setSuccess = await setSessionCookieInMainWindow(cookie);
+        let setSuccess = await setSessionCookieInMainWindow(cookie);
+
+        // Error recovery: Retry cookie set if first attempt failed
+        if (!setSuccess) {
+          logger.warn('oauth-cookie-set-retry', {
+            attempt: 1,
+          }, windowId, 'Cookie set failed on first attempt, retrying...');
+          
+          // Retry with a small delay
+          await new Promise(resolve => setTimeout(resolve, 200));
+          setSuccess = await setSessionCookieInMainWindow(cookie);
+        }
 
         if (setSuccess) {
           logger.info('oauth-cookie-transferred', {
@@ -338,6 +360,11 @@ async function handleGitHubOAuth(returnTo?: string): Promise<void> {
               logger.warn('cookie-verify-failed', {
                 cookiePresent: false,
               }, 'main');
+              // Error recovery: Cookie set but not verified - notify anyway
+              // The cookie might still work, just not immediately visible
+              logger.warn('cookie-verify-retry', {
+                reason: 'Cookie set but not immediately visible',
+              }, 'main');
             }
           }
 
@@ -349,12 +376,28 @@ async function handleGitHubOAuth(returnTo?: string): Promise<void> {
         } else {
           logger.error('oauth-cookie-transfer-failed', {
             cookieSet: false,
-          }, windowId, 'Failed to set cookie in main window');
+            retries: 1,
+          }, windowId, 'Failed to set cookie in main window after retry');
+          
+          // Error recovery: Notify renderer of failure
+          if (mainWindow) {
+            mainWindow.webContents.send('github-auth-error', {
+              error: 'Failed to transfer authentication cookie. Please try signing in again.',
+            });
+          }
         }
       } else {
         logger.error('oauth-cookie-read-failed', {
           cookieRead: false,
-        }, windowId, 'Failed to read cookie from popup');
+          retries: 1,
+        }, windowId, 'Failed to read cookie from popup after retry');
+        
+        // Error recovery: Notify renderer of failure
+        if (mainWindow) {
+          mainWindow.webContents.send('github-auth-error', {
+            error: 'Failed to read authentication cookie. Please try signing in again.',
+          });
+        }
       }
 
       // Close popup

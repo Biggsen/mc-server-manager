@@ -10,4 +10,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onAuthComplete: (callback: () => void) => {
     ipcRenderer.on('github-auth-complete', () => callback());
   },
+  // Notify renderer of OAuth errors
+  onAuthError: (callback: (error: { error: string }) => void) => {
+    ipcRenderer.on('github-auth-error', (_event, error) => callback(error));
+  },
 });

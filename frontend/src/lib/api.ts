@@ -5,6 +5,7 @@ declare global {
       isElectron?: boolean;
       startGitHubAuth?: (returnTo?: string) => Promise<void>;
       onAuthComplete?: (callback: () => void) => void;
+      onAuthError?: (callback: (error: { error: string }) => void) => void;
     };
   }
 }

@@ -121,7 +121,52 @@ function App() {
       })
   }, [location.pathname])
 
-  // Listen for OAuth completion in Electron
+  // Periodic session validation (every 30 seconds)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      logger.debug('session-validation-periodic', {
+        interval: '30s',
+      });
+
+      fetchAuthStatus()
+        .then((status) => {
+          logger.debug('session-validation-result', {
+            authenticated: status.authenticated,
+            login: status.login,
+          });
+
+          if (!status.authenticated && authStatus?.authenticated) {
+            // Session was valid but now invalid - session expired
+            logger.warn('session-expired', {
+              previousLogin: authStatus.login,
+            }, 'Session expired - user needs to re-authenticate');
+            setAuthStatus(status);
+            setAuthError('Your session has expired. Please sign in again.');
+          } else {
+            // Update status (might have changed)
+            setAuthStatus(status);
+            if (status.authenticated) {
+              setAuthError(null);
+            }
+          }
+        })
+        .catch((error: Error) => {
+          logger.error('session-validation-failed', {
+            reason: 'Failed to validate session',
+          }, error.message);
+          // Don't clear auth status on network errors - might be temporary
+          // Only clear if we get a 401 or similar
+          if (error.message.includes('401') || error.message.includes('Unauthorized')) {
+            setAuthStatus((prev) => prev ? { ...prev, authenticated: false, login: null } : null);
+            setAuthError('Session validation failed. Please sign in again.');
+          }
+        });
+    }, 30000); // 30 seconds
+
+    return () => clearInterval(interval);
+  }, [authStatus])
+
+  // Listen for OAuth completion and errors in Electron
   useEffect(() => {
     const isElectron = window.electronAPI?.isElectron || window.location.protocol === 'file:';
     
@@ -159,6 +204,18 @@ function App() {
             setAuthError(error.message);
           });
       });
+
+      // Set up IPC listener for OAuth errors
+      if (window.electronAPI.onAuthError) {
+        window.electronAPI.onAuthError((error: { error: string }) => {
+          logger.error('oauth-error-received', {
+            source: 'IPC',
+            error: error.error,
+          }, error.error);
+          setAuthError(error.error);
+          // Don't clear auth status - might still be valid
+        });
+      }
     }
   }, [])
 
