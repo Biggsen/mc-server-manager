@@ -1,5 +1,6 @@
 import { app, BrowserWindow, shell } from 'electron';
 import { join } from 'path';
+import { logger } from './src/utils/logger';
 
 let mainWindow: BrowserWindow | null = null;
 let backendStarted = false;
@@ -91,6 +92,12 @@ function getIconPath(): string {
 
 
 function createWindow(): void {
+  logger.info('window-created', {
+    isDev,
+    width: 1200,
+    height: 800,
+  }, 'main');
+  
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -107,12 +114,17 @@ function createWindow(): void {
 
   // Show window when ready to prevent visual flash
   mainWindow.once('ready-to-show', () => {
+    logger.debug('window-ready-to-show', {}, 'main');
     mainWindow?.show();
   });
 
   // Load frontend
   if (isDev) {
     // In development, load from Vite dev server
+    logger.info('window-loading', {
+      url: 'http://localhost:5173',
+      mode: 'development',
+    }, 'main');
     mainWindow.loadURL('http://localhost:5173');
     mainWindow.webContents.openDevTools();
   } else {
@@ -129,20 +141,45 @@ function createWindow(): void {
       frontendPath = join(__dirname, '../frontend/dist/index.html');
     }
     
-    console.log('Loading frontend from:', frontendPath);
+    logger.info('window-loading', {
+      path: frontendPath,
+      mode: 'production',
+    }, 'main');
     mainWindow.loadFile(frontendPath).catch((err) => {
-      console.error('Failed to load frontend:', err);
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      logger.error('window-load-failed', {
+        path: frontendPath,
+      }, 'main', errorMsg);
       mainWindow?.webContents.openDevTools();
     });
   }
 
   // Handle external links
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    logger.debug('window-external-link', {
+      url,
+    }, 'main');
     shell.openExternal(url);
     return { action: 'deny' };
   });
 
+  // Log navigation events
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    logger.debug('window-navigation', {
+      type: 'will-navigate',
+      url,
+    }, 'main');
+  });
+
+  mainWindow.webContents.on('did-navigate', (event, url) => {
+    logger.debug('window-navigation', {
+      type: 'did-navigate',
+      url,
+    }, 'main');
+  });
+
   mainWindow.on('closed', () => {
+    logger.info('window-closed', {}, 'main');
     mainWindow = null;
   });
 }
@@ -154,6 +191,11 @@ app.whenReady().then(async () => {
   }
   
   try {
+    logger.info('app-initializing', {
+      isDev,
+      isPackaged: app.isPackaged,
+    });
+    
     // Start backend server first
     await startBackendServer();
     
@@ -162,8 +204,11 @@ app.whenReady().then(async () => {
     
     // Then create window
     createWindow();
+    
+    logger.info('app-initialized', {});
   } catch (error) {
-    console.error('[App] Failed to initialize:', error);
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    logger.error('app-initialization-failed', {}, undefined, errorMsg);
     // Create window anyway to show error to user
     createWindow();
     if (mainWindow) {

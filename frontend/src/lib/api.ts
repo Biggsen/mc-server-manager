@@ -7,6 +7,8 @@ declare global {
   }
 }
 
+import { logger } from './logger';
+
 export interface PluginSearchResult {
   provider: 'hangar' | 'modrinth' | 'spiget'
   id: string
@@ -134,6 +136,13 @@ async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
   const { parseJson = true, headers, ...rest } = options
   const url = `${API_BASE}${path}`
   
+  logger.debug('api-request', {
+    method: rest.method || 'GET',
+    path,
+    url,
+    hasCredentials: true,
+  });
+  
   try {
     const response = await fetch(url, {
       ...rest,
@@ -144,8 +153,21 @@ async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
       },
     })
 
+    logger.debug('api-response', {
+      method: rest.method || 'GET',
+      path,
+      status: response.status,
+      ok: response.ok,
+    });
+
     if (!response.ok) {
       const message = await response.text()
+      logger.error('api-error', {
+        method: rest.method || 'GET',
+        path,
+        status: response.status,
+        message: message.substring(0, 200), // Limit message length
+      }, message || `Request failed with status ${response.status}`);
       throw new Error(message || `Request failed with status ${response.status}`)
     }
 
@@ -156,7 +178,12 @@ async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
     return (await response.json()) as T
   } catch (error) {
     if (error instanceof TypeError && error.message === 'Failed to fetch') {
-      console.error(`Failed to fetch from ${url}. Is the backend running on ${API_BASE}?`)
+      logger.error('api-error', {
+        method: rest.method || 'GET',
+        path,
+        reason: 'Failed to fetch',
+        url,
+      }, `Failed to fetch from ${url}. Is the backend running on ${API_BASE}?`);
       throw new Error(`Failed to connect to backend at ${API_BASE}. Make sure the backend server is running.`)
     }
     throw error
@@ -935,10 +962,34 @@ export interface AuthStatus {
 }
 
 export async function fetchAuthStatus(): Promise<AuthStatus> {
-  return request<AuthStatus>('/auth/status')
+  logger.debug('auth-status-request', {});
+  const status = await request<AuthStatus>('/auth/status');
+  logger.info('auth-status-received', {
+    configured: status.configured,
+    authenticated: status.authenticated,
+    login: status.login,
+  });
+  return status;
 }
 
 export function startGitHubLogin(returnTo?: string): void {
+  const isElectron = window.electronAPI?.isElectron || window.location.protocol === 'file:';
+  
+  logger.info('oauth-initiation', {
+    isElectron,
+    returnTo,
+    protocol: window.location.protocol,
+    origin: window.location.origin,
+  });
+  
+  // In Electron, we'll use IPC (to be implemented in Phase 3)
+  // For now, use window navigation (will be updated in Phase 3)
+  if (isElectron) {
+    logger.warn('oauth-initiation', {
+      reason: 'Using window navigation in Electron (will be replaced with IPC)',
+    });
+  }
+  
   const url = new URL(`${API_BASE}/auth/github`, window.location.origin)
   if (returnTo) {
     url.searchParams.set('returnTo', returnTo)
@@ -947,6 +998,8 @@ export function startGitHubLogin(returnTo?: string): void {
 }
 
 export async function logout(): Promise<void> {
-  await request('/auth/logout', { method: 'POST', parseJson: false })
+  logger.info('logout-start', {});
+  await request('/auth/logout', { method: 'POST', parseJson: false });
+  logger.info('logout-complete', {});
 }
 
