@@ -1,9 +1,13 @@
-import { contextBridge } from 'electron';
+import { contextBridge, ipcRenderer } from 'electron';
 
 // Expose protected methods that allow the renderer process to use
 // the ipcRenderer without exposing the entire object
 contextBridge.exposeInMainWorld('electronAPI', {
-  // Add any IPC methods here if needed in the future
-  // For now, we're using HTTP communication
   isElectron: true,
+  // Required: OAuth initiation via IPC (window.location.origin doesn't work in Electron)
+  startGitHubAuth: (returnTo?: string) => ipcRenderer.invoke('github-auth-start', returnTo),
+  // Notify renderer that cookie was set (no cookie value sent)
+  onAuthComplete: (callback: () => void) => {
+    ipcRenderer.on('github-auth-complete', () => callback());
+  },
 });

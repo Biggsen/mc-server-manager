@@ -90,6 +90,112 @@ function getIconPath(): string {
   }
 }
 
+/**
+ * Read session cookie from a window's session
+ * Always reads from http://localhost:4000 (backend URL where cookie is set)
+ */
+async function getSessionCookieFromPopup(authWindow: BrowserWindow): Promise<string | null> {
+  const windowId = authWindow.id.toString();
+  
+  logger.debug('cookie-read-attempt', {
+    url: 'http://localhost:4000',
+    cookieName: 'connect.sid',
+  }, windowId);
+  
+  try {
+    const session = authWindow.webContents.session;
+    const cookies = await session.cookies.get({
+      url: 'http://localhost:4000',
+      name: 'connect.sid',
+    });
+    
+    if (cookies.length > 0) {
+      const cookie = cookies[0];
+      const cookieValue = cookie.value;
+      
+      logger.info('cookie-read-success', {
+        url: 'http://localhost:4000',
+        cookieName: 'connect.sid',
+        cookiePresent: true,
+        cookieValue: cookieValue.length > 8 
+          ? `${cookieValue.slice(0, 4)}...${cookieValue.slice(-4)}`
+          : '***',
+      }, windowId);
+      
+      return cookieValue;
+    } else {
+      logger.warn('cookie-read-failed', {
+        url: 'http://localhost:4000',
+        cookieName: 'connect.sid',
+        cookiePresent: false,
+        reason: 'Cookie not found',
+      }, windowId);
+      return null;
+    }
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    logger.error('cookie-read-failed', {
+      url: 'http://localhost:4000',
+      cookieName: 'connect.sid',
+      reason: 'Exception during cookie read',
+    }, windowId, errorMsg);
+    return null;
+  }
+}
+
+/**
+ * Set session cookie in main window's session
+ * Cookie is set directly in session, so renderer doesn't need to manage it
+ */
+async function setSessionCookieInMainWindow(cookieValue: string): Promise<boolean> {
+  logger.debug('cookie-set-attempt', {
+    url: 'http://localhost:4000',
+    cookieName: 'connect.sid',
+    cookieValue: cookieValue.length > 8 
+      ? `${cookieValue.slice(0, 4)}...${cookieValue.slice(-4)}`
+      : '***',
+  }, 'main');
+  
+  try {
+    if (!mainWindow) {
+      logger.error('cookie-set-failed', {
+        reason: 'Main window not available',
+      }, 'main', 'Main window is null');
+      return false;
+    }
+    
+    const session = mainWindow.webContents.session;
+    await session.cookies.set({
+      url: 'http://localhost:4000',
+      name: 'connect.sid',
+      value: cookieValue,
+      domain: 'localhost',  // Explicitly set for Electron compatibility
+      path: '/',
+      httpOnly: true,
+      secure: false,
+      sameSite: 'lax',  // Works for Electron localhost
+    });
+    
+    logger.info('cookie-set-success', {
+      url: 'http://localhost:4000',
+      cookieName: 'connect.sid',
+      domain: 'localhost',
+      path: '/',
+      sameSite: 'lax',
+    }, 'main');
+    
+    return true;
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    logger.error('cookie-set-failed', {
+      url: 'http://localhost:4000',
+      cookieName: 'connect.sid',
+      reason: 'Exception during cookie set',
+    }, 'main', errorMsg);
+    return false;
+  }
+}
+
 
 function createWindow(): void {
   logger.info('window-created', {

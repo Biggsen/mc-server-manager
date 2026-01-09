@@ -14,6 +14,35 @@ import { createLogger } from "../utils/logger";
 const router = Router();
 const logger = createLogger("backend-auth");
 
+// Stateless in-memory OAuth state store
+// Replaces session-based storage to avoid cookie issues in Electron OAuth flows
+interface OAuthStateEntry {
+  state: string;
+  returnTo?: string;
+  createdAt: number;
+}
+
+const oauthStateStore = new Map<string, OAuthStateEntry>();
+
+// Clean up expired states (older than 10 minutes)
+const STATE_EXPIRY_MS = 10 * 60 * 1000; // 10 minutes
+setInterval(() => {
+  const now = Date.now();
+  let cleaned = 0;
+  for (const [state, entry] of oauthStateStore.entries()) {
+    if (now - entry.createdAt > STATE_EXPIRY_MS) {
+      oauthStateStore.delete(state);
+      cleaned++;
+    }
+  }
+  if (cleaned > 0) {
+    logger.debug("oauth-state-cleanup", {
+      cleaned,
+      remaining: oauthStateStore.size,
+    });
+  }
+}, 5 * 60 * 1000); // Run cleanup every 5 minutes
+
 router.get("/status", (req: Request, res: Response) => {
   const sessionId = req.sessionID;
   const configured = Boolean(githubClientId && githubClientSecret);
@@ -52,12 +81,14 @@ router.get("/github", (req: Request, res: Response) => {
   }
 
   const state = randomBytes(24).toString("hex");
-  req.session.oauthState = state;
-
   const returnToParam = typeof req.query.returnTo === "string" ? req.query.returnTo : undefined;
-  if (returnToParam) {
-    req.session.returnTo = returnToParam;
-  }
+  
+  // Store state in in-memory store (stateless, no session dependency)
+  oauthStateStore.set(state, {
+    state,
+    returnTo: returnToParam,
+    createdAt: Date.now(),
+  });
 
   const authorizeUrl = new URL("https://github.com/login/oauth/authorize");
   authorizeUrl.searchParams.set("client_id", githubClientId);
@@ -67,6 +98,8 @@ router.get("/github", (req: Request, res: Response) => {
 
   logger.debug("oauth-state-created", {
     state: state.slice(0, 4) + "..." + state.slice(-4),
+    returnTo: returnToParam,
+    storeSize: oauthStateStore.size,
     authorizeUrl: authorizeUrl.toString(),
   }, sessionId);
 
@@ -79,7 +112,7 @@ router.get("/github/callback", async (req: Request, res: Response) => {
   logger.info("oauth-callback-detected", {
     hasCode: typeof req.query.code === "string",
     hasState: typeof req.query.state === "string",
-    hasSessionState: Boolean(req.session.oauthState),
+    storeSize: oauthStateStore.size,
   }, sessionId);
   
   try {
@@ -95,15 +128,35 @@ router.get("/github/callback", async (req: Request, res: Response) => {
       return;
     }
 
-    if (!req.session.oauthState || state !== req.session.oauthState) {
+    // Validate state from in-memory store (stateless, no session dependency)
+    const stateEntry = oauthStateStore.get(state);
+    if (!stateEntry) {
       logger.error("oauth-failed", {
-        reason: "Invalid OAuth state",
-        expectedState: req.session.oauthState ? req.session.oauthState.slice(0, 4) + "..." + req.session.oauthState.slice(-4) : null,
+        reason: "Invalid OAuth state - not found in store",
         receivedState: state.slice(0, 4) + "..." + state.slice(-4),
+        storeSize: oauthStateStore.size,
       }, sessionId, "Invalid OAuth state");
       res.status(400).json({ error: "Invalid OAuth state" });
       return;
     }
+
+    // Check if state has expired
+    const now = Date.now();
+    if (now - stateEntry.createdAt > STATE_EXPIRY_MS) {
+      oauthStateStore.delete(state);
+      logger.error("oauth-failed", {
+        reason: "Invalid OAuth state - expired",
+        receivedState: state.slice(0, 4) + "..." + state.slice(-4),
+        age: now - stateEntry.createdAt,
+      }, sessionId, "Invalid OAuth state - expired");
+      res.status(400).json({ error: "Invalid OAuth state" });
+      return;
+    }
+
+    logger.debug("oauth-state-validated", {
+      state: state.slice(0, 4) + "..." + state.slice(-4),
+      returnTo: stateEntry.returnTo,
+    }, sessionId);
 
     if (!githubClientId || !githubClientSecret) {
       logger.error("oauth-failed", {
@@ -203,13 +256,16 @@ router.get("/github/callback", async (req: Request, res: Response) => {
       scopes: tokenJson.scope ? tokenJson.scope.split(",") : undefined,
     }, sessionId);
 
-    const redirectTarget = req.session.returnTo ?? appBaseUrl;
-    delete req.session.oauthState;
-    delete req.session.returnTo;
+    // Get returnTo from state entry (stateless, no session dependency)
+    const redirectTarget = stateEntry.returnTo ?? appBaseUrl;
+    
+    // Clean up used state from store
+    oauthStateStore.delete(state);
 
     logger.info("oauth-completed", {
       redirectTarget,
       login: userJson.login,
+      storeSize: oauthStateStore.size,
     }, sessionId);
 
     res.redirect(redirectTarget);

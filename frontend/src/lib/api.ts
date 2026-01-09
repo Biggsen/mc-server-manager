@@ -3,6 +3,8 @@ declare global {
   interface Window {
     electronAPI?: {
       isElectron?: boolean;
+      startGitHubAuth?: (returnTo?: string) => Promise<void>;
+      onAuthComplete?: (callback: () => void) => void;
     };
   }
 }
