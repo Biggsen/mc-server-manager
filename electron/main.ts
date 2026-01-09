@@ -20,6 +20,7 @@ async function getKeytar() {
 
 let mainWindow: BrowserWindow | null = null;
 let backendStarted = false;
+let backendServer: import('http').Server | null = null;
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 
@@ -72,14 +73,14 @@ async function startBackendServer(): Promise<void> {
     }
     
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const backendModule = require(backendPath) as { startServer: (port: number) => Promise<void> };
+    const backendModule = require(backendPath) as { startServer: (port: number) => Promise<import('http').Server> };
     
     if (!backendModule || typeof backendModule.startServer !== 'function') {
       throw new Error('Backend module does not export startServer function');
     }
     
     console.log('[Backend] Starting server on port 4000...');
-    await backendModule.startServer(4000);
+    backendServer = await backendModule.startServer(4000);
     backendStarted = true;
     console.log('[Backend] Server started successfully on port 4000');
   } catch (error) {
@@ -268,6 +269,8 @@ ipcMain.handle('api-request', async (_event, url: string, options?: {
   headers?: Record<string, string>; 
   body?: string 
 }) => {
+  console.log(`[Electron] API request: ${options?.method || 'GET'} ${url}`);
+  
   // Get token from keytar
   let token: string | null = null;
   try {
@@ -303,6 +306,8 @@ ipcMain.handle('api-request', async (_event, url: string, options?: {
     let responseData = '';
     
     request.on('response', (response) => {
+      console.log(`[Electron] API response: ${response.statusCode} for ${url}`);
+      
       response.on('data', (chunk: Buffer) => {
         responseData += chunk.toString();
       });
@@ -310,6 +315,10 @@ ipcMain.handle('api-request', async (_event, url: string, options?: {
       response.on('end', () => {
         try {
           const jsonData = JSON.parse(responseData);
+          // Log the response for projects and plugins endpoints
+          if (url.includes('/api/projects') || url.includes('/api/plugins/library')) {
+            console.log(`[Electron] API response data:`, JSON.stringify(jsonData).substring(0, 200));
+          }
           resolve({
             ok: response.statusCode >= 200 && response.statusCode < 300,
             status: response.statusCode,
@@ -504,7 +513,13 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
-  // Cleanup can be added here if needed
+  if (backendServer) {
+    console.log('[Backend] Closing server...');
+    backendServer.close(() => {
+      console.log('[Backend] Server closed');
+    });
+    backendServer = null;
+  }
 });
 
 // Security: Prevent new window creation

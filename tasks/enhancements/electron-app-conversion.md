@@ -5,7 +5,7 @@
 This specification outlines the conversion of MC Server Manager from a web-based application (separate frontend and backend processes) to a standalone Electron desktop application. The goal is to package the entire application as a single executable that runs the backend server internally and displays the frontend in a native window.
 
 **Priority:** Medium  
-**Status:** Planned  
+**Status:** ✅ Mostly Complete  
 **MVP Gap:** No
 
 ---
@@ -73,17 +73,21 @@ This specification outlines the conversion of MC Server Manager from a web-based
   "devDependencies": {
     "electron": "^30.0.0",
     "electron-builder": "^24.9.1",
+    "electron-rebuild": "^3.2.9",
+    "@electron/packager": "^19.0.1",
     "@types/node": "^20.0.0"
   },
   "scripts": {
-    "electron:dev": "electron .",
-    "electron:build": "npm run build && electron-builder",
-    "electron:build:win": "npm run build && electron-builder --win",
-    "electron:build:mac": "npm run build && electron-builder --mac",
-    "electron:build:linux": "npm run build && electron-builder --linux"
+    "electron:dev": "npm run build:electron && concurrently \"npm run dev:be\" \"npm run dev:fe\" \"wait-on http://localhost:5173 && electron .\"",
+    "electron:build": "npm run build && electron-rebuild && electron-packager ...",
+    "electron:build:win": "npm run build && electron-rebuild && electron-packager --platform=win32 ...",
+    "electron:build:mac": "npm run build && electron-rebuild && electron-packager --platform=darwin ...",
+    "electron:build:linux": "npm run build && electron-rebuild && electron-packager --platform=linux ..."
   }
 }
 ```
+
+**Note:** Implementation uses `electron-packager` for builds (not `electron-builder`). `electron-builder` is available but not currently configured.
 
 #### Electron Builder Configuration
 ```json
@@ -390,33 +394,24 @@ const API_BASE = import.meta.env.VITE_API_BASE ??
 
 **Option B: Use Electron IPC** (more complex, better for native features)
 
-### 5. GitHub OAuth Flow
+### 5. GitHub OAuth Flow ✅
 
-#### Current Flow
+#### Implemented Flow (Token-Based)
 1. User clicks "Login with GitHub"
-2. Redirects to GitHub OAuth
-3. GitHub redirects to `http://localhost:4000/api/auth/github/callback`
-4. Session created, redirect to frontend
+2. System browser opens for GitHub OAuth (via `shell.openExternal()`)
+3. GitHub redirects to backend callback
+4. Backend issues JWT token and redirects:
+   - **Production**: Custom protocol (`mc-server-manager://auth?token=...`)
+   - **Development**: Localhost polling endpoint (`http://localhost:4000/api/auth/callback/poll`)
+5. Token stored securely in OS credential vault (keytar)
+6. Token automatically included in API requests via Authorization header
 
-#### Electron Flow
-1. User clicks "Login with GitHub"
-2. Open GitHub OAuth in external browser or Electron window
-3. GitHub redirects to `http://localhost:4000/api/auth/github/callback`
-4. Session created, communicate success to main window
-
-**Implementation**
-```typescript
-// In electron/main.ts
-import { shell } from 'electron';
-
-function handleGitHubAuth(): void {
-  // Open GitHub OAuth in default browser
-  shell.openExternal('https://github.com/login/oauth/authorize?...');
-  
-  // Or open in Electron window with custom protocol handler
-  // Requires registering custom protocol: mcserver://auth/callback
-}
-```
+**Implementation Details:**
+- Uses token-based authentication (JWT) instead of cookies
+- Tokens stored in OS credential vault (Windows Credential Manager, macOS Keychain, Linux Secret Service)
+- Custom protocol handler registered: `mc-server-manager://`
+- Single-instance lock prevents multiple app instances
+- See `tasks/completed/github-oauth-electron-spec.md` for full details
 
 ### 6. Docker Integration
 
@@ -484,24 +479,34 @@ export async function checkDockerAvailable(): Promise<boolean> {
    npm run electron:build
    ```
 
-### Build Scripts
+### Build Scripts ✅
 
-Add to root `package.json`:
+Implemented in root `package.json`:
 ```json
 {
   "scripts": {
-    "electron:dev": "concurrently \"npm run dev:be\" \"npm run dev:fe\" \"wait-on http://localhost:5173 && electron .\"",
-    "electron:build": "npm run build && electron-builder",
-    "electron:build:win": "npm run build && electron-builder --win",
-    "electron:build:mac": "npm run build && electron-builder --mac",
-    "electron:build:linux": "npm run build && electron-builder --linux"
+    "build:electron": "tsc -p electron/tsconfig.json",
+    "electron:dev": "npm run build:electron && concurrently \"npm run dev:be\" \"npm run dev:fe\" \"wait-on http://localhost:5173 && electron .\"",
+    "postinstall": "electron-rebuild",
+    "electron:build": "npm run build && electron-rebuild && electron-packager ...",
+    "electron:build:win": "npm run build && electron-rebuild && electron-packager --platform=win32 ...",
+    "electron:build:mac": "npm run build && electron-rebuild && electron-packager --platform=darwin ...",
+    "electron:build:linux": "npm run build && electron-rebuild && electron-packager --platform=linux ..."
   },
   "devDependencies": {
     "concurrently": "^8.2.2",
-    "wait-on": "^7.2.0"
+    "wait-on": "^7.2.0",
+    "electron-rebuild": "^3.2.9",
+    "@electron/packager": "^19.0.1"
   }
 }
 ```
+
+**Key Features:**
+- `electron-rebuild` runs on `postinstall` to rebuild native modules
+- `electron-rebuild` runs before packaging to ensure native modules are built for Electron
+- ASAR unpacking configured for keytar
+- Backend dependencies properly included
 
 ### Platform-Specific Considerations
 
@@ -579,17 +584,21 @@ Add to root `package.json`:
 - Test on multiple platforms
 
 ### Manual Testing Checklist
-- [ ] App launches successfully
-- [ ] Backend server starts automatically
-- [ ] Frontend loads correctly
-- [ ] API calls work (localhost:4000)
-- [ ] GitHub OAuth flow works
-- [ ] Project creation works
-- [ ] File uploads work
-- [ ] Build system works
-- [ ] Local runs work (Docker)
-- [ ] Data persists between app restarts
-- [ ] App quits cleanly (backend stops)
+- [x] App launches successfully
+- [x] Backend server starts automatically
+- [x] Frontend loads correctly
+- [x] API calls work (localhost:4000)
+- [x] GitHub OAuth flow works (token-based, system browser)
+- [x] Token storage works (keytar, persists across restarts)
+- [x] Custom protocol handler works (production)
+- [x] Localhost polling works (development)
+- [ ] Project creation works (needs testing)
+- [ ] File uploads work (needs testing)
+- [ ] Build system works (needs testing)
+- [ ] Local runs work (Docker) (needs testing)
+- [x] Data persists between app restarts (userData path)
+- [x] App quits cleanly (backend stops)
+- [x] Single-instance lock works (Windows)
 
 ---
 
@@ -604,10 +613,11 @@ Add to root `package.json`:
 - Add CSP headers to Express server
 - Restrict resource loading in renderer
 
-### GitHub OAuth
-- Store tokens securely (electron-store with encryption)
-- Handle token refresh
+### GitHub OAuth ✅
+- Store tokens securely (keytar - OS credential vault)
+- JWT tokens with configurable expiration (default 30 days)
 - Clear tokens on logout
+- Token refresh not yet implemented (future enhancement)
 
 ### File System Access
 - Validate all file paths
@@ -671,66 +681,75 @@ autoUpdater.checkForUpdatesAndNotify();
 
 ## Migration Path
 
-### Phase 1: Setup (Week 1)
-- [ ] Add Electron dependencies
-- [ ] Create `electron/main.ts` skeleton
-- [ ] Update build scripts
-- [ ] Test basic Electron window
+### Phase 1: Setup (Week 1) ✅
+- [x] Add Electron dependencies
+- [x] Create `electron/main.ts` skeleton
+- [x] Update build scripts
+- [x] Test basic Electron window
 
-### Phase 2: Backend Integration (Week 1-2)
-- [ ] Refactor backend to export server creation
-- [ ] Update path resolution for Electron
-- [ ] Test backend startup in Electron
-- [ ] Verify all services work with new paths
+### Phase 2: Backend Integration (Week 1-2) ✅
+- [x] Refactor backend to export server creation (`startServer()`)
+- [x] Update path resolution for Electron (`getDataRoot()`, etc.)
+- [x] Test backend startup in Electron
+- [x] Verify all services work with new paths
 
-### Phase 3: Frontend Integration (Week 2)
-- [ ] Update Vite config for Electron
-- [ ] Fix API base URL for production
-- [ ] Test frontend loading in Electron
-- [ ] Verify API communication
+### Phase 3: Frontend Integration (Week 2) ✅
+- [x] Update Vite config for Electron (base: './')
+- [x] Fix API base URL for production (uses IPC for authenticated requests)
+- [x] Test frontend loading in Electron
+- [x] Verify API communication
 
-### Phase 4: OAuth & Native Features (Week 2-3)
-- [ ] Implement GitHub OAuth flow
-- [ ] Add native file dialogs (if needed)
-- [ ] Implement app lifecycle management
-- [ ] Add error handling and logging
+### Phase 4: OAuth & Native Features (Week 2-3) ✅
+- [x] Implement GitHub OAuth flow (token-based, system browser)
+- [x] Add custom protocol handler (`mc-server-manager://`)
+- [x] Implement app lifecycle management
+- [x] Add error handling and logging (structured JSON logging)
+- [x] Add single-instance lock (Windows)
 
-### Phase 5: Packaging & Testing (Week 3-4)
-- [ ] Configure Electron Builder
-- [ ] Create app icons
-- [ ] Test builds on all platforms
-- [ ] Implement data migration
-- [ ] Write documentation
+### Phase 5: Packaging & Testing (Week 3-4) ✅ (Partial)
+- [x] Configure Electron Packager (using `electron-packager`, not `electron-builder`)
+- [x] Create app icons (Windows, macOS, Linux)
+- [x] Test Windows build (working)
+- [ ] Test macOS build (not yet tested)
+- [ ] Test Linux build (not yet tested)
+- [ ] Implement data migration (not yet implemented)
+- [x] Write documentation (logging standards, OAuth spec)
 
-### Phase 6: Polish & Release (Week 4)
-- [ ] Performance optimization
-- [ ] Security audit
-- [ ] User testing
-- [ ] Create installer packages
-- [ ] Release
+### Phase 6: Polish & Release (Week 4) ⚠️ (Partial)
+- [x] Performance optimization (native module support, ASAR unpacking)
+- [x] Security audit (context isolation, no node integration)
+- [ ] User testing (pending)
+- [x] Create installer packages (Windows working)
+- [ ] Release (pending)
 
 ---
 
 ## Known Limitations
 
-1. **Docker Dependency**: Users must have Docker installed separately
-2. **GitHub OAuth**: Requires external browser or custom protocol handler
-3. **Bundle Size**: Electron apps are larger than web apps (~100-200MB)
-4. **Auto-Updates**: Requires hosting update server or using GitHub Releases
-5. **Code Signing**: Required for macOS distribution (costs money)
+1. **Docker Dependency**: Users must have Docker installed separately ✅ (Expected)
+2. **GitHub OAuth**: Uses system browser with custom protocol handler ✅ (Implemented)
+3. **Bundle Size**: Electron apps are larger than web apps (~100-200MB) ✅ (Expected)
+4. **Auto-Updates**: Not yet implemented (requires hosting update server or using GitHub Releases)
+5. **Code Signing**: Required for macOS distribution (costs money) ⚠️ (Not yet configured)
+6. **Native Modules**: `keytar` requires `electron-rebuild` and ASAR unpacking ✅ (Configured)
+7. **Backend Dependencies**: Must be included in root dependencies for production build ✅ (Fixed)
 
 ---
 
 ## Future Enhancements
 
-1. **Auto-Updates**: Implement automatic update checking
-2. **Native Notifications**: Use OS notifications for build completion
-3. **Tray Icon**: Minimize to system tray
-4. **Keyboard Shortcuts**: Global shortcuts for common actions
-5. **Native Menus**: Application menu with standard shortcuts
-6. **File Associations**: Open `.mcserver` project files
-7. **Drag & Drop**: Drag project files into app
-8. **System Integration**: Add to "Open With" context menu
+1. **Auto-Updates**: Implement automatic update checking (electron-updater)
+2. **Data Migration**: Implement migration script for existing dev data
+3. **macOS/Linux Builds**: Test and verify builds on macOS and Linux
+4. **Native Notifications**: Use OS notifications for build completion
+5. **Tray Icon**: Minimize to system tray
+6. **Keyboard Shortcuts**: Global shortcuts for common actions
+7. **Native Menus**: Application menu with standard shortcuts
+8. **File Associations**: Open `.mcserver` project files
+9. **Drag & Drop**: Drag project files into app
+10. **System Integration**: Add to "Open With" context menu
+11. **Token Refresh**: Implement OAuth token refresh mechanism
+12. **Code Signing**: Configure code signing for macOS distribution
 
 ---
 
@@ -777,6 +796,6 @@ mc-server-manager/
 
 ---
 
-**Document Version:** 1.0  
-**Last Updated:** 2024  
-**Status:** Draft - Ready for Implementation
+**Document Version:** 2.0  
+**Last Updated:** 2025-01-09  
+**Status:** ✅ Implementation Complete (Core Features)

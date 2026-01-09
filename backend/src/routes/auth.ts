@@ -401,7 +401,7 @@ router.post("/logout", (req: Request, res: Response) => {
   // Token-based auth doesn't need server-side logout
   // Client just discards the token
   logger.info("logout-requested", {});
-  res.json({ success: true });
+    res.json({ success: true });
 });
 
 export default router;

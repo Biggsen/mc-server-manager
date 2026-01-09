@@ -1,6 +1,5 @@
-import { mkdir, readFile, writeFile, access } from "fs/promises";
+import { mkdir, readFile, writeFile } from "fs/promises";
 import { join } from "path";
-import { constants } from "fs";
 import type { ProjectSummary } from "../types/projects";
 import type {
   ManifestMetadata,
@@ -9,88 +8,55 @@ import type {
   StoredProject,
 } from "../types/storage";
 import type { ProjectPlugin } from "../types/plugins";
-import { getDataRoot, getDevDataPaths } from "../config";
+import { getDataRoot } from "../config";
 
-const DATA_DIR = getDataRoot();
-const MANIFEST_DIR = join(DATA_DIR, "data", "manifests");
-const PROJECTS_PATH = join(DATA_DIR, "data", "projects.json");
+// Helper functions to compute paths at runtime (not at module load)
+function getDataDir(): string {
+  return getDataRoot();
+}
+
+function getManifestDir(): string {
+  return join(getDataDir(), "data", "manifests");
+}
+
+function getProjectsPath(): string {
+  return join(getDataDir(), "data", "projects.json");
+}
 
 async function ensureStore(): Promise<void> {
-  await mkdir(DATA_DIR, { recursive: true });
-  await mkdir(MANIFEST_DIR, { recursive: true });
+  const dataDir = getDataDir();
+  const manifestDir = getManifestDir();
+  const projectsPath = getProjectsPath();
+
+  await mkdir(dataDir, { recursive: true });
+  await mkdir(manifestDir, { recursive: true });
 
   try {
-    await readFile(PROJECTS_PATH, "utf-8");
-    // File exists, no migration needed
+    await readFile(projectsPath, "utf-8");
+    // File exists, no action needed
   } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        // File doesn't exist - check if we should migrate from development directory
-        if (process.env.ELECTRON_MODE === "true") {
-          // In Electron mode, try to migrate from development backend/data directory
-          // Try multiple possible locations for the development data
-          const devDataPaths = getDevDataPaths();
-          
-          for (const devDataPath of devDataPaths) {
-            const devProjectsPath = join(devDataPath, "projects.json");
-            try {
-              await access(devProjectsPath, constants.F_OK);
-              // Development file exists, copy it
-              const devData = await readFile(devProjectsPath, "utf-8");
-              const devSnapshot = JSON.parse(devData) as ProjectsSnapshot;
-              if (devSnapshot.projects && devSnapshot.projects.length > 0) {
-                await writeFile(PROJECTS_PATH, devData, "utf-8");
-                console.log(`[Migration] Copied ${devSnapshot.projects.length} projects from ${devProjectsPath}`);
-                return;
-              }
-            } catch (migrationError) {
-              // This path doesn't exist, try next one
-              continue;
-            }
-          }
-        }
-      
-      // Create empty file
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      // File doesn't exist - create empty file
       const empty: ProjectsSnapshot = { projects: [] };
-      await writeFile(PROJECTS_PATH, JSON.stringify(empty, null, 2), "utf-8");
+      await writeFile(projectsPath, JSON.stringify(empty, null, 2), "utf-8");
       return;
     }
-
     throw error;
   }
 }
 
 async function loadSnapshot(): Promise<ProjectsSnapshot> {
   await ensureStore();
-  const contents = await readFile(PROJECTS_PATH, "utf-8");
+  const projectsPath = getProjectsPath();
+  const contents = await readFile(projectsPath, "utf-8");
   const snapshot = JSON.parse(contents) as ProjectsSnapshot;
-  
-  // If file is empty and we're in Electron mode, try to migrate from dev directory
-  if (process.env.ELECTRON_MODE === "true" && snapshot.projects.length === 0 && contents.length < 50) {
-    const devDataPaths = getDevDataPaths();
-    
-    for (const devDataPath of devDataPaths) {
-      const devProjectsPath = join(devDataPath, "projects.json");
-      try {
-        await access(devProjectsPath, constants.F_OK);
-        const devData = await readFile(devProjectsPath, "utf-8");
-        const devSnapshot = JSON.parse(devData) as ProjectsSnapshot;
-        if (devSnapshot.projects && devSnapshot.projects.length > 0) {
-          await writeFile(PROJECTS_PATH, devData, "utf-8");
-          console.log(`[Migration] Copied ${devSnapshot.projects.length} projects from ${devProjectsPath} (file was empty)`);
-          return devSnapshot;
-        }
-      } catch (migrationError) {
-        continue;
-      }
-    }
-  }
-  
   return snapshot;
 }
 
 async function persistSnapshot(snapshot: ProjectsSnapshot): Promise<void> {
   await ensureStore();
-  await writeFile(PROJECTS_PATH, JSON.stringify(snapshot, null, 2), "utf-8");
+  const projectsPath = getProjectsPath();
+  await writeFile(projectsPath, JSON.stringify(snapshot, null, 2), "utf-8");
 }
 
 function toSummary(project: StoredProject): ProjectSummary {
@@ -242,7 +208,7 @@ export async function updateProject(
 }
 
 export function getManifestFilePath(projectId: string, buildId: string): string {
-  return join(MANIFEST_DIR, `${projectId}-${buildId}.json`);
+  return join(getManifestDir(), `${projectId}-${buildId}.json`);
 }
 
 export async function recordManifestMetadata(projectId: string, metadata: ManifestMetadata): Promise<StoredProject | undefined> {

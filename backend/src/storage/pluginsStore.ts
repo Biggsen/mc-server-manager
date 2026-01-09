@@ -1,51 +1,35 @@
-import { mkdir, readFile, writeFile, access } from "fs/promises";
+import { mkdir, readFile, writeFile } from "fs/promises";
 import { join } from "path";
-import { constants } from "fs";
 import type { StoredPluginRecord } from "../types/plugins";
-import { getDataRoot, getDevDataPaths } from "../config";
+import { getDataRoot } from "../config";
 
-const DATA_DIR = getDataRoot();
-const PLUGINS_PATH = join(DATA_DIR, "data", "plugins.json");
+// Helper functions to compute paths at runtime (not at module load)
+function getDataDir(): string {
+  return getDataRoot();
+}
+
+function getPluginsPath(): string {
+  return join(getDataDir(), "data", "plugins.json");
+}
 
 interface PluginsSnapshot {
   plugins: StoredPluginRecord[];
 }
 
 async function ensureStore(): Promise<void> {
-  await mkdir(DATA_DIR, { recursive: true });
+  const dataDir = getDataDir();
+  const pluginsPath = getPluginsPath();
+
+  await mkdir(dataDir, { recursive: true });
 
   try {
-    await readFile(PLUGINS_PATH, "utf-8");
-    // File exists, no migration needed
+    await readFile(pluginsPath, "utf-8");
+    // File exists, no action needed
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      // File doesn't exist - check if we should migrate from development directory
-      if (process.env.ELECTRON_MODE === "true") {
-        // In Electron mode, try to migrate from development backend/data directory
-        const devDataPaths = getDevDataPaths();
-        
-        for (const devDataPath of devDataPaths) {
-          const devPluginsPath = join(devDataPath, "plugins.json");
-          try {
-            await access(devPluginsPath, constants.F_OK);
-            // Development file exists, copy it
-            const devData = await readFile(devPluginsPath, "utf-8");
-            const devSnapshot = JSON.parse(devData) as PluginsSnapshot;
-            if (devSnapshot.plugins && devSnapshot.plugins.length > 0) {
-              await writeFile(PLUGINS_PATH, devData, "utf-8");
-              console.log(`[Migration] Copied ${devSnapshot.plugins.length} plugins from ${devPluginsPath}`);
-              return;
-            }
-          } catch (migrationError) {
-            // This path doesn't exist, try next one
-            continue;
-          }
-        }
-      }
-      
-      // Create empty file
+      // File doesn't exist - create empty file
       const empty: PluginsSnapshot = { plugins: [] };
-      await writeFile(PLUGINS_PATH, JSON.stringify(empty, null, 2), "utf-8");
+      await writeFile(pluginsPath, JSON.stringify(empty, null, 2), "utf-8");
       return;
     }
     throw error;
@@ -54,36 +38,16 @@ async function ensureStore(): Promise<void> {
 
 async function loadSnapshot(): Promise<PluginsSnapshot> {
   await ensureStore();
-  const contents = await readFile(PLUGINS_PATH, "utf-8");
+  const pluginsPath = getPluginsPath();
+  const contents = await readFile(pluginsPath, "utf-8");
   const snapshot = JSON.parse(contents) as PluginsSnapshot;
-  
-  // If file is empty and we're in Electron mode, try to migrate from dev directory
-  if (process.env.ELECTRON_MODE === "true" && snapshot.plugins.length === 0 && contents.length < 50) {
-    const devDataPaths = getDevDataPaths();
-    
-    for (const devDataPath of devDataPaths) {
-      const devPluginsPath = join(devDataPath, "plugins.json");
-      try {
-        await access(devPluginsPath, constants.F_OK);
-        const devData = await readFile(devPluginsPath, "utf-8");
-        const devSnapshot = JSON.parse(devData) as PluginsSnapshot;
-        if (devSnapshot.plugins && devSnapshot.plugins.length > 0) {
-          await writeFile(PLUGINS_PATH, devData, "utf-8");
-          console.log(`[Migration] Copied ${devSnapshot.plugins.length} plugins from ${devPluginsPath} (file was empty)`);
-          return devSnapshot;
-        }
-      } catch (migrationError) {
-        continue;
-      }
-    }
-  }
-  
   return snapshot;
 }
 
 async function persistSnapshot(snapshot: PluginsSnapshot): Promise<void> {
   await ensureStore();
-  await writeFile(PLUGINS_PATH, JSON.stringify(snapshot, null, 2), "utf-8");
+  const pluginsPath = getPluginsPath();
+  await writeFile(pluginsPath, JSON.stringify(snapshot, null, 2), "utf-8");
 }
 
 function keyFor(record: Pick<StoredPluginRecord, "id" | "version">): string {

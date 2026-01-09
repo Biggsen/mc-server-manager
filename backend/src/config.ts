@@ -1,7 +1,18 @@
 import { config as loadEnv } from "dotenv";
 import { join } from "path";
 
-loadEnv({ path: process.env.ENV_FILE ?? "./.env" });
+// In Electron mode, load .env from userData
+// In dev mode, load from project root
+let envPath = process.env.ENV_FILE;
+if (!envPath) {
+  if (process.env.ELECTRON_MODE === "true" && process.env.USER_DATA_PATH) {
+    envPath = join(process.env.USER_DATA_PATH, ".env");
+  } else {
+    envPath = "./.env";
+  }
+}
+
+loadEnv({ path: envPath });
 
 export const githubClientId = process.env.GITHUB_CLIENT_ID ?? "";
 export const githubClientSecret = process.env.GITHUB_CLIENT_SECRET ?? "";
@@ -24,9 +35,13 @@ export function requireAuthConfig(): void {
  * In web mode, uses process.cwd().
  */
 export function getDataRoot(): string {
-  if (process.env.ELECTRON_MODE === "true" && process.env.USER_DATA_PATH) {
-    return process.env.USER_DATA_PATH;
+  const electronMode = process.env.ELECTRON_MODE === "true";
+  const userDataPath = process.env.USER_DATA_PATH;
+  
+  if (electronMode && userDataPath) {
+    return userDataPath;
   }
+  
   return process.cwd();
 }
 
