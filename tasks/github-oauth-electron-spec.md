@@ -1,7 +1,7 @@
 # GitHub OAuth Authentication in Electron App - Implementation Specification
 
 ## Document Status
-- **Version**: 1.1
+- **Version**: 1.2
 - **Date**: 2025-01-09
 - **Last Updated**: 2025-01-09
 - **Status**: Implementation Ready
@@ -23,6 +23,7 @@ The following key decisions were made to optimize for Electron app compatibility
 8. **Frontend Storage**: Store flag indicating "cookie was set" for debugging only (not cookie value)
 9. **API Client**: Keep using `credentials: 'include'` only (no manual Cookie headers)
 10. **Validation Endpoint**: Use existing `/api/auth/status` endpoint (no new endpoint needed)
+11. **OAuth Initiation**: Use IPC in Electron (required - `window.location.origin` is `file://` in production)
 
 ---
 
@@ -118,7 +119,8 @@ The solution will use a **hybrid approach** combining:
 - Log all window lifecycle and navigation events
 
 #### Electron Renderer Process (`frontend/src/App.tsx`, `frontend/src/lib/api.ts`)
-- Initiate OAuth flow (via window navigation or IPC if needed)
+- **Initiate OAuth flow via IPC** (required for Electron - `window.location.origin` is `file://` in production)
+- Detect Electron mode and use `electronAPI.startGitHubAuth()` instead of window navigation
 - Store flag indicating "cookie was set" for debugging/logging (not the cookie value)
 - Use `credentials: 'include'` in API requests (cookies sent automatically)
 - Validate session status periodically using `/api/auth/status`
@@ -242,15 +244,15 @@ The solution will use a **hybrid approach** combining:
 - **Logging**: Log cookie set attempts, results, errors
 - **Note**: Cookie is set directly in main window's session. Renderer uses `credentials: 'include'` and cookie is automatically sent with requests.
 
-#### Step 2.3: Update Preload Script (if needed)
+#### Step 2.3: Update Preload Script (required for Electron)
 - **File**: `electron/preload.ts`
-- **Note**: Since cookies are set directly in main window's session, no IPC is needed for cookie transfer
-- **Add** (if OAuth initiation via IPC is desired):
+- **Note**: IPC is required for OAuth initiation because `window.location.origin` is `file://` in Electron production, which breaks URL construction
+- **Add**:
   ```typescript
   contextBridge.exposeInMainWorld('electronAPI', {
     isElectron: true,
-    // Add OAuth initiation via IPC if needed, otherwise use window navigation
-    startGitHubAuth: () => ipcRenderer.invoke('github-auth-start'),
+    // Required: OAuth initiation via IPC (window.location.origin doesn't work in Electron)
+    startGitHubAuth: (returnTo?: string) => ipcRenderer.invoke('github-auth-start', returnTo),
     onAuthComplete: (callback: () => void) => {
       // Notify renderer that cookie was set (no cookie value sent)
       ipcRenderer.on('github-auth-complete', () => callback());
@@ -271,7 +273,23 @@ The solution will use a **hybrid approach** combining:
 
 **Objective**: Integrate cookie management into the OAuth flow.
 
-#### Step 3.1: Modify OAuth Popup Handler
+#### Step 3.1: Add IPC Handler for OAuth Initiation
+- **File**: `electron/main.ts`
+- **Add IPC Handler**:
+  ```typescript
+  ipcMain.handle('github-auth-start', async (_event, returnTo?: string) => {
+    // Create OAuth popup window and handle flow
+    // Return when popup is created (popup handles OAuth flow)
+  });
+  ```
+- **Functionality**:
+  - Create popup window with shared session partition (`persist:main`)
+  - Navigate popup to OAuth URL: `http://localhost:4000/api/auth/github` (with returnTo if provided)
+  - Monitor popup for OAuth completion
+  - Return immediately after popup creation (async flow continues in background)
+- **Logging**: Log IPC call, popup creation, OAuth URL construction
+
+#### Step 3.2: Modify OAuth Popup Handler
 - **File**: `electron/main.ts`
 - **Changes**:
   1. Create popup window with shared session partition (`persist:main`)
@@ -289,17 +307,27 @@ The solution will use a **hybrid approach** combining:
 - **Logging**: Log every step with detailed state information
 - **Note**: Use polling/retry with timeout instead of fixed delay for better reliability
 
-#### Step 3.2: Update Frontend OAuth Handler
+#### Step 3.3: Update Frontend OAuth Initiation Function
+- **File**: `frontend/src/lib/api.ts`
+- **Function**: `startGitHubLogin(returnTo?: string)`
+- **Changes**:
+  1. Detect Electron mode: `window.electronAPI?.isElectron || window.location.protocol === 'file:'`
+  2. If Electron: Call `window.electronAPI.startGitHubAuth(returnTo)` via IPC
+  3. If not Electron: Use existing window navigation approach (for web compatibility)
+  4. **Critical**: Never use `window.location.origin` in Electron - it's `file://` in production
+- **Logging**: Log OAuth initiation method (IPC vs navigation), Electron detection result
+
+#### Step 3.4: Update Frontend OAuth Handler
 - **File**: `frontend/src/App.tsx`
 - **Changes**:
-  1. Listen for `github-auth-complete` IPC event (or detect via navigation)
+  1. Listen for `github-auth-complete` IPC event (Electron) or detect via navigation (web)
   2. Store flag indicating "cookie was set" for debugging/logging (not the cookie value)
   3. Make auth status request using existing `/api/auth/status` endpoint
   4. Cookie is automatically included via `credentials: 'include'`
   5. If authentication fails, show error message
 - **Logging**: Log auth completion flag, auth status request, results
 
-#### Step 3.3: Update API Client
+#### Step 3.4: Update API Client
 - **File**: `frontend/src/lib/api.ts`
 - **Changes**:
   1. Keep using `credentials: 'include'` in all API requests
@@ -528,6 +556,16 @@ The solution will use a **hybrid approach** combining:
 - Clear old sessions on app start
 - Log all session operations
 
+### 6.5 Frontend URL Construction in Electron
+
+**Pitfall**: `window.location.origin` is `file://` in Electron production, breaking OAuth URL construction.
+
+**Mitigation**:
+- Always detect Electron mode before using `window.location.origin`
+- Use IPC (`electronAPI.startGitHubAuth()`) for OAuth initiation in Electron
+- Fall back to window navigation only in web mode
+- Never construct OAuth URLs using `window.location.origin` in Electron
+
 ---
 
 ## 7. Implementation Checklist
@@ -546,10 +584,13 @@ The solution will use a **hybrid approach** combining:
 - [ ] Test cookie operations in isolation
 
 ### Phase 3: OAuth Integration
-- [ ] Modify OAuth popup handler
-- [ ] Update frontend OAuth handler
+- [ ] Add IPC handler for OAuth initiation in main process
+- [ ] Update preload script with `startGitHubAuth` IPC method
+- [ ] Modify OAuth popup handler in main process
+- [ ] Update `startGitHubLogin` function to detect Electron and use IPC
+- [ ] Update frontend OAuth handler to listen for IPC events
 - [ ] Update API client
-- [ ] Test complete OAuth flow
+- [ ] Test complete OAuth flow in Electron
 
 ### Phase 4: Session Validation
 - [ ] Use existing `/api/auth/status` endpoint for validation
