@@ -2,8 +2,9 @@ import { createHash } from "crypto";
 import { mkdir, readFile, readdir, rm, stat, unlink, writeFile } from "fs/promises";
 import { dirname, join, posix, relative as pathRelative } from "path";
 import type { StoredProject } from "../types/storage";
-import { resolveProjectRoot } from "./projectFiles";
+import { getProjectsRoot } from "../config";
 
+const PROJECTS_ROOT = getProjectsRoot();
 const UPLOAD_ROOT_SEGMENTS = ["config", "uploads"];
 
 export function sanitizeRelativePath(input: string | undefined | null): string {
@@ -24,7 +25,10 @@ export function sanitizeRelativePath(input: string | undefined | null): string {
 }
 
 export function getUploadsRoot(project: StoredProject): string {
-  return join(resolveProjectRoot(project), ...UPLOAD_ROOT_SEGMENTS);
+  // Always use the actual project directory for uploads, never the template
+  // Template root is read-only (especially in packaged Electron apps)
+  const projectRoot = join(PROJECTS_ROOT, project.id);
+  return join(projectRoot, ...UPLOAD_ROOT_SEGMENTS);
 }
 
 async function pruneEmptyDirectories(root: string, target: string): Promise<void> {
@@ -70,8 +74,13 @@ export async function saveUploadedConfigFile(
   buffer: Buffer,
 ): Promise<ConfigFileContent> {
   const sanitized = sanitizeRelativePath(relativePath);
-  const target = join(getUploadsRoot(project), sanitized);
+  const uploadsRoot = getUploadsRoot(project);
+  const target = join(uploadsRoot, sanitized);
+  
+  // Ensure the uploads directory exists (creates project directory if needed)
+  await mkdir(uploadsRoot, { recursive: true });
   await mkdir(dirname(target), { recursive: true });
+  
   await writeFile(target, buffer);
   const sha256 = createHash("sha256").update(buffer).digest("hex");
   return {
@@ -88,8 +97,13 @@ export async function overwriteUploadedConfigFile(
 ): Promise<ConfigFileContent> {
   const sanitized = sanitizeRelativePath(relativePath);
   const buffer = Buffer.from(content, "utf-8");
-  const target = join(getUploadsRoot(project), sanitized);
+  const uploadsRoot = getUploadsRoot(project);
+  const target = join(uploadsRoot, sanitized);
+  
+  // Ensure the uploads directory exists (creates project directory if needed)
+  await mkdir(uploadsRoot, { recursive: true });
   await mkdir(dirname(target), { recursive: true });
+  
   await writeFile(target, buffer);
   const sha256 = createHash("sha256").update(buffer).digest("hex");
   return {
