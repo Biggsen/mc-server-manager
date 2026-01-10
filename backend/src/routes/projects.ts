@@ -1182,7 +1182,12 @@ router.post("/:id/run", async (req: Request, res: Response) => {
       return;
     }
 
-    const run = await enqueueRun(project);
+    const options = {
+      resetWorld: Boolean(req.body?.resetWorld),
+      resetPlugins: Boolean(req.body?.resetPlugins),
+    };
+
+    const run = await enqueueRun(project, options);
     res.status(202).json({ run });
   } catch (error) {
     console.error("Failed to trigger local run", error);

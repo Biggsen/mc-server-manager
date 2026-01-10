@@ -1,21 +1,17 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Buildings, Play, FileText, MagnifyingGlass, Package as PackageIcon } from '@phosphor-icons/react'
+import { Buildings, Stop } from '@phosphor-icons/react'
 import {
   fetchProjects,
-  triggerBuild,
-  triggerManifest,
-  scanProjectAssets,
   fetchBuilds,
-  runProjectLocally,
   fetchRuns,
+  stopRunJob,
   type ProjectSummary,
   type BuildJob,
   type RunJob,
 } from '../lib/api'
 import { subscribeProjectsUpdated } from '../lib/events'
 import { ContentSection } from '../components/layout'
-import { useAsyncAction } from '../lib/useAsyncAction'
 import { Anchor, Group, Loader, Stack, Text, Title } from '@mantine/core'
 import { Button, Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui'
 
@@ -70,23 +66,15 @@ function projectMessageForRun(run: RunJob): ProjectMessage {
   }
 }
 
-function countPluginConfigs(configs: NonNullable<ProjectSummary['configs']>): number {
-  return configs.filter(
-    (config) =>
-      config.pluginId !== undefined ||
-      config.definitionId !== undefined ||
-      config.path.startsWith('plugins/'),
-  ).length
-}
-
 function Projects() {
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [building, setBuilding] = useState<Record<string, BuildJob['status']>>({})
   const [builds, setBuilds] = useState<Record<string, BuildJob | undefined>>({})
-  const [busy, setBusy] = useState<Record<string, boolean>>({})
   const [messages, setMessages] = useState<Record<string, ProjectMessage | undefined>>({})
+  const [runs, setRuns] = useState<Record<string, RunJob | undefined>>({})
+  const [stopping, setStopping] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
     let active = true
@@ -162,178 +150,36 @@ function Projects() {
     setMessages((prev) => ({ ...prev, [projectId]: message }))
   }
 
-  const setProjectBusy = (projectId: string, value: boolean) => {
-    setBusy((prev) => ({ ...prev, [projectId]: value }))
-  }
-
-  const { run: queueProjectBuild } = useAsyncAction(
-    async (project: ProjectSummary) => triggerBuild(project.id),
-    {
-      label: (project) => `Triggering build • ${project.name}`,
-      onStart: (project) => {
-        setProjectBusy(project.id, true)
-        setBuilding((prev) => ({ ...prev, [project.id]: 'running' }))
-      },
-      onSuccess: (build, [project]) => {
-        setBuilding((prev) => ({ ...prev, [project.id]: build.status }))
-        setProjectMessage(project.id, {
-          type: 'success',
-          text: `Triggered build ${build.id}`,
-        })
-      },
-      onError: (error, [project]) => {
-        console.error('Failed to queue build', error)
-        setBuilding((prev) => ({ ...prev, [project.id]: 'failed' }))
-        setProjectMessage(project.id, {
-          type: 'error',
-          text: error instanceof Error ? error.message : 'Failed to queue build',
-        })
-      },
-      onFinally: (project) => {
-        setProjectBusy(project.id, false)
-      },
-      successToast: (build, [project]) => ({
-        title: 'Build queued',
-        description: `Build ${build.id} queued for ${project.name}`,
-        variant: 'success',
-      }),
-      errorToast: (error, [project]) => ({
-        title: 'Build failed',
-        description: error instanceof Error ? error.message : `Build failed for ${project.name}`,
-        variant: 'danger',
-      }),
-    },
-  )
-
-  const { run: generateProjectManifest } = useAsyncAction(
-    async (project: ProjectSummary) => triggerManifest(project.id),
-    {
-      label: (project) => `Generating manifest • ${project.name}`,
-      onStart: (project) => {
-        setProjectBusy(project.id, true)
-      },
-      onSuccess: (manifest, [project]) => {
-        setProjectMessage(project.id, {
-          type: 'success',
-          text: `Manifest ${manifest.manifest?.lastBuildId ?? 'generated'}`,
-        })
-      },
-      onError: (error, [project]) => {
-        console.error('Failed to generate manifest', error)
-        setProjectMessage(project.id, {
-          type: 'error',
-          text: error instanceof Error ? error.message : 'Manifest generation failed',
-        })
-      },
-      onFinally: (project) => {
-        setProjectBusy(project.id, false)
-      },
-      successToast: (_manifest, [project]) => ({
-        title: 'Manifest generated',
-        description: `Latest manifest ready for ${project.name}`,
-        variant: 'success',
-      }),
-      errorToast: (error, [project]) => ({
-        title: 'Manifest generation failed',
-        description:
-          error instanceof Error ? error.message : `Could not generate manifest for ${project.name}`,
-        variant: 'danger',
-      }),
-    },
-  )
-
-  const { run: scanProjectAssetsAction } = useAsyncAction(
-    async (project: ProjectSummary) => scanProjectAssets(project.id),
-    {
-      label: (project) => `Scanning assets • ${project.name}`,
-      onStart: (project) => {
-        setProjectBusy(project.id, true)
-      },
-      onSuccess: (assets, [project]) => {
-        setProjectMessage(project.id, {
-          type: 'success',
-          text: `Scanned ${assets.plugins.length} plugins, ${countPluginConfigs(assets.configs)} plugin configs`,
-        })
-      },
-      onError: (error, [project]) => {
-        console.error('Failed to scan assets', error)
-        setProjectMessage(project.id, {
-          type: 'error',
-          text: error instanceof Error ? error.message : 'Asset scan failed',
-        })
-      },
-      onFinally: (project) => {
-        setProjectBusy(project.id, false)
-      },
-      successToast: (assets, [project]) => ({
-        title: 'Assets scanned',
-        description: `${project.name}: ${assets.plugins.length} plugins, ${countPluginConfigs(assets.configs)} plugin configs`,
-        variant: 'success',
-      }),
-      errorToast: (error, [project]) => ({
-        title: 'Asset scan failed',
-        description:
-          error instanceof Error ? error.message : `Failed to scan assets for ${project.name}`,
-        variant: 'danger',
-      }),
-    },
-  )
-
-  const { run: runProjectLocallyAction } = useAsyncAction(
-    async (project: ProjectSummary) => runProjectLocally(project.id),
-    {
-      label: (project) => `Starting local run • ${project.name}`,
-      onStart: (project) => {
-        setProjectBusy(project.id, true)
-      },
-      onSuccess: (run, [project]) => {
-        setProjectMessage(project.id, projectMessageForRun(run))
-      },
-      onError: (error, [project]) => {
-        console.error('Failed to queue local run', error)
-        setProjectMessage(project.id, {
-          type: 'error',
-          text: error instanceof Error ? error.message : 'Run locally failed',
-        })
-      },
-      onFinally: (project) => {
-        setProjectBusy(project.id, false)
-      },
-      successToast: (run, [project]) => ({
-        title: 'Run queued',
-        description: `${project.name}: ${describeRunStatus(run)}`,
-        variant: 'success',
-      }),
-      errorToast: (error, [project]) => ({
-        title: 'Run failed',
-        description: error instanceof Error ? error.message : `Failed to run ${project.name} locally`,
-        variant: 'danger',
-      }),
-    },
-  )
-
   useEffect(() => {
     let cancelled = false
-    fetchRuns()
-      .then((runs) => {
-        if (cancelled) return
-        const latestByProject = runs.reduce<Record<string, RunJob>>((acc, run) => {
-          acc[run.projectId] = preferRun(acc[run.projectId], run)
-          return acc
-        }, {})
-        setMessages((prev) => {
-          const next = { ...prev }
-          Object.entries(latestByProject).forEach(([projectId, run]) => {
-            next[projectId] = projectMessageForRun(run)
+    const loadRuns = () => {
+      fetchRuns()
+        .then((runsList) => {
+          if (cancelled) return
+          const latestByProject = runsList.reduce<Record<string, RunJob>>((acc, run) => {
+            acc[run.projectId] = preferRun(acc[run.projectId], run)
+            return acc
+          }, {})
+          setRuns(latestByProject)
+          setMessages((prev) => {
+            const next = { ...prev }
+            Object.entries(latestByProject).forEach(([projectId, run]) => {
+              if (isActiveRun(run) || run.status === 'failed') {
+                next[projectId] = projectMessageForRun(run)
+              }
+            })
+            return next
           })
-          return next
         })
-      })
-      .catch((err: Error) => {
-        console.error('Failed to load run status', err)
-      })
+        .catch((err: Error) => {
+          console.error('Failed to load run status', err)
+        })
+    }
+    loadRuns()
+    const interval = window.setInterval(loadRuns, 5000)
     return () => {
       cancelled = true
+      window.clearInterval(interval)
     }
   }, [])
 
@@ -382,12 +228,15 @@ function Projects() {
             const preferred = preferRun(latestRunsRef.get(run.projectId), run)
             latestRunsRef.set(run.projectId, preferred)
           })
+          const nextRuns: Record<string, RunJob> = {}
           const nextMessages: Record<string, ProjectMessage> = {}
           latestRunsRef.forEach((storedRun, projectId) => {
+            nextRuns[projectId] = storedRun
             if (isActiveRun(storedRun) || storedRun.status === 'failed') {
               nextMessages[projectId] = projectMessageForRun(storedRun)
             }
           })
+          setRuns((prev) => ({ ...prev, ...nextRuns }))
           setMessages((prev) => ({ ...prev, ...nextMessages }))
         }
       } catch (err) {
@@ -400,6 +249,11 @@ function Projects() {
         const payload = JSON.parse(event.data) as { run: RunJob }
         if (payload.run) {
           updateMessage(payload.run)
+          setRuns((prev) => {
+            const current = prev[payload.run.projectId]
+            const preferred = preferRun(current, payload.run)
+            return { ...prev, [payload.run.projectId]: preferred }
+          })
         }
       } catch (err) {
         console.error('Failed to parse run update payload', err)
@@ -458,11 +312,27 @@ function Projects() {
           <Stack gap="lg">
             {projects.map((project) => {
               const latestBuild = builds[project.id]
-              const repoUrl = project.repo?.htmlUrl
-              const repoLabel = project.repo?.fullName ?? project.repo?.name
-              const commitSha = project.manifest?.commitSha
-              const buildStatus = latestBuild?.status ?? building[project.id] ?? 'idle'
-              const message = messages[project.id]
+              const pluginCount = project.plugins?.length ?? 0
+              const pluginList = project.plugins
+                ?.map(p => p.id)
+                .sort((a, b) => a.localeCompare(b))
+                .join(', ') ?? ''
+              const currentRun = runs[project.id]
+              const hasActiveRun = currentRun && isActiveRun(currentRun)
+              const isStopping = stopping[project.id] ?? false
+
+              const handleStop = async () => {
+                if (!currentRun || isStopping) return
+                setStopping((prev) => ({ ...prev, [project.id]: true }))
+                try {
+                  const stoppedRun = await stopRunJob(currentRun.id)
+                  setRuns((prev) => ({ ...prev, [project.id]: stoppedRun }))
+                } catch (error) {
+                  console.error('Failed to stop run', error)
+                } finally {
+                  setStopping((prev) => ({ ...prev, [project.id]: false }))
+                }
+              }
 
               return (
                 <Card key={project.id}>
@@ -485,14 +355,6 @@ function Projects() {
                   <CardContent>
                     <Stack gap="md">
                       <Stack gap={4}>
-                        {repoUrl && repoLabel && (
-                          <Text size="sm" c="dimmed">
-                            Repo:{' '}
-                            <Anchor href={repoUrl} target="_blank" rel="noreferrer">
-                              {repoLabel}
-                            </Anchor>
-                          </Text>
-                        )}
                         <Text size="sm" c="dimmed">
                           {latestBuild
                             ? `Build status: ${latestBuild.status.toUpperCase()}${
@@ -504,70 +366,37 @@ function Projects() {
                               }${latestBuild.error ? ` — ${latestBuild.error}` : ''}`
                             : 'Build status: IDLE'}
                         </Text>
-                        {project.manifest && (
+                        {pluginCount > 0 ? (
+                          <Text size="sm" c="dimmed" style={{ wordBreak: 'break-word' }}>
+                            Plugins ({pluginCount}):{' '}
+                            <span style={{ color: 'white' }}>
+                              {pluginList}
+                            </span>
+                          </Text>
+                        ) : (
                           <Text size="sm" c="dimmed">
-                            Manifest: {project.manifest.lastBuildId}{' '}
-                            {commitSha && repoUrl ? (
-                              <Anchor
-                                href={`${repoUrl.replace(/\.git$/, '')}/commit/${commitSha}`}
-                                target="_blank"
-                                rel="noreferrer"
-                              >
-                                ({commitSha.slice(0, 7)})
-                              </Anchor>
-                            ) : null}
+                            Plugins (0)
                           </Text>
                         )}
+                        {currentRun && (
+                          <Group gap="sm" align="center">
+                            <Text size="sm" c={currentRun.status === 'running' ? 'green.5' : currentRun.status === 'failed' ? 'red.4' : 'dimmed'}>
+                              {describeRunStatus(currentRun)}
+                            </Text>
+                            {hasActiveRun && (
+                              <Button
+                                variant="danger"
+                                size="xs"
+                                icon={<Stop size={16} weight="fill" aria-hidden="true" />}
+                                onClick={handleStop}
+                                disabled={isStopping}
+                              >
+                                {isStopping ? 'Stopping...' : 'Stop'}
+                              </Button>
+                            )}
+                          </Group>
+                        )}
                       </Stack>
-
-                      <Group gap="sm" wrap="wrap">
-                        <Button
-                          variant="ghost"
-                          icon={<MagnifyingGlass size={18} weight="bold" aria-hidden="true" />}
-                          disabled={busy[project.id]}
-                          onClick={() => {
-                            void scanProjectAssetsAction(project).catch(() => null)
-                          }}
-                        >
-                          Scan assets
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          icon={<FileText size={18} weight="fill" aria-hidden="true" />}
-                          disabled={busy[project.id]}
-                          onClick={() => {
-                            void generateProjectManifest(project).catch(() => null)
-                          }}
-                        >
-                          Generate manifest
-                        </Button>
-                        <Button
-                          variant="primary"
-                          icon={<PackageIcon size={18} weight="fill" aria-hidden="true" />}
-                          disabled={busy[project.id] || buildStatus === 'running'}
-                          onClick={() => {
-                            void queueProjectBuild(project).catch(() => null)
-                          }}
-                        >
-                          {buildStatus === 'running' ? 'Building…' : 'Build'}
-                        </Button>
-                        <Button
-                          variant="pill"
-                          icon={<Play size={18} weight="fill" aria-hidden="true" />}
-                          disabled={busy[project.id]}
-                          onClick={() => {
-                            void runProjectLocallyAction(project).catch(() => null)
-                          }}
-                        >
-                          Run locally
-                        </Button>
-                      </Group>
-
-                      {message && (
-                        <Text size="sm" c={message.type === 'error' ? 'red.4' : 'green.5'}>
-                          {message.text}
-                        </Text>
-                      )}
                     </Stack>
                   </CardContent>
                 </Card>

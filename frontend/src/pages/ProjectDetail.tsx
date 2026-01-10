@@ -496,13 +496,15 @@ function ProjectDetail() {
   const [descriptionModalOpen, setDescriptionModalOpen] = useState(false)
   const [descriptionBusy, setDescriptionBusy] = useState(false)
   const [activeTab, setActiveTab] = useState<string>('overview')
+  const [showRunOptions, setShowRunOptions] = useState(false)
+  const [runOptions, setRunOptions] = useState({ resetWorld: false, resetPlugins: false })
 
   const existingProjectPlugins = useMemo(() => {
-    const set = new Set<string>()
+    const pluginSet = new Set<string>()
     for (const plugin of project?.plugins ?? []) {
-      set.add(`${plugin.id}:${plugin.version}`)
+      pluginSet.add(`${plugin.id}:${plugin.version}`)
     }
-    return set
+    return pluginSet
   }, [project?.plugins])
 
   const resetAddPluginForms = useCallback(() => {
@@ -640,7 +642,8 @@ function ProjectDetail() {
       if (!id) {
         throw new Error('Project identifier missing.')
       }
-      return runProjectLocally(id)
+      const options = runOptions.resetWorld || runOptions.resetPlugins ? runOptions : undefined;
+      return runProjectLocally(id, options)
     },
     {
       label: 'Starting local run',
@@ -656,6 +659,8 @@ function ProjectDetail() {
       }),
       onSuccess: (run) => {
         setRuns((prev) => [run, ...prev.filter((item) => item.id !== run.id)])
+        setShowRunOptions(false)
+        setRunOptions({ resetWorld: false, resetPlugins: false })
       },
     },
   )
@@ -1678,7 +1683,7 @@ useEffect(() => {
               <Button
                 variant="pill"
                 icon={<Play size={18} weight="fill" aria-hidden="true" />}
-                onClick={() => void queueRunLocally()}
+                onClick={() => setShowRunOptions(true)}
                 disabled={busy}
               >
                 Run locally
@@ -2780,6 +2785,53 @@ useEffect(() => {
             </Group>
           </Stack>
         )}
+      </Modal>
+
+      <Modal
+        opened={showRunOptions}
+        onClose={() => {
+          setShowRunOptions(false)
+          setRunOptions({ resetWorld: false, resetPlugins: false })
+        }}
+        title="Run Options"
+        size="sm"
+        centered
+      >
+        <Stack gap="md">
+          <Text size="sm" c="dimmed">
+            Select what to reset when starting the run:
+          </Text>
+          <Checkbox
+            label="Reset world data"
+            checked={runOptions.resetWorld}
+            onChange={(event) => setRunOptions(prev => ({ ...prev, resetWorld: event.target.checked }))}
+            description="Deletes the world directory to start fresh"
+          />
+          <Checkbox
+            label="Reset plugin data"
+            checked={runOptions.resetPlugins}
+            onChange={(event) => setRunOptions(prev => ({ ...prev, resetPlugins: event.target.checked }))}
+            description="Removes plugin data directories (keeps plugin JARs)"
+          />
+          <Group justify="flex-end" gap="sm">
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setShowRunOptions(false)
+                setRunOptions({ resetWorld: false, resetPlugins: false })
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() => void queueRunLocally()}
+              disabled={runLocallyBusy}
+            >
+              {runLocallyBusy ? 'Starting...' : 'Start Run'}
+            </Button>
+          </Group>
+        </Stack>
       </Modal>
   </>
   )

@@ -30,6 +30,10 @@ export interface RunJob {
   workspacePath?: string;
   consoleAvailable?: boolean;
   workspaceStatus?: RunWorkspaceStatus;
+  resetOptions?: {
+    resetWorld?: boolean;
+    resetPlugins?: boolean;
+  };
 }
 
 export interface RunWorkspaceStatus {

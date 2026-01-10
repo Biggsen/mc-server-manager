@@ -543,6 +543,10 @@ export interface RunJob {
   workspacePath?: string
   consoleAvailable?: boolean
   workspaceStatus?: RunWorkspaceStatus
+  resetOptions?: {
+    resetWorld?: boolean
+    resetPlugins?: boolean
+  }
 }
 
 export interface RunWorkspaceStatus {
@@ -551,9 +555,17 @@ export interface RunWorkspaceStatus {
   dirtyPaths: string[]
 }
 
-export async function runProjectLocally(projectId: string): Promise<RunJob> {
+export async function runProjectLocally(
+  projectId: string,
+  options?: { resetWorld?: boolean; resetPlugins?: boolean }
+): Promise<RunJob> {
+  const body = options && (options.resetWorld || options.resetPlugins)
+    ? JSON.stringify(options)
+    : undefined;
+  
   const data = await request<{ run: RunJob }>(`/projects/${projectId}/run`, {
     method: 'POST',
+    body,
   })
   return data.run
 }

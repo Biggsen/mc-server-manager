@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile, rm, stat } from "fs/promises";
+import { mkdir, readFile, writeFile, rm, stat, readdir } from "fs/promises";
 import { join, dirname } from "path";
 import { spawn, type ChildProcess } from "child_process";
 import { EventEmitter } from "events";
@@ -93,7 +93,12 @@ function cloneRun(run: RunJob): RunJob {
   return JSON.parse(JSON.stringify(run)) as RunJob;
 }
 
-export async function enqueueRun(project: StoredProject): Promise<RunJob> {
+export interface RunOptions {
+  resetWorld?: boolean;
+  resetPlugins?: boolean;
+}
+
+export async function enqueueRun(project: StoredProject, options: RunOptions = {}): Promise<RunJob> {
   const existingActive = Array.from(jobs.values()).find(
     (run) =>
       run.projectId === project.id &&
@@ -124,6 +129,7 @@ export async function enqueueRun(project: StoredProject): Promise<RunJob> {
     createdAt,
     logs: [],
     containerName,
+    resetOptions: options.resetWorld || options.resetPlugins ? options : undefined,
   };
 
   jobs.set(jobId, job);
@@ -556,10 +562,66 @@ function getProjectWorkspacePath(projectId: string): string {
   return join(WORKSPACE_ROOT, safeProject);
 }
 
+async function resetWorldData(workspaceDir: string, job: RunJob, project: StoredProject): Promise<void> {
+  const serverPropsPath = join(workspaceDir, "server.properties");
+  let worldName = "world";
+  
+  try {
+    const serverProps = await readFile(serverPropsPath, "utf-8");
+    const levelNameMatch = serverProps.match(/^level-name\s*=\s*(.+)$/m);
+    if (levelNameMatch && levelNameMatch[1]) {
+      worldName = levelNameMatch[1].trim();
+    }
+    if (!worldName) {
+      worldName = "world";
+    }
+  } catch (error) {
+    appendLog(job, "system", `Could not read server.properties to determine world name, using default "world"`);
+  }
+  
+  const worldPath = join(workspaceDir, worldName);
+  try {
+    await rm(worldPath, { recursive: true, force: true });
+    appendLog(job, "system", `Reset world data: removed ${worldName} directory`);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT") {
+      appendLog(job, "system", `Failed to reset world data: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+}
+
+async function resetPluginData(workspaceDir: string, job: RunJob): Promise<void> {
+  const pluginsDir = join(workspaceDir, "plugins");
+  try {
+    const entries = await readdir(pluginsDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        const pluginDataPath = join(pluginsDir, entry.name);
+        await rm(pluginDataPath, { recursive: true, force: true });
+        appendLog(job, "system", `Reset plugin data: removed ${entry.name} directory`);
+      }
+    }
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT") {
+      appendLog(job, "system", `Failed to reset plugin data: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+}
+
 async function prepareWorkspace(job: RunJob, project: StoredProject): Promise<string> {
   await mkdir(WORKSPACE_ROOT, { recursive: true });
   const workspaceDir = getProjectWorkspacePath(project.id);
   await mkdir(workspaceDir, { recursive: true });
+
+  const options = job.resetOptions;
+  if (options?.resetWorld) {
+    await resetWorldData(workspaceDir, job, project);
+  }
+  if (options?.resetPlugins) {
+    await resetPluginData(workspaceDir, job);
+  }
 
   const state = await loadWorkspaceState(project.id);
   const updatedState = await syncWorkspaceWithArtifact(workspaceDir, job, state);
