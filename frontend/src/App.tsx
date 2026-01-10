@@ -1,15 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import { NavLink as RouterNavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { NavLink as RouterNavLink, Route, Routes, useLocation } from 'react-router-dom'
 import {
-  MagnifyingGlass,
   Package,
   Plug,
   SquaresFour,
   Toolbox,
   RocketLaunch,
   Buildings,
-  Building,
   GithubLogo,
   PaintBrush,
 } from '@phosphor-icons/react'
@@ -21,7 +19,6 @@ import {
   NavLink as MantineNavLink,
   Stack,
   Text,
-  TextInput,
   Title,
   Avatar,
 } from '@mantine/core'
@@ -102,7 +99,6 @@ const NAV_SECTIONS: NavSection[] = [
 ]
 
 function App() {
-  const navigate = useNavigate()
   const location = useLocation()
   const [authStatus, setAuthStatus] = useState<AuthStatus | null>(null)
   const [authError, setAuthError] = useState<string | null>(null)
@@ -276,20 +272,12 @@ function App() {
 
   const sidebar = (
     <Stack gap="xl" miw={0}>
-      <Button
-        variant="ghost"
-        size="lg"
-        onClick={() => navigate('/')}
-        icon={<Package size={24} weight="duotone" aria-hidden="true" />}
-        style={{ justifyContent: 'flex-start' }}
-      >
-        <Stack gap={2}>
-          <Title order={4}>MC Server Manager</Title>
-          <Text size="xs" c="dimmed">
-            Define • Build • Deploy
-          </Text>
-        </Stack>
-      </Button>
+      <Stack gap={2}>
+        <Title order={4}>{currentTitle}</Title>
+        <Text size="xs" c="dimmed">
+          Define • Build • Deploy
+        </Text>
+      </Stack>
 
       {NAV_SECTIONS.map((section) => (
         <Box key={section.label}>
@@ -326,32 +314,21 @@ function App() {
   )
 
   const topbar = (
-    <Group justify="space-between" align="center" gap="lg" wrap="nowrap" w="100%">
-      <Stack gap={2} flex={0}>
-        <Text size="xs" c="dimmed">
-          {ENVIRONMENT_LABEL} mode
-        </Text>
-        <Title order={2}>{currentTitle}</Title>
-      </Stack>
+    <Group justify="space-between" align="center" gap="xl" wrap="nowrap" w="100%">
+      <Group gap="md" align="center">
+        <Package size={28} weight="duotone" />
+        <Stack gap={2}>
+          <Text size="xs" c="dimmed">
+            {ENVIRONMENT_LABEL} mode
+          </Text>
+          <Title order={2}>MC Server Manager</Title>
+        </Stack>
+      </Group>
 
-      <TextInput
-        placeholder="Search projects, builds, plugins"
-        flex={1}
-        leftSection={<MagnifyingGlass size={16} weight="bold" aria-hidden="true" />}
-        aria-label="Global search"
-      />
-
-      <Group gap="sm" flex={0} wrap="nowrap">
+      <Group gap="md" wrap="nowrap">
         <ActiveActionIndicator />
-        <Button
-          variant="ghost"
-          icon={<Building size={16} weight="fill" aria-hidden="true" />}
-          onClick={() => navigate('/projects/new')}
-        >
-          New Project
-        </Button>
         {authStatus?.authenticated ? (
-          <Group gap="xs" wrap="nowrap">
+          <Group gap="sm" wrap="nowrap">
             <Avatar radius="xl" color="blue">
               {initials}
             </Avatar>
