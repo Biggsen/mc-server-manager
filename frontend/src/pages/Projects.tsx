@@ -15,8 +15,6 @@ import { ContentSection } from '../components/layout'
 import { Anchor, Group, Loader, Stack, Text, Title } from '@mantine/core'
 import { Button, Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui'
 
-type ProjectMessage = { type: 'success' | 'error'; text: string }
-
 import { getApiBase } from '../lib/api'
 const API_BASE = getApiBase()
 
@@ -59,20 +57,11 @@ function describeRunStatus(run: RunJob): string {
   }
 }
 
-function projectMessageForRun(run: RunJob): ProjectMessage {
-  return {
-    type: run.status === 'failed' ? 'error' : 'success',
-    text: describeRunStatus(run),
-  }
-}
-
 function Projects() {
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [building, setBuilding] = useState<Record<string, BuildJob['status']>>({})
   const [builds, setBuilds] = useState<Record<string, BuildJob | undefined>>({})
-  const [messages, setMessages] = useState<Record<string, ProjectMessage | undefined>>({})
   const [runs, setRuns] = useState<Record<string, RunJob | undefined>>({})
   const [stopping, setStopping] = useState<Record<string, boolean>>({})
 
@@ -135,22 +124,6 @@ function Projects() {
   }, [])
 
   useEffect(() => {
-    setBuilding((prev) => {
-      const next = { ...prev }
-      Object.entries(builds).forEach(([projectId, build]) => {
-        if (build && build.status !== 'running') {
-          next[projectId] = build.status
-        }
-      })
-      return next
-    })
-  }, [builds])
-
-  const setProjectMessage = (projectId: string, message?: ProjectMessage) => {
-    setMessages((prev) => ({ ...prev, [projectId]: message }))
-  }
-
-  useEffect(() => {
     let cancelled = false
     const loadRuns = () => {
       fetchRuns()
@@ -161,15 +134,6 @@ function Projects() {
             return acc
           }, {})
           setRuns(latestByProject)
-          setMessages((prev) => {
-            const next = { ...prev }
-            Object.entries(latestByProject).forEach(([projectId, run]) => {
-              if (isActiveRun(run) || run.status === 'failed') {
-                next[projectId] = projectMessageForRun(run)
-              }
-            })
-            return next
-          })
         })
         .catch((err: Error) => {
           console.error('Failed to load run status', err)
@@ -197,27 +161,10 @@ function Projects() {
 
     const latestRunsRef = new Map<string, RunJob>()
 
-    const updateMessage = (run: RunJob) => {
+    const updateRun = (run: RunJob) => {
       const preferred = preferRun(latestRunsRef.get(run.projectId), run)
       latestRunsRef.set(run.projectId, preferred)
-
-      if (isActiveRun(preferred) || preferred.status === 'failed') {
-        setMessages((prev) => ({
-          ...prev,
-          [run.projectId]: projectMessageForRun(preferred),
-        }))
-      } else if (preferred.status === 'stopped' || preferred.status === 'succeeded') {
-        setMessages((prev) => {
-          const next = { ...prev }
-          delete next[run.projectId]
-          return next
-        })
-      } else {
-        setMessages((prev) => ({
-          ...prev,
-          [run.projectId]: projectMessageForRun(preferred),
-        }))
-      }
+      setRuns((prev) => ({ ...prev, [run.projectId]: preferred }))
     }
 
     const handleInit = (event: MessageEvent) => {
@@ -229,15 +176,10 @@ function Projects() {
             latestRunsRef.set(run.projectId, preferred)
           })
           const nextRuns: Record<string, RunJob> = {}
-          const nextMessages: Record<string, ProjectMessage> = {}
           latestRunsRef.forEach((storedRun, projectId) => {
             nextRuns[projectId] = storedRun
-            if (isActiveRun(storedRun) || storedRun.status === 'failed') {
-              nextMessages[projectId] = projectMessageForRun(storedRun)
-            }
           })
           setRuns((prev) => ({ ...prev, ...nextRuns }))
-          setMessages((prev) => ({ ...prev, ...nextMessages }))
         }
       } catch (err) {
         console.error('Failed to parse run stream init payload', err)
@@ -248,12 +190,7 @@ function Projects() {
       try {
         const payload = JSON.parse(event.data) as { run: RunJob }
         if (payload.run) {
-          updateMessage(payload.run)
-          setRuns((prev) => {
-            const current = prev[payload.run.projectId]
-            const preferred = preferRun(current, payload.run)
-            return { ...prev, [payload.run.projectId]: preferred }
-          })
+          updateRun(payload.run)
         }
       } catch (err) {
         console.error('Failed to parse run update payload', err)
@@ -386,7 +323,7 @@ function Projects() {
                             {hasActiveRun && (
                               <Button
                                 variant="danger"
-                                size="xs"
+                                size="sm"
                                 icon={<Stop size={16} weight="fill" aria-hidden="true" />}
                                 onClick={handleStop}
                                 disabled={isStopping}
