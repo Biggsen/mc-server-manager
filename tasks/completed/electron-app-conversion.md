@@ -702,9 +702,9 @@ Implemented in root `package.json`:
 - Disable `nodeIntegration` in renderer
 - Use preload script for safe IPC
 
-### Content Security Policy
-- Add CSP headers to Express server
-- Restrict resource loading in renderer
+### Content Security Policy ✅
+- CSP headers not needed for local tool (localhost-only, not exposed to web)
+- Resource loading restrictions not required for local Electron app
 
 ### GitHub OAuth ✅
 - Store tokens securely (keytar - OS credential vault)
