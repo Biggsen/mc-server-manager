@@ -48,6 +48,7 @@ import {
   readUploadedConfigFile,
   saveUploadedConfigFile,
   deleteUploadedConfigFile,
+  collectUploadedConfigMaterials,
   type ConfigFileSummary,
 } from "../services/configUploads";
 import { optionalAuth } from "../middleware/auth";
@@ -724,6 +725,92 @@ router.get("/:id/profile", async (req: Request, res: Response) => {
   } catch (error) {
     console.error("Failed to read project profile", error);
     res.status(500).json({ error: "Failed to read project profile" });
+  }
+});
+
+async function syncProjectRepository(
+  req: Request,
+  project: StoredProject,
+): Promise<{ commitSha: string }> {
+  if (!project.repo) {
+    throw new Error("Project does not have a linked repository");
+  }
+
+  const octokit = await getOctokitForRequest(req);
+  const branch = project.repo.defaultBranch ?? project.defaultBranch ?? "main";
+  
+  const filesToCommit: Record<string, string> = {};
+
+  // Collect project definition files (profile, overlays, plugin registry)
+  const definitionFiles = await collectProjectDefinitionFiles(project);
+  for (const [path, content] of Object.entries(definitionFiles)) {
+    filesToCommit[path] = content;
+  }
+
+  // Collect uploaded config files (user-edited configs, NOT rendered template configs)
+  const uploadedConfigs = await collectUploadedConfigMaterials(project);
+  for (const config of uploadedConfigs) {
+    filesToCommit[config.path] = config.content;
+  }
+
+  if (Object.keys(filesToCommit).length === 0) {
+    throw new Error("No files to commit");
+  }
+
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const { commitSha } = await commitFiles(octokit, {
+    owner: project.repo.owner,
+    repo: project.repo.name,
+    branch,
+    message: `chore: sync project definition files (${timestamp})`,
+    files: filesToCommit,
+  });
+
+  return { commitSha };
+}
+
+router.post("/:id/sync", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const project = await findProject(id);
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+
+    if (!project.repo) {
+      res.status(400).json({ error: "Project does not have a linked repository" });
+      return;
+    }
+
+    const { commitSha } = await syncProjectRepository(req, project);
+
+    res.status(200).json({
+      commitSha,
+      message: "Project definition files synced to repository",
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const errorDetails = error instanceof Error 
+      ? { message: error.message, stack: error.stack, name: error.name }
+      : String(error);
+    console.error("Failed to sync project repository", errorDetails);
+    const status = message.includes("GitHub session not available") 
+      ? 401 
+      : message.includes("does not have a linked repository")
+      ? 400
+      : message.includes("No files to commit")
+      ? 400
+      : 500;
+    res
+      .status(status)
+      .json({ 
+        error: status === 401 
+          ? "GitHub authentication required" 
+          : status === 400
+          ? message
+          : "Failed to sync project repository" 
+      });
   }
 });
 

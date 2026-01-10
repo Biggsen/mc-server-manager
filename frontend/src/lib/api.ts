@@ -499,6 +499,20 @@ export async function saveProjectProfile(
   }
 }
 
+export async function syncProjectRepository(projectId: string): Promise<{
+  commitSha: string
+  message: string
+}> {
+  const data = await request<{
+    commitSha: string
+    message: string
+  }>(`/projects/${projectId}/sync`, {
+    method: 'POST',
+  })
+  emitProjectsUpdated()
+  return data
+}
+
 export type RunStatus =
   | 'pending'
   | 'running'

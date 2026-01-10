@@ -22,6 +22,7 @@ import {
   scanProjectAssets,
   sendRunCommand,
   stopRunJob,
+  syncProjectRepository,
   triggerBuild,
   triggerManifest,
   updateProject,
@@ -687,7 +688,41 @@ function ProjectDetail() {
     },
   )
 
-  const busy = queueBuildBusy || generateManifestBusy || scanAssetsBusy || runLocallyBusy
+  const {
+    run: syncRepository,
+    busy: syncRepositoryBusy,
+  } = useAsyncAction(
+    async () => {
+      if (!id) {
+        throw new Error('Project identifier missing.')
+      }
+      if (!project?.repo) {
+        throw new Error('Project does not have a linked repository.')
+      }
+      return syncProjectRepository(id)
+    },
+    {
+      label: 'Syncing repository',
+      successToast: (result) => ({
+        title: 'Repository synced',
+        description: `Definition files committed to repository (${result.commitSha.slice(0, 7)})`,
+        variant: 'success',
+      }),
+      errorToast: (error) => ({
+        title: 'Sync failed',
+        description: error instanceof Error ? error.message : 'Failed to sync repository',
+        variant: 'danger',
+      }),
+      onSuccess: () => {
+        // Refresh project to get updated commit SHA if needed
+        if (id) {
+          void fetchProject(id).then(setProject).catch(() => null)
+        }
+      },
+    },
+  )
+
+  const busy = queueBuildBusy || generateManifestBusy || scanAssetsBusy || runLocallyBusy || syncRepositoryBusy
 
   const loadConfigs = useCallback(async () => {
     if (!id) return
@@ -1648,6 +1683,16 @@ useEffect(() => {
               >
                 Run locally
               </Button>
+              {project?.repo && (
+                <Button
+                  variant="secondary"
+                  icon={<ArrowsClockwise size={18} weight="bold" aria-hidden="true" />}
+                  onClick={() => void syncRepository()}
+                  disabled={busy}
+                >
+                  Sync to repository
+                </Button>
+              )}
             </Group>
           </Stack>
         </CardContent>
@@ -1800,46 +1845,6 @@ useEffect(() => {
                   </CardContent>
                 </Card>
 
-                <Card>
-                  <CardContent>
-                    <Stack gap="md">
-                    <Title order={3}>Quick actions</Title>
-                    <Text size="sm" c="dimmed">
-                      Use these shortcuts to keep the project in sync.
-                    </Text>
-                    <Group gap="sm" wrap="wrap">
-                      <Button
-                        variant="ghost"
-                        onClick={() => void scanAssets()}
-                        disabled={busy}
-                      >
-                        Rescan assets
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        onClick={() => void generateManifest()}
-                        disabled={busy}
-                      >
-                        Generate manifest
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        onClick={() => void queueBuild()}
-                        disabled={busy}
-                      >
-                        Trigger build
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        onClick={() => void queueRunLocally()}
-                        disabled={busy}
-                      >
-                        Run locally
-                      </Button>
-                    </Group>
-                    </Stack>
-                  </CardContent>
-                </Card>
               </Stack>
             </Tabs.Panel>
 
