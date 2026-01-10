@@ -50,8 +50,10 @@ import {
   deleteUploadedConfigFile,
   type ConfigFileSummary,
 } from "../services/configUploads";
+import { optionalAuth } from "../middleware/auth";
 
 const router = Router();
+router.use(optionalAuth);
 const pluginUpload = multer({
   storage: multer.memoryStorage(),
   limits: {
@@ -494,7 +496,10 @@ router.post("/", async (req: Request, res: Response) => {
       hydratedProject = bootstrapped.project;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.error("Failed to bootstrap project repository", error);
+      const errorDetails = error instanceof Error 
+        ? { message: error.message, stack: error.stack, name: error.name }
+        : String(error);
+      console.error("Failed to bootstrap project repository", errorDetails);
       const status = message.includes("GitHub session not available") ? 401 : 500;
       res
         .status(status)
@@ -557,7 +562,10 @@ router.post("/import", async (req: Request, res: Response) => {
       hydratedProject = bootstrapped.project;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.error("Failed to bootstrap imported project repository", error);
+      const errorDetails = error instanceof Error 
+        ? { message: error.message, stack: error.stack, name: error.name }
+        : String(error);
+      console.error("Failed to bootstrap imported project repository", errorDetails);
       const status = message.includes("GitHub session not available") ? 401 : 500;
       res
         .status(status)
