@@ -25,7 +25,7 @@ export function AppShell({
       className={className}
       padding="xl"
       navbar={{
-        width: 280,
+        width: 200,
         breakpoint: 'xs',
       }}
       header={{
@@ -33,9 +33,9 @@ export function AppShell({
       }}
       styles={{
         navbar: {
-          width: '280px',
-          minWidth: '280px',
-          maxWidth: '280px',
+          width: '200px',
+          minWidth: '200px',
+          maxWidth: '200px',
         },
       }}
     >
