@@ -5,8 +5,10 @@
 This specification outlines the conversion of MC Server Manager from a web-based application (separate frontend and backend processes) to a standalone Electron desktop application. The goal is to package the entire application as a single executable that runs the backend server internally and displays the frontend in a native window.
 
 **Priority:** Medium  
-**Status:** ✅ Mostly Complete  
+**Status:** ✅ Core Features Complete  
 **MVP Gap:** No
+
+**Note:** Core functionality is implemented and working. Remaining items include data migration, installer packages (currently using unpacked directories), and cross-platform build testing.
 
 ---
 
@@ -87,41 +89,7 @@ This specification outlines the conversion of MC Server Manager from a web-based
 }
 ```
 
-**Note:** Implementation uses `electron-packager` for builds (not `electron-builder`). `electron-builder` is available but not currently configured.
-
-#### Electron Builder Configuration
-```json
-{
-  "build": {
-    "appId": "com.mcservermanager.app",
-    "productName": "MC Server Manager",
-    "directories": {
-      "output": "dist-electron"
-    },
-    "files": [
-      "electron/**/*",
-      "backend/dist/**/*",
-      "frontend/dist/**/*",
-      "templates/**/*",
-      "package.json"
-    ],
-    "win": {
-      "target": ["nsis"],
-      "icon": "assets/icon.ico"
-    },
-    "mac": {
-      "target": ["dmg"],
-      "icon": "assets/icon.icns",
-      "category": "public.app-category.utilities"
-    },
-    "linux": {
-      "target": ["AppImage"],
-      "icon": "assets/icon.png",
-      "category": "Utility"
-    }
-  }
-}
-```
+**Note:** Implementation uses `@electron/packager` (electron-packager) for builds. `electron-builder` is available with a configuration file (`electron-builder.yml`) but is not currently used for packaging. The `electron-builder.yml` file exists for potential future use.
 
 ---
 
@@ -168,30 +136,72 @@ mc-server-manager/
 #### Key Implementation Points
 
 **Backend Server Initialization**
+The backend is started using direct import (not spawned as a separate process). In development mode, the backend is NOT started by Electron - it's expected to be running via `npm run dev:be`. Only in production (packaged app) does Electron start the backend.
+
 ```typescript
 import { app, BrowserWindow } from 'electron';
 import { join } from 'path';
-import { spawn } from 'child_process';
 
-let backendProcess: ChildProcess | null = null;
 let mainWindow: BrowserWindow | null = null;
+let backendServer: import('http').Server | null = null;
+let backendStarted = false;
+
+const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 
 async function startBackendServer(): Promise<void> {
-  // Option 1: Spawn backend as separate process
-  const backendPath = join(__dirname, '../backend/dist/index.js');
-  backendProcess = spawn('node', [backendPath], {
-    env: {
-      ...process.env,
-      PORT: '4000',
-      ELECTRON_MODE: 'true',
-      USER_DATA_PATH: app.getPath('userData')
-    }
-  });
+  if (backendStarted) {
+    return;
+  }
 
-  // Option 2: Import and start backend directly (preferred)
-  // This requires refactoring backend to export server initialization
+  // In development, the backend is already started by npm run dev:be
+  // Only start it in production (packaged app)
+  if (isDev) {
+    console.log('Development mode: Using backend from dev:be script');
+    backendStarted = true;
+    return;
+  }
+
+  try {
+    // Set Electron mode environment variable
+    process.env.ELECTRON_MODE = 'true';
+    process.env.USER_DATA_PATH = app.getPath('userData');
+    process.env.PORT = '4000';
+
+    // Import backend server dynamically
+    const appPath = app.getAppPath();
+    
+    // Set NODE_PATH to include root node_modules for module resolution
+    // This allows the backend to find dependencies from the root node_modules (workspace hoisting)
+    const nodeModulesPath = join(appPath, 'node_modules');
+    if (!process.env.NODE_PATH) {
+      process.env.NODE_PATH = nodeModulesPath;
+    } else {
+      process.env.NODE_PATH = `${nodeModulesPath}${require('path').delimiter}${process.env.NODE_PATH}`;
+    }
+    
+    const backendPath = join(appPath, 'backend/dist/index.js');
+    
+    // Import and start backend directly
+    const backendModule = require(backendPath) as { 
+      startServer: (port: number) => Promise<import('http').Server> 
+    };
+    
+    if (!backendModule || typeof backendModule.startServer !== 'function') {
+      throw new Error('Backend module does not export startServer function');
+    }
+    
+    backendServer = await backendModule.startServer(4000);
+    backendStarted = true;
+    console.log('Backend server started successfully on port 4000');
+  } catch (error) {
+    console.error('Failed to start backend server:', error);
+    throw error;
+  }
 }
 ```
+
+**File Logging in Electron Mode**
+When running in Electron mode, the backend automatically logs to `backend.log` in the userData directory for debugging purposes.
 
 **BrowserWindow Creation**
 ```typescript
@@ -199,21 +209,54 @@ function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
+    minWidth: 800,
+    minHeight: 600,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
       preload: join(__dirname, 'preload.js')
     },
-    icon: getIconPath()
+    icon: getIconPath(),
+    show: false, // Don't show until ready to prevent visual flash
+  });
+
+  // Show window when ready to prevent visual flash
+  mainWindow.once('ready-to-show', () => {
+    mainWindow?.show();
   });
 
   // Load frontend
-  if (process.env.NODE_ENV === 'development') {
+  const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
+  
+  if (isDev) {
+    // In development, load from Vite dev server
     mainWindow.loadURL('http://localhost:5173');
     mainWindow.webContents.openDevTools();
   } else {
-    mainWindow.loadFile(join(__dirname, '../frontend/dist/index.html'));
+    // In production, load from built files
+    // Use app.getAppPath() to get the correct path in packaged app
+    const appPath = app.getAppPath();
+    let frontendPath: string;
+    
+    if (appPath.endsWith('.asar')) {
+      // In asar, use the path directly
+      frontendPath = join(appPath, 'frontend/dist/index.html');
+    } else {
+      // Not in asar, use relative path
+      frontendPath = join(__dirname, '../frontend/dist/index.html');
+    }
+    
+    mainWindow.loadFile(frontendPath).catch((err) => {
+      console.error('Failed to load frontend:', err);
+      mainWindow?.webContents.openDevTools();
+    });
   }
+
+  // Handle external links - open in system browser
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    shell.openExternal(url);
+    return { action: 'deny' };
+  });
 
   mainWindow.on('closed', () => {
     mainWindow = null;
@@ -223,9 +266,29 @@ function createWindow(): void {
 
 **App Lifecycle**
 ```typescript
-app.whenReady().then(() => {
-  startBackendServer();
-  createWindow();
+app.whenReady().then(async () => {
+  // Set app user model ID for Windows taskbar icon
+  if (process.platform === 'win32') {
+    app.setAppUserModelId('com.mcservermanager.app');
+  }
+  
+  try {
+    // Start backend server first
+    await startBackendServer();
+    
+    // Give backend a moment to be ready to accept connections
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    // Then create window
+    createWindow();
+  } catch (error) {
+    console.error('App initialization failed:', error);
+    // Create window anyway to show error to user
+    createWindow();
+    if (mainWindow) {
+      mainWindow.webContents.openDevTools();
+    }
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -235,14 +298,20 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
+  // On macOS, keep app running even when all windows are closed
   if (process.platform !== 'darwin') {
-    stopBackendServer();
     app.quit();
   }
 });
 
 app.on('before-quit', () => {
-  stopBackendServer();
+  if (backendServer) {
+    console.log('[Backend] Closing server...');
+    backendServer.close(() => {
+      console.log('[Backend] Server closed');
+    });
+    backendServer = null;
+  }
 });
 ```
 
@@ -257,18 +326,23 @@ Backend uses `process.cwd()` for all data directories:
 - `templates/server`
 
 #### Electron Implementation
-Use Electron's `app.getPath('userData')` for data storage:
+The Electron main process sets `USER_DATA_PATH` environment variable before starting the backend. The backend does NOT import Electron directly - it uses the environment variable.
 
 **New Config Module** (`backend/src/config.ts`)
 ```typescript
-import { app } from 'electron';
+import { join } from 'path';
 
-// In Electron mode, use app.getPath('userData')
+// In Electron mode, use USER_DATA_PATH set by Electron main process
 // In web mode, use process.cwd()
+// Note: Backend does not import Electron - USER_DATA_PATH is set as env var
 export function getDataRoot(): string {
-  if (process.env.ELECTRON_MODE === 'true') {
-    return process.env.USER_DATA_PATH || app.getPath('userData');
+  const electronMode = process.env.ELECTRON_MODE === 'true';
+  const userDataPath = process.env.USER_DATA_PATH;
+  
+  if (electronMode && userDataPath) {
+    return userDataPath;
   }
+  
   return process.cwd();
 }
 
@@ -295,6 +369,18 @@ export function getTemplatesRoot(): string {
   }
   return join(process.cwd(), '..', 'templates', 'server');
 }
+
+// Helper function for migration - checks dev data paths
+export function getDevDataPaths(): string[] {
+  if (process.env.ELECTRON_MODE === 'true') {
+    // In Electron, check multiple possible locations for dev data
+    return [
+      join(__dirname, '..', '..', '..', 'backend', 'data'),
+      join(__dirname, '..', '..', 'backend', 'data'),
+    ];
+  }
+  return [join(process.cwd(), 'backend', 'data')];
+}
 ```
 
 **Update All Services**
@@ -310,44 +396,87 @@ Replace `process.cwd()` with config functions:
 ### 3. Backend Server Refactoring
 
 #### Export Server Initialization
-Modify `backend/src/index.ts` to export server creation:
+Modified `backend/src/index.ts` to export server creation:
 
 ```typescript
 import express from 'express';
+import type { Server } from 'http';
 // ... other imports
 
 export function createApp(): express.Application {
   const app = express();
-  // ... middleware setup
+  // ... middleware setup (CORS, JSON parsing, routes, error handlers)
   registerRoutes(app);
   // ... error handlers
   return app;
 }
 
-export async function startServer(port: number = 4000): Promise<void> {
+export async function startServer(port: number = 4000): Promise<Server> {
   const app = createApp();
-  return new Promise((resolve) => {
-    app.listen(port, () => {
-      console.log(`MC Server Manager backend listening on port ${port}`);
-      resolve();
-    });
+  return new Promise((resolve, reject) => {
+    try {
+      // Bind to 127.0.0.1 (localhost only) for security
+      const server = app.listen(port, '127.0.0.1', () => {
+        console.log(`MC Server Manager backend listening on http://127.0.0.1:${port}`);
+        resolve(server);
+      }).on('error', (err: Error) => {
+        reject(err);
+      });
+    } catch (err) {
+      reject(err);
+    }
   });
 }
 
 // Only start if run directly (not imported)
 if (require.main === module) {
-  startServer(Number(process.env.PORT ?? 4000));
+  const port = Number(process.env.PORT ?? 4000);
+  let server: Server | null = null;
+  
+  startServer(port)
+    .then((s) => {
+      server = s;
+    })
+    .catch((error) => {
+      console.error('Failed to start server:', error);
+      process.exit(1);
+    });
+  
+  // Handle graceful shutdown
+  const shutdown = () => {
+    if (server) {
+      console.log('Shutting down server...');
+      server.close(() => {
+        console.log('Server closed');
+        process.exit(0);
+      });
+    } else {
+      process.exit(0);
+    }
+  };
+  
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
 }
 ```
 
-#### Electron Integration
-In `electron/main.ts`:
-```typescript
-import { startServer } from '../backend/dist/index';
+**File Logging in Electron Mode**
+When `ELECTRON_MODE` is true and `USER_DATA_PATH` is set, the backend automatically redirects console output to `backend.log` in the userData directory for debugging.
 
+#### Electron Integration
+In `electron/main.ts`, the backend is dynamically required (not imported via ES6 imports):
+
+```typescript
 async function startBackendServer(): Promise<void> {
-  await startServer(4000);
-  console.log('Backend server started');
+  // ... environment setup (ELECTRON_MODE, USER_DATA_PATH, NODE_PATH) ...
+  
+  const backendPath = join(appPath, 'backend/dist/index.js');
+  const backendModule = require(backendPath) as { 
+    startServer: (port: number) => Promise<import('http').Server> 
+  };
+  
+  backendServer = await backendModule.startServer(4000);
+  backendStarted = true;
 }
 ```
 
@@ -379,20 +508,24 @@ export default defineConfig({
 ```
 
 #### API Base URL
-Frontend already uses environment variable:
+Frontend uses environment variable:
 ```typescript
 const API_BASE = import.meta.env.VITE_API_BASE ?? '/api'
 ```
 
-In Electron production, this will resolve to `/api` which won't work with `file://` protocol. Options:
+**Implemented Solution: Electron IPC for Authenticated Requests**
 
-**Option A: Use absolute localhost URL**
-```typescript
-const API_BASE = import.meta.env.VITE_API_BASE ?? 
-  (import.meta.env.MODE === 'production' ? 'http://localhost:4000/api' : '/api');
-```
+In Electron, authenticated API requests are made through an IPC handler (`api-request`) that:
+- Uses Electron's `net` module to make HTTP requests from the main process
+- Automatically includes the Authorization header with the GitHub token from keytar
+- Works seamlessly with both `file://` protocol (production) and `http://localhost` (development)
 
-**Option B: Use Electron IPC** (more complex, better for native features)
+This approach is more secure because:
+- Tokens never leave the main process
+- Direct file:// protocol issues are avoided
+- Token management is centralized in the main process
+
+The preload script exposes an `apiRequest` function to the renderer that forwards requests to the main process via IPC.
 
 ### 5. GitHub OAuth Flow ✅
 
@@ -401,16 +534,21 @@ const API_BASE = import.meta.env.VITE_API_BASE ??
 2. System browser opens for GitHub OAuth (via `shell.openExternal()`)
 3. GitHub redirects to backend callback
 4. Backend issues JWT token and redirects:
-   - **Production**: Custom protocol (`mc-server-manager://auth?token=...`)
+   - **Production**: Custom protocol (`mc-server-manager://auth?token=...&login=...`)
    - **Development**: Localhost polling endpoint (`http://localhost:4000/api/auth/callback/poll`)
+   - **Fallback**: Token polling is always started as a fallback in case custom protocol doesn't work
 5. Token stored securely in OS credential vault (keytar)
-6. Token automatically included in API requests via Authorization header
+6. Token automatically included in API requests via IPC handler in Authorization header
 
 **Implementation Details:**
 - Uses token-based authentication (JWT) instead of cookies
 - Tokens stored in OS credential vault (Windows Credential Manager, macOS Keychain, Linux Secret Service)
 - Custom protocol handler registered: `mc-server-manager://`
-- Single-instance lock prevents multiple app instances
+- Protocol handling differs by platform:
+  - **Windows**: Uses `requestSingleInstanceLock()` and `second-instance` event
+  - **macOS/Linux**: Uses `open-url` event
+- Token polling runs as fallback in both dev and prod (polls every 1 second for up to 2 minutes)
+- Single-instance lock prevents multiple app instances (Windows)
 - See `tasks/completed/github-oauth-electron-spec.md` for full details
 
 ### 6. Docker Integration
@@ -511,24 +649,28 @@ Implemented in root `package.json`:
 ### Platform-Specific Considerations
 
 #### Windows
-- NSIS installer
-- Auto-updater support (electron-updater)
-- Windows-specific path handling
+- Uses `electron-packager` which creates a directory with unpacked app (not an installer)
+- `electron-builder.yml` is configured for NSIS installer (future use)
+- Auto-updater support (electron-updater) - not yet implemented
+- Windows-specific path handling (working)
+- App user model ID set for taskbar icon grouping
 
 #### macOS
-- DMG installer
-- Code signing (required for distribution)
-- Notarization (required for Gatekeeper)
-- App Sandbox considerations
+- Uses `electron-packager` which creates a directory with unpacked app (not a DMG)
+- `electron-builder.yml` is configured for DMG installer (future use)
+- Code signing (required for distribution) - not yet configured
+- Notarization (required for Gatekeeper) - not yet configured
+- App Sandbox considerations - not yet implemented
 
 #### Linux
-- AppImage (portable)
-- DEB/RPM packages (optional)
-- Desktop file integration
+- Uses `electron-packager` which creates a directory with unpacked app (not an AppImage)
+- `electron-builder.yml` is configured for AppImage (future use)
+- DEB/RPM packages (optional) - not yet implemented
+- Desktop file integration - not yet implemented
 
 ---
 
-## Data Migration
+## Data Migration ⚠️ (Not Yet Implemented)
 
 ### User Data Location
 
@@ -540,26 +682,38 @@ Implemented in root `package.json`:
 - **macOS**: `~/Library/Application Support/MC Server Manager/`
 - **Linux**: `~/.config/MC Server Manager/`
 
-### Migration Strategy
+### Migration Strategy (Future Enhancement)
 
+The `getDevDataPaths()` function exists in `backend/src/config.ts` to support migration, but the actual migration logic is not yet implemented.
+
+**Planned Implementation:**
 1. **On First Launch**
-   - Check if data exists in old location
+   - Check if data exists in old location using `getDevDataPaths()`
    - If found, prompt user to migrate
    - Copy data to new Electron userData location
+   - Show migration progress dialog
 
-2. **Migration Script**
+2. **Migration Script** (Planned)
    ```typescript
    import { app } from 'electron';
-   import { existsSync, copyFileSync } from 'fs';
+   import { existsSync } from 'fs';
    import { join } from 'path';
+   import { getDevDataPaths } from '../backend/dist/config';
 
-   function migrateDataIfNeeded(): void {
-     const oldDataPath = join(process.cwd(), 'backend', 'data');
+   async function migrateDataIfNeeded(): Promise<void> {
      const newDataPath = join(app.getPath('userData'), 'data');
      
-     if (existsSync(oldDataPath) && !existsSync(newDataPath)) {
-       // Copy data
-       // Show migration dialog
+     if (existsSync(newDataPath)) {
+       return; // Already migrated
+     }
+     
+     const devDataPaths = getDevDataPaths();
+     for (const oldDataPath of devDataPaths) {
+       if (existsSync(oldDataPath)) {
+         // Copy data from oldDataPath to newDataPath
+         // Show migration dialog
+         break;
+       }
      }
    }
    ```
@@ -584,21 +738,24 @@ Implemented in root `package.json`:
 - Test on multiple platforms
 
 ### Manual Testing Checklist
-- [x] App launches successfully
-- [x] Backend server starts automatically
-- [x] Frontend loads correctly
-- [x] API calls work (localhost:4000)
+- [x] App launches successfully (dev and prod)
+- [x] Backend server starts automatically (production mode only; dev mode expects external backend)
+- [x] Frontend loads correctly (both dev server and built files)
+- [x] API calls work (localhost:4000 via IPC in production, direct HTTP in dev)
 - [x] GitHub OAuth flow works (token-based, system browser)
 - [x] Token storage works (keytar, persists across restarts)
-- [x] Custom protocol handler works (production)
-- [x] Localhost polling works (development)
+- [x] Custom protocol handler works (production - Windows tested, macOS/Linux use `open-url` event)
+- [x] Localhost polling works (development fallback, also used as fallback in production)
+- [x] IPC-based API requests work (authenticated requests via `api-request` handler)
+- [x] File logging works (backend.log in userData directory in Electron mode)
+- [x] Data persists between app restarts (userData path)
+- [x] App quits cleanly (backend stops gracefully)
+- [x] Single-instance lock works (Windows tested)
 - [ ] Project creation works (needs testing)
 - [ ] File uploads work (needs testing)
 - [ ] Build system works (needs testing)
 - [ ] Local runs work (Docker) (needs testing)
-- [x] Data persists between app restarts (userData path)
-- [x] App quits cleanly (backend stops)
-- [x] Single-instance lock works (Windows)
+- [ ] Data migration (not yet implemented)
 
 ---
 
@@ -695,25 +852,31 @@ autoUpdater.checkForUpdatesAndNotify();
 
 ### Phase 3: Frontend Integration (Week 2) ✅
 - [x] Update Vite config for Electron (base: './')
-- [x] Fix API base URL for production (uses IPC for authenticated requests)
-- [x] Test frontend loading in Electron
-- [x] Verify API communication
+- [x] Fix API base URL for production (uses IPC for authenticated requests via `api-request` handler)
+- [x] Implement IPC-based API requests for Electron (uses Electron `net` module with token injection)
+- [x] Test frontend loading in Electron (both dev server and built files)
+- [x] Verify API communication (IPC in production, direct HTTP in dev)
 
 ### Phase 4: OAuth & Native Features (Week 2-3) ✅
 - [x] Implement GitHub OAuth flow (token-based, system browser)
 - [x] Add custom protocol handler (`mc-server-manager://`)
-- [x] Implement app lifecycle management
-- [x] Add error handling and logging (structured JSON logging)
-- [x] Add single-instance lock (Windows)
+- [x] Implement token polling fallback (works in dev and prod)
+- [x] Implement app lifecycle management (graceful shutdown, backend cleanup)
+- [x] Add error handling and logging (structured JSON logging via Electron logger utility)
+- [x] Add file logging for backend (backend.log in userData directory in Electron mode)
+- [x] Add single-instance lock (Windows tested)
 
 ### Phase 5: Packaging & Testing (Week 3-4) ✅ (Partial)
-- [x] Configure Electron Packager (using `electron-packager`, not `electron-builder`)
-- [x] Create app icons (Windows, macOS, Linux)
-- [x] Test Windows build (working)
+- [x] Configure Electron Packager (using `@electron/packager`, not `electron-builder`)
+- [x] Create app icons (Windows .ico, macOS .icns, Linux .png)
+- [x] Configure ASAR unpacking for keytar native module
+- [x] Test Windows build (working - creates unpacked directory)
+- [x] Configure electron-builder.yml for future use (not currently active)
 - [ ] Test macOS build (not yet tested)
 - [ ] Test Linux build (not yet tested)
-- [ ] Implement data migration (not yet implemented)
-- [x] Write documentation (logging standards, OAuth spec)
+- [ ] Create installer packages (NSIS for Windows, DMG for macOS, AppImage for Linux) - would require electron-builder or additional packaging step
+- [ ] Implement data migration (not yet implemented - `getDevDataPaths()` exists but migration logic pending)
+- [x] Write documentation (logging standards, OAuth spec, electron conversion spec)
 
 ### Phase 6: Polish & Release (Week 4) ⚠️ (Partial)
 - [x] Performance optimization (native module support, ASAR unpacking)
@@ -733,6 +896,8 @@ autoUpdater.checkForUpdatesAndNotify();
 5. **Code Signing**: Required for macOS distribution (costs money) ⚠️ (Not yet configured)
 6. **Native Modules**: `keytar` requires `electron-rebuild` and ASAR unpacking ✅ (Configured)
 7. **Backend Dependencies**: Must be included in root dependencies for production build ✅ (Fixed)
+8. **Build Tools**: Using `electron-packager` which creates unpacked directories. `electron-builder.yml` exists but is not used. Installer packages (NSIS/DMG/AppImage) would require switching to electron-builder or additional packaging step.
+9. **File Logging**: Backend logs to `backend.log` in userData directory only in Electron mode (production). Development mode uses console output.
 
 ---
 
@@ -791,11 +956,21 @@ mc-server-manager/
     icon.icns
     icon.png
   package.json               # Updated with Electron scripts
-  electron-builder.yml
+  electron-builder.yml          # Configured but not used (electron-packager is active)
 ```
 
 ---
 
-**Document Version:** 2.0  
+**Document Version:** 2.1  
 **Last Updated:** 2025-01-09  
-**Status:** ✅ Implementation Complete (Core Features)
+**Status:** ✅ Core Features Complete
+
+**Implementation Status:**
+- ✅ Core Electron functionality (window, backend startup, IPC)
+- ✅ GitHub OAuth with token-based auth
+- ✅ Path resolution for Electron mode
+- ✅ File logging in Electron mode
+- ✅ Windows build working (electron-packager)
+- ⚠️ Data migration not yet implemented
+- ⚠️ Installer packages (NSIS/DMG/AppImage) not yet configured (using electron-packager unpacked directories)
+- ⚠️ macOS/Linux builds not yet tested
