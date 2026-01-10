@@ -7,7 +7,7 @@ import { deleteBuildsForProject } from "./buildQueue";
 import type { RunStatus } from "../types/run";
 import { getDataRoot } from "../config";
 
-const MANIFEST_DIR = join(getDataRoot(), "manifests");
+const MANIFEST_DIR = join(getDataRoot(), "data", "manifests");
 
 const ACTIVE_RUN_STATUSES = new Set<RunStatus>(["pending", "running", "stopping"]);
 
