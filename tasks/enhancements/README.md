@@ -13,21 +13,27 @@ Add UI for uploading existing world files or generating new worlds during projec
 
 **Priority:** High  
 **Status:** Planned  
-**MVP Gap:** Yes - listed as step 2 in project creation flow
+**MVP Gap:** Yes - listed as step 2 in project creation flow  
+**Estimate:** 2-3 days (Medium complexity)  
+**Dependencies:** None
 
 ### 2. [Visual Configuration Forms](visual-config-forms.md)
 Add ongoing form-based editing for `server.properties` and `paper-global.yml` within projects.
 
 **Priority:** High  
 **Status:** Planned  
-**MVP Gap:** Yes - listed as main feature and step 4 in project creation flow
+**MVP Gap:** Yes - listed as main feature and step 4 in project creation flow  
+**Estimate:** 2-3 days (Medium complexity)  
+**Dependencies:** None
 
 ### 3. [Diff & History UI](diff-history-ui.md)
 Add UI to view GitHub commit history and diffs between builds.
 
 **Priority:** Medium  
 **Status:** Planned  
-**MVP Gap:** Yes - listed as main feature in spec
+**MVP Gap:** Yes - listed as main feature in spec  
+**Estimate:** 3-5 days (Medium-High complexity)  
+**Dependencies:** GitHub API integration
 
 ### Other Enhancements
 
@@ -35,44 +41,58 @@ Add UI to view GitHub commit history and diffs between builds.
 Generate `plugins/lock.yml` files that record exact resolved plugin versions, URLs, and checksums for reproducibility.
 
 **Priority:** Low  
-**Status:** Planned
+**Status:** Planned  
+**Estimate:** 1 day (Low complexity)  
+**Dependencies:** None
 
 ### 5. [GitHub Pending Commits Queue](github-pending-commits.md)
 Implement a local queue system for failed GitHub commits, automatically retrying when connectivity is restored.
 
 **Priority:** Medium  
-**Status:** Planned
+**Status:** Planned  
+**Estimate:** 2-3 days (Medium complexity)  
+**Dependencies:** None
 
 ### 6. [GitHub Conflict Resolution](github-conflict-resolution.md)
 Automatically handle push conflicts by fetching, rebasing, and retrying commits. Fallback to PR creation for complex conflicts.
 
 **Priority:** Low  
-**Status:** Planned
+**Status:** Planned  
+**Estimate:** 3-4 days (Medium-High complexity)  
+**Dependencies:** Could benefit from #5 (Pending Commits Queue)
 
 ### 7. [Deterministic Config Hashing](deterministic-config-hashing.md)
 Normalize config files to UTF-8 + LF line endings before hashing to ensure consistent checksums across platforms.
 
 **Priority:** Low  
-**Status:** Planned
+**Status:** Planned  
+**Estimate:** 1 day (Low complexity)  
+**Dependencies:** None
 
 ### 8. [Deterministic Folder Hashing](deterministic-folder-hashing.md)
 Sort file paths deterministically when computing folder hashes (e.g., for datapacks) to ensure consistency across filesystems.
 
 **Priority:** Low  
-**Status:** Planned
+**Status:** Planned  
+**Estimate:** 1-2 days (Low-Medium complexity)  
+**Dependencies:** None
 
 ### 9. [Overlays Specification](overlays-spec.md)
 Complete implementation of overlay override system. Currently overlay files are read and plugin/config arrays are merged, but path-based overrides are not yet applied to config files.
 
 **Priority:** Medium  
-**Status:** Partially Implemented
+**Status:** Partially Implemented  
+**Estimate:** 2-3 days (Medium complexity)  
+**Dependencies:** None
 
 ### 10. [Electron App Conversion](electron-app-conversion.md)
 Convert the web application to a standalone Electron desktop app. Package the entire application as a single executable that runs the backend server internally and displays the frontend in a native window.
 
 **Priority:** Medium  
-**Status:** Planned  
-**MVP Gap:** No
+**Status:** Completed  
+**MVP Gap:** No  
+**Estimate:** Completed  
+**Dependencies:** None
 
 ## Notes
 

@@ -9,7 +9,7 @@
   "status": "active",
   "domain": "minecraft",
   "type": "tool",
-  "lastUpdated": "2025-12-28",
+  "lastUpdated": "2026-01-12",
   "links": {
     "prod": null,
     "staging": null
@@ -82,6 +82,7 @@ Currently focused on **MVP gap features** to complete the core specification:
 - [x] Design Token System - Comprehensive design system with component library
 - [x] Local Run Improvements - Persistent project workspaces, interactive console access, workspace reset capabilities (see `tasks/completed/local-run-improvements.md`)
 - [x] Plugin Config Path Management - Plugin library config definitions, project-level config mappings, guided config upload flows (see `tasks/completed/manage-plugin-config-paths.md`)
+- [x] Electron App Conversion - Standalone Electron desktop app with integrated backend server and native window (see `tasks/enhancements/README.md`)
 
 ### Detailed Completed Features
 
@@ -112,6 +113,12 @@ Currently focused on **MVP gap features** to complete the core specification:
 - Persistent project workspaces (preserves world data between runs)
 - Interactive console access (command sending via stdin)
 - Workspace reset capabilities
+
+#### Electron App
+- Standalone desktop application
+- Integrated backend server
+- Native window interface
+- Single executable packaging
 
 #### UI Pages
 - **Dashboard**: Project overview, activity feed, quick actions
@@ -159,27 +166,54 @@ Currently focused on **MVP gap features** to complete the core specification:
 - [ ] **World Setup UI** - Upload existing world ZIPs or generate new worlds through UI
   - **Priority**: High (MVP gap)
   - **Status**: Planned
+  - **Estimate**: 2-3 days (Medium complexity)
   - **See**: `tasks/enhancements/world-setup-ui.md`
 
 - [ ] **Visual Configuration Forms** - Ongoing form-based editing for `server.properties` and `paper-global.yml`
   - **Priority**: High (MVP gap)
   - **Status**: Planned
+  - **Estimate**: 2-3 days (Medium complexity)
   - **See**: `tasks/enhancements/visual-config-forms.md`
 
 - [ ] **Diff & History UI** - View GitHub commit history and build diffs
   - **Priority**: Medium (MVP gap)
   - **Status**: Planned
+  - **Estimate**: 3-5 days (Medium-High complexity)
   - **See**: `tasks/enhancements/diff-history-ui.md`
 
 ### Medium Priority Enhancements
 
 - [ ] **Overlays System** - Complete path-based override system for environment variations (dev/live)
   - **Status**: Partially implemented (files exist, arrays merge, but path-based overrides pending)
+  - **Estimate**: 2-3 days (Medium complexity)
   - **See**: `tasks/enhancements/overlays-spec.md`
 
 - [ ] **GitHub Pending Commits Queue** - Local queue system for failed GitHub commits with automatic retry
   - **Status**: Planned
+  - **Estimate**: 2-3 days (Medium complexity)
   - **See**: `tasks/enhancements/github-pending-commits.md`
+
+### Low Priority Enhancements
+
+- [ ] **Plugin Lockfile Generation** - Record exact resolved plugin versions, URLs, and checksums
+  - **Status**: Planned
+  - **Estimate**: 1 day (Low complexity)
+  - **See**: `tasks/enhancements/plugin-lockfile.md`
+
+- [ ] **GitHub Conflict Resolution** - Auto-handle push conflicts with fetch/rebase
+  - **Status**: Planned
+  - **Estimate**: 3-4 days (Medium-High complexity)
+  - **See**: `tasks/enhancements/github-conflict-resolution.md`
+
+- [ ] **Deterministic Config Hashing** - Normalize config files for consistent hashes across platforms
+  - **Status**: Planned
+  - **Estimate**: 1 day (Low complexity)
+  - **See**: `tasks/enhancements/deterministic-config-hashing.md`
+
+- [ ] **Deterministic Folder Hashing** - Sort file paths deterministically for consistent folder hashes
+  - **Status**: Planned
+  - **Estimate**: 1-2 days (Low-Medium complexity)
+  - **See**: `tasks/enhancements/deterministic-folder-hashing.md`
 
 ---
 
@@ -198,9 +232,6 @@ Currently focused on **MVP gap features** to complete the core specification:
 
 ### Low Priority / Future Extensions
 
-- [ ] Plugin Lockfile Generation - Record exact resolved plugin versions and checksums
-- [ ] Deterministic Config/Folder Hashing - Normalize configs and sort paths for consistent hashes
-- [ ] GitHub Conflict Resolution - Auto-handle push conflicts with fetch/rebase
 - [ ] Plugin Registry Auto-Update - Automatic checking for plugin updates, update notifications
 - [ ] Additional Server Types - Fabric loader support, Forge loader support (currently supports Paper only)
 - [ ] Webhooks & Notifications - Webhooks for "build succeeded" notifications, integration with external services
@@ -213,15 +244,16 @@ Currently focused on **MVP gap features** to complete the core specification:
 
 **Overall Status**: Active Development  
 **Completion**: ~85% (MVP core complete, 3 MVP gaps remaining)  
-**Last Major Update**: December 2025
+**Last Major Update**: January 2026
 
 ### Metrics
 
-- **Completed Features**: 10 major feature areas (including Local Run Improvements and Plugin Config Path Management)
+- **Completed Features**: 11 major feature areas (including Electron App Conversion)
 - **In Progress Features**: 3 MVP gap features
 - **High Priority Enhancements (MVP Gaps)**: 3
 - **Medium Priority Enhancements**: 2
-- **Low Priority / Future Extensions**: 8
+- **Low Priority Enhancements**: 4
+- **Low Priority / Future Extensions**: 5
 
 ---
 
