@@ -762,211 +762,9 @@ const typeValue = typeof req.body?.type === "string" ? req.body.type : undefined
 
 ---
 
-## Part 5: Data Migration Script
+## Part 5: Testing Checklist
 
-### 5.1 Migration Script (`scripts/migrate-config-system.ts`)
-
-**Important:** 
-- The `scripts/` directory needs to be created at the project root if it doesn't exist
-- This script uses the same path resolution logic as the app, supporting both development and production (Electron/userData) environments
-- The script should be run before deploying the refactored code to ensure data compatibility
-
-```typescript
-import { readFile, writeFile } from 'fs/promises';
-import { join } from 'path';
-import { existsSync } from 'fs';
-
-// Replicate getDataRoot logic from backend/src/config.ts
-// This ensures the script works in both dev and production (Electron) environments
-function getDataRoot(): string {
-  const electronMode = process.env.ELECTRON_MODE === 'true';
-  const userDataPath = process.env.USER_DATA_PATH;
-  
-  if (electronMode && userDataPath) {
-    return userDataPath;
-  }
-  
-  // In dev mode, use backend directory as base (where data/ folder is)
-  return join(process.cwd(), 'backend');
-}
-
-function getPluginsPath(): string {
-  return join(getDataRoot(), 'data', 'plugins.json');
-}
-
-function getProjectsPath(): string {
-  return join(getDataRoot(), 'data', 'projects.json');
-}
-
-// Note: In Electron mode, getDataRoot() returns USER_DATA_PATH directly
-// In dev mode, getDataRoot() returns backend/, so data/plugins.json resolves correctly
-
-interface OldProjectPluginConfigMapping {
-  definitionId: string;
-  label?: string;
-  path?: string;
-  requirement?: string;
-  notes?: string;
-}
-
-interface NewProjectPluginConfigMapping {
-  type: 'library' | 'custom';
-  definitionId?: string;
-  customId?: string;
-  label?: string;
-  path?: string;
-  notes?: string;
-}
-
-async function migrateProjects() {
-  const projectsPath = getProjectsPath();
-  const pluginsPath = getPluginsPath();
-  
-  console.log('Data root:', getDataRoot());
-  console.log('Projects path:', projectsPath);
-  console.log('Plugins path:', pluginsPath);
-  
-  // Verify files exist
-  if (!existsSync(projectsPath)) {
-    console.error(`Projects file not found: ${projectsPath}`);
-    process.exit(1);
-  }
-  if (!existsSync(pluginsPath)) {
-    console.error(`Plugins file not found: ${pluginsPath}`);
-    process.exit(1);
-  }
-  
-  // Load data
-  const projectsData = JSON.parse(await readFile(projectsPath, 'utf-8'));
-  const pluginsData = JSON.parse(await readFile(pluginsPath, 'utf-8'));
-  
-  // Create plugin definition map
-  const pluginDefMap = new Map<string, Map<string, { id: string; path: string }>>();
-  for (const plugin of pluginsData.plugins || []) {
-    const defMap = new Map();
-    for (const def of plugin.configDefinitions || []) {
-      defMap.set(def.id, { id: def.id, path: def.path });
-    }
-    pluginDefMap.set(`${plugin.id}:${plugin.version}`, defMap);
-  }
-  
-  // Migrate projects
-  let migrated = 0;
-  for (const project of projectsData.projects || []) {
-    for (const plugin of project.plugins || []) {
-      if (!plugin.configMappings) continue;
-      
-      const key = `${plugin.id}:${plugin.version}`;
-      const defMap = pluginDefMap.get(key);
-      
-      const newMappings: NewProjectPluginConfigMapping[] = [];
-      
-      for (const oldMapping of plugin.configMappings) {
-        const isLibrary = defMap?.has(oldMapping.definitionId);
-        
-        if (isLibrary) {
-          // Library mapping - use library definition
-          newMappings.push({
-            type: 'library',
-            definitionId: oldMapping.definitionId,
-            notes: oldMapping.notes,
-            // Remove path (library always uses definition.path) and requirement
-          });
-        } else {
-          // Custom mapping - ensure customId format and path is present
-          const customId = oldMapping.definitionId.startsWith('custom/')
-            ? oldMapping.definitionId
-            : `custom/${oldMapping.definitionId}`;
-          
-          if (!oldMapping.path) {
-            console.warn(`Skipping custom mapping without path: ${customId} in project ${project.id}, plugin ${plugin.id}`);
-            continue;
-          }
-          
-          newMappings.push({
-            type: 'custom',
-            customId,
-            label: oldMapping.label || oldMapping.definitionId,
-            path: oldMapping.path,
-            notes: oldMapping.notes,
-            // Remove requirement
-          });
-        }
-      }
-      
-      plugin.configMappings = newMappings;
-      migrated++;
-    }
-  }
-  
-  // Remove requirement from plugin definitions
-  let defsCleaned = 0;
-  for (const plugin of pluginsData.plugins || []) {
-    for (const def of plugin.configDefinitions || []) {
-      if ('requirement' in def) {
-        delete def.requirement;
-        defsCleaned++;
-      }
-    }
-  }
-  
-  console.log(`Cleaned requirement field from ${defsCleaned} plugin config definitions`);
-  
-  // Backup and write
-  await writeFile(projectsPath + '.backup', JSON.stringify(projectsData, null, 2));
-  await writeFile(pluginsPath + '.backup', JSON.stringify(pluginsData, null, 2));
-  
-  await writeFile(projectsPath, JSON.stringify(projectsData, null, 2));
-  await writeFile(pluginsPath, JSON.stringify(pluginsData, null, 2));
-  
-  console.log(`Migrated ${migrated} plugin config mappings`);
-  console.log('Backups created:', projectsPath + '.backup', pluginsPath + '.backup');
-  console.log('Migration completed successfully!');
-}
-
-migrateProjects().catch(console.error);
-```
-
-#### Running the Migration Script
-
-**Development Mode:**
-```bash
-# From project root
-# Ensure tsx is available: npm install -D tsx (if not already installed)
-npx tsx scripts/migrate-config-system.ts
-```
-
-**Note:** The script will automatically use `backend/data/` as the data root in development mode.
-
-**Production/Electron Mode:**
-The script will automatically detect Electron mode if `ELECTRON_MODE` and `USER_DATA_PATH` environment variables are set. These are typically set by the Electron main process, but you can also run manually:
-
-**Important:** Before running in production, ensure you have a backup of your data files. The script creates `.backup` files, but it's good practice to have an additional backup.
-
-```bash
-# Set environment variables (adjust userData path for your system)
-export ELECTRON_MODE=true
-export USER_DATA_PATH="/path/to/userData"  # e.g., ~/Library/Application Support/mc-server-manager
-npx tsx scripts/migrate-config-system.ts
-```
-
-**Windows (PowerShell):**
-```powershell
-$env:ELECTRON_MODE="true"
-$env:USER_DATA_PATH="C:\Users\Username\AppData\Roaming\mc-server-manager"
-npx tsx scripts/migrate-config-system.ts
-```
-
-**Note:** 
-- The script creates backups (`.backup` files) before modifying data. Always verify backups before proceeding.
-- The script is idempotent - running it multiple times is safe (it will convert old format to new format each time).
-- After migration, old format mappings without `type` field will be automatically converted when loaded by the application, but running the script ensures all data is in the new format upfront.
-
----
-
-## Part 6: Testing Checklist
-
-### 6.1 Type System
+### 5.1 Type System
 - [ ] Library config: type='library', no path field, definitionId required
 - [ ] Custom config: type='custom', path and label required, customId generated
 - [ ] Backward compatibility: old format without type field loads correctly
@@ -974,21 +772,21 @@ npx tsx scripts/migrate-config-system.ts
 - [ ] Migration: old format mappings converted correctly (library vs custom detection)
 - [ ] Type validation: API rejects invalid type values with clear error messages
 
-### 6.2 Deletion
+### 5.2 Deletion
 - [ ] Delete from config/uploads/ works
 - [ ] Delete from project directory works
 - [ ] Delete from dev directory works
 - [ ] Delete when file doesn't exist (metadata only) works
 - [ ] Metadata always removed
 
-### 6.3 UI
+### 5.3 UI
 - [ ] Upload form: Template mode shows template dropdown, path read-only
 - [ ] Upload form: Custom mode shows name + path inputs
 - [ ] Config display: Shows unified list with Template/Custom badges
 - [ ] No requirement badges shown
 - [ ] No missing warnings shown
 
-### 6.4 Validation
+### 5.4 Validation
 - [ ] Upload: Prevents custom config with path matching library definition
 - [ ] Upload: Requires template selection in template mode
 - [ ] Upload: Requires name and path in custom mode
@@ -1001,10 +799,8 @@ npx tsx scripts/migrate-config-system.ts
 
 ## Implementation Order
 
-1. **Phase 1: Type System + Data Migration** (Foundation)
+1. **Phase 1: Type System** (Foundation)
    - Update backend types (`backend/src/types/plugins.ts`)
-   - Create migration script (`scripts/migrate-config-system.ts`)
-   - Run migration script on existing data
    - Update backend logic (`buildPluginConfigViews`, PUT endpoint, etc.)
    - Update plugin routes (`backend/src/routes/plugins.ts`)
    - Update project scanner (`backend/src/services/projectScanner.ts`)
@@ -1033,18 +829,19 @@ npx tsx scripts/migrate-config-system.ts
 
 - **API**: `ProjectPluginConfigMapping` structure changes (discriminated union with `type` field)
 - **API**: `requirement` field removed from all config-related endpoints
-- **Data**: Existing `configMappings` need migration (script provided)
-- **Data**: `requirement` fields removed from `plugins.json` and `projects.json`
+- **Data**: Existing `configMappings` are automatically migrated on access (runtime conversion)
+- **Data**: `requirement` fields removed from `plugins.json` and `projects.json` (ignored if present)
 
 ## Backward Compatibility
 
-- **Migration Script**: Handles existing data automatically
-- **Runtime Detection**: Old format mappings (without `type` field) are detected and converted on-the-fly:
+- **Automatic Runtime Migration**: Old format mappings (without `type` field) are automatically detected and converted when projects are loaded:
   - If `definitionId` matches a library definition → treated as `type: 'library'`
   - Otherwise → treated as `type: 'custom'` with `customId` derived from `definitionId`
+  - Migration happens transparently in `buildPluginConfigViews` - no manual steps required
 - **No Data Loss**: All existing fields are preserved (notes, label, path for custom)
 - **View Compatibility**: `source` field in views is kept for backward compatibility (same value as `type`)
 - **API Compatibility**: Old API requests without `type` field will be rejected with clear error messages directing users to use the new format
+- **Requirement Field**: The `requirement` field is ignored if present in old data (no migration needed)
 
 ## Additional Considerations
 
@@ -1068,19 +865,13 @@ npx tsx scripts/migrate-config-system.ts
 
 This specification has been enhanced with the following improvements:
 
-1. **Migration Script Enhancements:**
-   - Added file existence checks before processing
-   - Added validation for custom configs without paths
-   - Added progress logging and error handling
-   - Clarified data root resolution for dev vs production modes
-
-2. **Code Examples:**
+1. **Code Examples:**
    - Improved `buildPluginConfigViews` logic with better migration handling
    - Added missing imports and function references
 
-3. **Clarifications:**
+2. **Clarifications:**
    - Added notes about existing functions (`sanitizeRelativePath`, `getDevDataPaths`)
-   - Clarified backward compatibility behavior
+   - Clarified backward compatibility behavior (automatic runtime migration)
    - Added edge case considerations
    - Enhanced testing checklist with additional scenarios
 
@@ -1092,6 +883,5 @@ This specification has been enhanced with the following improvements:
 
 5. **Documentation:**
    - Added "Additional Considerations" section
-   - Enhanced migration script documentation
    - Improved code comments and explanations
-   - Added warnings about backups and data safety
+   - Simplified migration approach (runtime conversion instead of script)
