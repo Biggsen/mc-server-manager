@@ -196,8 +196,6 @@ const PluginCard = memo(function PluginCard({
   )
   const sourceKind = useMemo(() => getStoredPluginSourceKind(plugin), [plugin])
 
-  const totalCount = useMemo(() => pluginDefinitions.length, [pluginDefinitions.length])
-
   return (
     <Card key={`${plugin.id}:${plugin.version}`}>
       <CardContent>
