@@ -6,14 +6,14 @@ Comprehensive refactor of the config system to:
 2. Remove requirement field (contextual, not inherent to configs)
 3. Fix deletion issue (configs in project directory not being found)
 4. Improve UI/UX with proper terminology (Config Template vs Custom Config)
-5. Add migration support (auto-detect custom→library conflicts)
+5. Prevent path conflicts (validate custom configs don't match library definitions)
 
 ## Goals
 - **Type Safety**: Discriminated union makes library vs custom distinction explicit
 - **Simplicity**: Remove requirement field that adds no functional value
 - **Reliability**: Fix deletion to work from all storage locations
 - **Clarity**: Better terminology and UI flow
-- **Migration**: Smooth transition when library definitions become available
+- **Prevention**: Validate uploads to prevent path conflicts between custom and library configs
 
 ---
 
@@ -677,314 +677,9 @@ export async function uploadProjectConfig(
 
 ---
 
-## Part 4: Migration Detection & User Confirmation
+## Part 4: Validation & Path Conflict Prevention
 
-### 4.1 Backend - Detection Function (`backend/src/routes/projects.ts`)
-
-```typescript
-function detectCustomToLibraryConflicts(
-  project: StoredProject,
-  plugin: ProjectPlugin,
-  libraryDefinitions: PluginConfigDefinition[],
-): Array<{ custom: ProjectPluginConfigMapping, library: PluginConfigDefinition }> {
-  const conflicts: Array<{ custom: ProjectPluginConfigMapping, library: PluginConfigDefinition }> = [];
-  
-  // Get library definition IDs for quick lookup
-  const libraryDefIds = new Set(libraryDefinitions.map(d => d.id));
-  
-  // Find custom configs (either explicitly marked as custom, or not matching any library definition)
-  const customConfigs = (plugin.configMappings ?? []).filter(
-    (m) => m.type === 'custom' || (!m.type && !libraryDefIds.has(m.definitionId))
-  );
-  
-  for (const custom of customConfigs) {
-    // Get path - for old format, use definitionId; for new format, use path field
-    const customPath = (custom as any).path;
-    if (!customPath) continue;
-    
-    // Find library definition with matching path
-    for (const libraryDef of libraryDefinitions) {
-      if (libraryDef.path === customPath) {
-        conflicts.push({ custom, library: libraryDef });
-        break;  // Only one conflict per custom config
-      }
-    }
-  }
-  
-  return conflicts;
-}
-```
-
-### 4.2 Backend - Migration Endpoints
-
-**Add these new endpoints to `backend/src/routes/projects.ts`:**
-
-```typescript
-router.get("/:id/plugins/:pluginId/configs/migration-opportunities", async (req: Request, res: Response) => {
-  try {
-    const { id, pluginId } = req.params;
-    const project = await findProject(id);
-    if (!project) {
-      res.status(404).json({ error: "Project not found" });
-      return;
-    }
-    const plugin = project.plugins?.find((p) => p.id === pluginId);
-    if (!plugin) {
-      res.status(404).json({ error: "Plugin not found" });
-      return;
-    }
-    
-    const stored = plugin.version ? await findStoredPlugin(plugin.id, plugin.version) : undefined;
-    const libraryDefinitions = stored?.configDefinitions ?? [];
-    
-    const conflicts = detectCustomToLibraryConflicts(project, plugin, libraryDefinitions);
-    
-    res.json({
-      opportunities: conflicts.map(({ custom, library }) => ({
-        custom: {
-          customId: custom.type === 'custom' ? custom.customId : custom.definitionId,
-          label: custom.type === 'custom' ? custom.label : custom.definitionId,
-          path: custom.path,
-          notes: custom.notes,
-        },
-        library: {
-          id: library.id,
-          label: library.label,
-          path: library.path,
-          description: library.description,
-        },
-      })),
-    });
-  } catch (error) {
-    console.error("Failed to detect migration opportunities", error);
-    res.status(500).json({ error: "Failed to detect migration opportunities" });
-  }
-});
-
-router.post("/:id/plugins/:pluginId/configs/migrate", async (req: Request, res: Response) => {
-  try {
-    const { id, pluginId } = req.params;
-    const { customId, definitionId } = req.body ?? {};
-    
-    if (typeof customId !== "string" || typeof definitionId !== "string") {
-      res.status(400).json({ error: "customId and definitionId are required" });
-      return;
-    }
-    
-    const project = await findProject(id);
-    if (!project) {
-      res.status(404).json({ error: "Project not found" });
-      return;
-    }
-    
-    const plugin = project.plugins?.find((p) => p.id === pluginId);
-    if (!plugin) {
-      res.status(404).json({ error: "Plugin not found" });
-      return;
-    }
-    
-    const stored = plugin.version ? await findStoredPlugin(plugin.id, plugin.version) : undefined;
-    const libraryDefinitions = stored?.configDefinitions ?? [];
-    const libraryDef = libraryDefinitions.find((d) => d.id === definitionId);
-    if (!libraryDef) {
-      res.status(404).json({ error: "Library definition not found" });
-      return;
-    }
-    
-    const mappings = plugin.configMappings ?? [];
-    const customMapping = mappings.find(
-      (m) => (m.type === 'custom' && m.customId === customId) || 
-             (!m.type && m.definitionId === customId)
-    );
-    
-    if (!customMapping) {
-      res.status(404).json({ error: "Custom config not found" });
-      return;
-    }
-    
-    // Validate paths match
-    const customPath = (customMapping as any).path;
-    if (!customPath || customPath !== libraryDef.path) {
-      res.status(400).json({ error: "Paths do not match" });
-      return;
-    }
-    
-    // Convert to library mapping
-    const updatedMappings = mappings.map((m) => {
-      if ((m.type === 'custom' && m.customId === customId) || 
-          (!m.type && m.definitionId === customId)) {
-        return {
-          type: 'library' as const,
-          definitionId: definitionId,
-          notes: m.notes,
-        };
-      }
-      return m;
-    });
-    
-    // Update project
-    const updatedPlugin: ProjectPlugin = {
-      ...plugin,
-      configMappings: updatedMappings,
-    };
-    
-    await upsertProjectPlugin(id, updatedPlugin);
-    
-    // Update file metadata
-    const configs = project.configs ?? [];
-    const updatedConfigs = configs.map((config) => {
-      if (config.path === customPath && config.pluginId === pluginId) {
-        return {
-          ...config,
-          definitionId: definitionId,
-        };
-      }
-      return config;
-    });
-    
-    await setProjectAssets(id, { configs: updatedConfigs });
-    
-    // Return updated configs view
-    const refreshed = await findProject(id);
-    if (!refreshed) {
-      res.status(500).json({ error: "Failed to refresh project" });
-      return;
-    }
-    
-    const refreshedPlugin = refreshed.plugins?.find((p) => p.id === pluginId);
-    if (!refreshedPlugin) {
-      res.status(500).json({ error: "Failed to find refreshed plugin" });
-      return;
-    }
-    
-    const { definitions } = await buildPluginConfigViews(
-      pluginId,
-      refreshedPlugin,
-      libraryDefinitions,
-      await listUploadedConfigFiles(refreshed),
-    );
-    
-    res.json({ definitions });
-  } catch (error) {
-    console.error("Failed to migrate config", error);
-    res.status(500).json({ error: "Failed to migrate config" });
-  }
-});
-```
-
-### 4.3 Frontend - Migration UI (`frontend/src/pages/ProjectDetail.tsx`)
-
-```typescript
-// Add state
-const [migrationOpportunities, setMigrationOpportunities] = useState<Array<{
-  custom: { customId: string; label: string; path: string; notes?: string }
-  library: { id: string; label?: string; path: string; description?: string }
-}>>([])
-
-// Detect on plugin config load
-useEffect(() => {
-  if (!id || !plugin.id) return
-  
-  const checkMigrations = async () => {
-    try {
-      const opportunities = await fetchMigrationOpportunities(id, plugin.id)
-      setMigrationOpportunities(opportunities)
-    } catch {
-      // Ignore errors
-    }
-  }
-  
-  void checkMigrations()
-}, [id, plugin.id, pluginDefinitions])
-
-// Show migration banner
-{migrationOpportunities.length > 0 && (
-  <Alert color="blue" title="Library Templates Available">
-    <Stack gap="xs">
-      {migrationOpportunities.map((opp) => (
-        <Group key={opp.custom.customId} justify="space-between">
-          <Stack gap={2}>
-            <Text size="sm">
-              Your custom config "{opp.custom.label}" matches library template "{opp.library.label || opp.library.id}"
-            </Text>
-            <Text size="xs" c="dimmed">
-              Path: {opp.custom.path}
-            </Text>
-          </Stack>
-          <Group>
-            <Button
-              size="xs"
-              variant="light"
-              onClick={async () => {
-                try {
-                  await migrateCustomToLibrary(id, plugin.id, opp.custom.customId, opp.library.id)
-                  toast({ title: 'Migrated to template', variant: 'success' })
-                  setMigrationOpportunities((prev) => prev.filter((o) => o.custom.customId !== opp.custom.customId))
-                  // Refresh plugin configs
-                } catch (err) {
-                  toast({ title: 'Migration failed', description: err.message, variant: 'danger' })
-                }
-              }}
-            >
-              Convert to Template
-            </Button>
-            <Button
-              size="xs"
-              variant="subtle"
-              onClick={() => {
-                setMigrationOpportunities((prev) => prev.filter((o) => o.custom.customId !== opp.custom.customId))
-              }}
-            >
-              Keep as Custom
-            </Button>
-          </Group>
-        </Group>
-      ))}
-    </Stack>
-  </Alert>
-)}
-```
-
-### 4.4 Frontend - Migration API (`frontend/src/lib/api.ts`)
-
-```typescript
-export async function fetchMigrationOpportunities(
-  projectId: string,
-  pluginId: string,
-): Promise<Array<{
-  custom: { customId: string; label: string; path: string; notes?: string }
-  library: { id: string; label?: string; path: string; description?: string }
-}>> {
-  const data = await request<{ opportunities: Array<...> }>(
-    `/projects/${projectId}/plugins/${pluginId}/configs/migration-opportunities`
-  )
-  return data.opportunities
-}
-
-export async function migrateCustomToLibrary(
-  projectId: string,
-  pluginId: string,
-  customId: string,
-  definitionId: string,
-): Promise<ProjectPluginConfigsResponse> {
-  const data = await request<ProjectPluginConfigsResponse>(
-    `/projects/${projectId}/plugins/${pluginId}/configs/migrate`,
-    {
-      method: 'POST',
-      body: JSON.stringify({ customId, definitionId }),
-      headers: { 'Content-Type': 'application/json' },
-    }
-  )
-  emitProjectsUpdated()
-  return data
-}
-```
-
----
-
-## Part 5: Validation & Path Conflict Prevention
-
-### 5.1 Upload Validation (`backend/src/routes/projects.ts`)
+### 4.1 Upload Validation (`backend/src/routes/projects.ts`)
 
 **Add helper function before the upload endpoint:**
 
@@ -1067,9 +762,9 @@ const typeValue = typeof req.body?.type === "string" ? req.body.type : undefined
 
 ---
 
-## Part 6: Data Migration Script
+## Part 5: Data Migration Script
 
-### 6.1 Migration Script (`scripts/migrate-config-system.ts`)
+### 5.1 Migration Script (`scripts/migrate-config-system.ts`)
 
 **Important:** 
 - The `scripts/` directory needs to be created at the project root if it doesn't exist
@@ -1269,9 +964,9 @@ npx tsx scripts/migrate-config-system.ts
 
 ---
 
-## Part 7: Testing Checklist
+## Part 6: Testing Checklist
 
-### 7.1 Type System
+### 6.1 Type System
 - [ ] Library config: type='library', no path field, definitionId required
 - [ ] Custom config: type='custom', path and label required, customId generated
 - [ ] Backward compatibility: old format without type field loads correctly
@@ -1279,29 +974,21 @@ npx tsx scripts/migrate-config-system.ts
 - [ ] Migration: old format mappings converted correctly (library vs custom detection)
 - [ ] Type validation: API rejects invalid type values with clear error messages
 
-### 7.2 Deletion
+### 6.2 Deletion
 - [ ] Delete from config/uploads/ works
 - [ ] Delete from project directory works
 - [ ] Delete from dev directory works
 - [ ] Delete when file doesn't exist (metadata only) works
 - [ ] Metadata always removed
 
-### 7.3 UI
+### 6.3 UI
 - [ ] Upload form: Template mode shows template dropdown, path read-only
 - [ ] Upload form: Custom mode shows name + path inputs
 - [ ] Config display: Shows unified list with Template/Custom badges
 - [ ] No requirement badges shown
 - [ ] No missing warnings shown
 
-### 7.4 Migration
-- [ ] Detection finds custom configs matching library definitions
-- [ ] Migration converts custom to library correctly
-- [ ] Migration preserves notes
-- [ ] Migration updates file metadata
-- [ ] UI shows migration prompt
-- [ ] Migration action works
-
-### 7.5 Validation
+### 6.4 Validation
 - [ ] Upload: Prevents custom config with path matching library definition
 - [ ] Upload: Requires template selection in template mode
 - [ ] Upload: Requires name and path in custom mode
@@ -1334,13 +1021,7 @@ npx tsx scripts/migrate-config-system.ts
    - Update CustomPathModal component
    - Update PluginLibrary component
 
-4. **Phase 4: Migration Support** (Enhancement)
-   - Add detection function (`detectCustomToLibraryConflicts`)
-   - Add migration endpoints (GET opportunities, POST migrate)
-   - Add frontend API functions
-   - Add UI prompts/banner
-
-5. **Phase 5: Validation** (Polish)
+4. **Phase 4: Validation** (Polish)
    - Add path conflict helper function
    - Update upload endpoint validation
    - Add comprehensive error messages
@@ -1375,12 +1056,10 @@ npx tsx scripts/migrate-config-system.ts
 ### Testing Edge Cases
 - Custom config with path matching library definition (should be prevented)
 - Library config with path override attempt (should be rejected)
-- Migration of config with notes (should preserve notes)
 - Deletion of file that exists in both uploads and project directory (should delete from both)
 - Deletion of file that doesn't exist (should still remove metadata)
 
 ### Performance
-- Migration detection should be efficient (only check on plugin config load, not on every request)
 - Path conflict checking should use early exit when conflict is found
 
 ---
@@ -1396,9 +1075,7 @@ This specification has been enhanced with the following improvements:
    - Clarified data root resolution for dev vs production modes
 
 2. **Code Examples:**
-   - Fixed redundant code in migration endpoint
    - Improved `buildPluginConfigViews` logic with better migration handling
-   - Enhanced `detectCustomToLibraryConflicts` with clearer logic
    - Added missing imports and function references
 
 3. **Clarifications:**
