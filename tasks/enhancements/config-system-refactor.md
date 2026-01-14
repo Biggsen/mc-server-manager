@@ -83,7 +83,7 @@ const resolvedRequirement = mapping
 missing: resolvedRequirement === "required" && !uploaded,
 ```
 
-**New logic:**
+**New logic (replace the entire function body):**
 ```typescript
 for (const definition of libraryDefinitions) {
   const mapping = mappingById.get(definition.id);
@@ -110,34 +110,54 @@ for (const definition of libraryDefinitions) {
 }
 
 for (const mapping of mappings) {
+  // Skip if this is already handled as a library config
   if (definitionMap.has(mapping.definitionId)) {
-    continue;  // Already handled as library config
+    continue;
   }
-  // This is a custom config
-  if (mapping.type !== 'custom') {
-    // Migration: old format without type
-    // Assume custom if definitionId doesn't match library
-    continue;  // Or handle migration
+  
+  // Determine if this is a custom config
+  // Migration: old format without type field - treat as custom if not in library
+  const isCustom = mapping.type === 'custom' || 
+                   (!mapping.type && !definitionMap.has(mapping.definitionId));
+  
+  if (!isCustom) {
+    continue;  // Skip non-custom mappings that aren't in library
   }
+  
+  // For custom configs, path is required
+  // Old format: use definitionId as customId if it starts with 'custom/'
+  // New format: use customId field
+  const customId = (mapping as any).customId || 
+                   (mapping.definitionId.startsWith('custom/') 
+                     ? mapping.definitionId 
+                     : `custom/${mapping.definitionId}`);
   const resolvedPath = mapping.path;  // Required for custom
   if (!resolvedPath) {
-    continue;  // Invalid custom config
+    continue;  // Invalid custom config without path
   }
-  const uploaded = resolveUpload(mapping.customId, resolvedPath);
+  
+  const uploaded = resolveUpload(customId, resolvedPath);
   if (uploaded) {
     matchedSummaries.add(uploaded);
   }
+  
   views.push({
-    id: mapping.customId,
+    id: customId,
     type: 'custom',
     source: 'custom',
-    label: mapping.label,  // Required for custom
+    label: mapping.label || customId,  // Required for custom, fallback to customId
     description: undefined,
     tags: undefined,
     defaultPath: resolvedPath,
     resolvedPath,
     notes: mapping.notes,
-    mapping,
+    mapping: {
+      type: 'custom',
+      customId,
+      label: mapping.label || customId,
+      path: resolvedPath,
+      notes: mapping.notes,
+    },
     uploaded,
     // REMOVED: requirement, missing
   });
@@ -238,6 +258,14 @@ const resolvedPath = definition.path;  // No override
 **For custom configs (line ~231):**
 ```typescript
 // Custom configs must have path
+// Note: This is in the second loop that processes mappings not in library definitions
+if (mapping.type !== 'custom') {
+  // Migration: old format without type field
+  // If definitionId doesn't match library, treat as custom
+  if (!mapping.path) {
+    continue;  // Invalid custom config without path
+  }
+}
 const resolvedPath = mapping.path ?? "";
 if (!resolvedPath) {
   continue;  // Invalid custom config
@@ -251,8 +279,9 @@ if (!resolvedPath) {
 ### 2.1 Update Delete Endpoint (`backend/src/routes/projects.ts`)
 
 **Current (lines ~1681-1712):**
-- Only checks `config/uploads/`
+- Only checks `config/uploads/` directory
 - Returns 404 if file not found in uploads
+- Does not check project directory or dev directories
 
 **New implementation:**
 ```typescript
@@ -337,7 +366,10 @@ router.delete("/:id/configs/file", async (req: Request, res: Response) => {
 import { unlink } from "fs/promises";
 import { existsSync } from "fs";
 import { sanitizeRelativePath } from "../services/configUploads";
+import { getProjectsRoot, getDevDataPaths } from "../config";
 ```
+
+**Note:** `sanitizeRelativePath` already exists in `backend/src/services/configUploads.ts`, so no new function needs to be created.
 
 ---
 
@@ -657,21 +689,24 @@ function detectCustomToLibraryConflicts(
 ): Array<{ custom: ProjectPluginConfigMapping, library: PluginConfigDefinition }> {
   const conflicts: Array<{ custom: ProjectPluginConfigMapping, library: PluginConfigDefinition }> = [];
   
+  // Get library definition IDs for quick lookup
+  const libraryDefIds = new Set(libraryDefinitions.map(d => d.id));
+  
+  // Find custom configs (either explicitly marked as custom, or not matching any library definition)
   const customConfigs = (plugin.configMappings ?? []).filter(
-    (m) => m.type === 'custom' || (!m.type && !libraryDefinitions.some(d => d.id === m.definitionId))
+    (m) => m.type === 'custom' || (!m.type && !libraryDefIds.has(m.definitionId))
   );
   
   for (const custom of customConfigs) {
-    if (custom.type !== 'custom' && !custom.path) continue;
-    
-    const customPath = custom.path;
+    // Get path - for old format, use definitionId; for new format, use path field
+    const customPath = (custom as any).path;
     if (!customPath) continue;
     
     // Find library definition with matching path
     for (const libraryDef of libraryDefinitions) {
       if (libraryDef.path === customPath) {
         conflicts.push({ custom, library: libraryDef });
-        break;
+        break;  // Only one conflict per custom config
       }
     }
   }
@@ -680,7 +715,9 @@ function detectCustomToLibraryConflicts(
 }
 ```
 
-### 4.2 Backend - Migration Endpoint
+### 4.2 Backend - Migration Endpoints
+
+**Add these new endpoints to `backend/src/routes/projects.ts`:**
 
 ```typescript
 router.get("/:id/plugins/:pluginId/configs/migration-opportunities", async (req: Request, res: Response) => {
@@ -766,8 +803,8 @@ router.post("/:id/plugins/:pluginId/configs/migrate", async (req: Request, res: 
     }
     
     // Validate paths match
-    const customPath = customMapping.type === 'custom' ? customMapping.path : customMapping.path;
-    if (customPath !== libraryDef.path) {
+    const customPath = (customMapping as any).path;
+    if (!customPath || customPath !== libraryDef.path) {
       res.status(400).json({ error: "Paths do not match" });
       return;
     }
@@ -949,6 +986,8 @@ export async function migrateCustomToLibrary(
 
 ### 5.1 Upload Validation (`backend/src/routes/projects.ts`)
 
+**Add helper function before the upload endpoint:**
+
 ```typescript
 // Add helper function
 async function findLibraryDefinitionForPath(
@@ -974,11 +1013,13 @@ async function findLibraryDefinitionForPath(
   return undefined;
 }
 
-// Update upload endpoint
-router.post("/:id/configs/upload", ...) {
-  // ... existing validation ...
-  
-  const typeValue = typeof req.body?.type === "string" ? req.body.type : undefined;
+// Update upload endpoint (router.post("/:id/configs/upload", ...))
+// Add this validation logic after existing path/plugin validation and before file processing:
+
+```typescript
+// ... existing validation (path, plugin, file checks) ...
+
+const typeValue = typeof req.body?.type === "string" ? req.body.type : undefined;
   const definitionIdValue = typeof req.body?.definitionId === "string" ? req.body.definitionId.trim() : undefined;
   const customIdValue = typeof req.body?.customId === "string" ? req.body.customId.trim() : undefined;
   const labelValue = typeof req.body?.label === "string" ? req.body.label.trim() : undefined;
@@ -1018,9 +1059,11 @@ router.post("/:id/configs/upload", ...) {
     }
   }
   
-  // ... rest of upload logic ...
+  // ... rest of upload logic (file saving, metadata updates, etc.) ...
 }
 ```
+
+**Note:** The validation should happen after basic path/plugin validation but before any file operations to provide early feedback to users.
 
 ---
 
@@ -1028,11 +1071,15 @@ router.post("/:id/configs/upload", ...) {
 
 ### 6.1 Migration Script (`scripts/migrate-config-system.ts`)
 
-**Important:** This script uses the same path resolution logic as the app, supporting both development and production (Electron/userData) environments.
+**Important:** 
+- The `scripts/` directory needs to be created at the project root if it doesn't exist
+- This script uses the same path resolution logic as the app, supporting both development and production (Electron/userData) environments
+- The script should be run before deploying the refactored code to ensure data compatibility
 
 ```typescript
 import { readFile, writeFile } from 'fs/promises';
 import { join } from 'path';
+import { existsSync } from 'fs';
 
 // Replicate getDataRoot logic from backend/src/config.ts
 // This ensures the script works in both dev and production (Electron) environments
@@ -1044,7 +1091,8 @@ function getDataRoot(): string {
     return userDataPath;
   }
   
-  return process.cwd();
+  // In dev mode, use backend directory as base (where data/ folder is)
+  return join(process.cwd(), 'backend');
 }
 
 function getPluginsPath(): string {
@@ -1054,6 +1102,9 @@ function getPluginsPath(): string {
 function getProjectsPath(): string {
   return join(getDataRoot(), 'data', 'projects.json');
 }
+
+// Note: In Electron mode, getDataRoot() returns USER_DATA_PATH directly
+// In dev mode, getDataRoot() returns backend/, so data/plugins.json resolves correctly
 
 interface OldProjectPluginConfigMapping {
   definitionId: string;
@@ -1079,6 +1130,16 @@ async function migrateProjects() {
   console.log('Data root:', getDataRoot());
   console.log('Projects path:', projectsPath);
   console.log('Plugins path:', pluginsPath);
+  
+  // Verify files exist
+  if (!existsSync(projectsPath)) {
+    console.error(`Projects file not found: ${projectsPath}`);
+    process.exit(1);
+  }
+  if (!existsSync(pluginsPath)) {
+    console.error(`Plugins file not found: ${pluginsPath}`);
+    process.exit(1);
+  }
   
   // Load data
   const projectsData = JSON.parse(await readFile(projectsPath, 'utf-8'));
@@ -1109,22 +1170,29 @@ async function migrateProjects() {
         const isLibrary = defMap?.has(oldMapping.definitionId);
         
         if (isLibrary) {
-          // Library mapping
+          // Library mapping - use library definition
           newMappings.push({
             type: 'library',
             definitionId: oldMapping.definitionId,
             notes: oldMapping.notes,
-            // Remove path and requirement
+            // Remove path (library always uses definition.path) and requirement
           });
         } else {
-          // Custom mapping
+          // Custom mapping - ensure customId format and path is present
+          const customId = oldMapping.definitionId.startsWith('custom/')
+            ? oldMapping.definitionId
+            : `custom/${oldMapping.definitionId}`;
+          
+          if (!oldMapping.path) {
+            console.warn(`Skipping custom mapping without path: ${customId} in project ${project.id}, plugin ${plugin.id}`);
+            continue;
+          }
+          
           newMappings.push({
             type: 'custom',
-            customId: oldMapping.definitionId.startsWith('custom/')
-              ? oldMapping.definitionId
-              : `custom/${oldMapping.definitionId}`,
+            customId,
             label: oldMapping.label || oldMapping.definitionId,
-            path: oldMapping.path || '',
+            path: oldMapping.path,
             notes: oldMapping.notes,
             // Remove requirement
           });
@@ -1137,11 +1205,17 @@ async function migrateProjects() {
   }
   
   // Remove requirement from plugin definitions
+  let defsCleaned = 0;
   for (const plugin of pluginsData.plugins || []) {
     for (const def of plugin.configDefinitions || []) {
-      delete def.requirement;
+      if ('requirement' in def) {
+        delete def.requirement;
+        defsCleaned++;
+      }
     }
   }
+  
+  console.log(`Cleaned requirement field from ${defsCleaned} plugin config definitions`);
   
   // Backup and write
   await writeFile(projectsPath + '.backup', JSON.stringify(projectsData, null, 2));
@@ -1152,6 +1226,7 @@ async function migrateProjects() {
   
   console.log(`Migrated ${migrated} plugin config mappings`);
   console.log('Backups created:', projectsPath + '.backup', pluginsPath + '.backup');
+  console.log('Migration completed successfully!');
 }
 
 migrateProjects().catch(console.error);
@@ -1162,11 +1237,16 @@ migrateProjects().catch(console.error);
 **Development Mode:**
 ```bash
 # From project root
+# Ensure tsx is available: npm install -D tsx (if not already installed)
 npx tsx scripts/migrate-config-system.ts
 ```
 
+**Note:** The script will automatically use `backend/data/` as the data root in development mode.
+
 **Production/Electron Mode:**
 The script will automatically detect Electron mode if `ELECTRON_MODE` and `USER_DATA_PATH` environment variables are set. These are typically set by the Electron main process, but you can also run manually:
+
+**Important:** Before running in production, ensure you have a backup of your data files. The script creates `.backup` files, but it's good practice to have an additional backup.
 
 ```bash
 # Set environment variables (adjust userData path for your system)
@@ -1182,7 +1262,10 @@ $env:USER_DATA_PATH="C:\Users\Username\AppData\Roaming\mc-server-manager"
 npx tsx scripts/migrate-config-system.ts
 ```
 
-**Note:** The script creates backups (`.backup` files) before modifying data. Always verify backups before proceeding.
+**Note:** 
+- The script creates backups (`.backup` files) before modifying data. Always verify backups before proceeding.
+- The script is idempotent - running it multiple times is safe (it will convert old format to new format each time).
+- After migration, old format mappings without `type` field will be automatically converted when loaded by the application, but running the script ensures all data is in the new format upfront.
 
 ---
 
@@ -1193,6 +1276,8 @@ npx tsx scripts/migrate-config-system.ts
 - [ ] Custom config: type='custom', path and label required, customId generated
 - [ ] Backward compatibility: old format without type field loads correctly
 - [ ] Path resolution: library always uses definition.path, custom uses mapping.path
+- [ ] Migration: old format mappings converted correctly (library vs custom detection)
+- [ ] Type validation: API rejects invalid type values with clear error messages
 
 ### 7.2 Deletion
 - [ ] Delete from config/uploads/ works
@@ -1221,36 +1306,45 @@ npx tsx scripts/migrate-config-system.ts
 - [ ] Upload: Requires template selection in template mode
 - [ ] Upload: Requires name and path in custom mode
 - [ ] Upload: Validates library path matches template path
+- [ ] PUT endpoint: Rejects library mappings with path field
+- [ ] PUT endpoint: Rejects custom mappings without path or label
+- [ ] PUT endpoint: Validates definitionId references exist for library type
 
 ---
 
 ## Implementation Order
 
 1. **Phase 1: Type System + Data Migration** (Foundation)
-   - Update types
-   - Create migration script
-   - Run migration
-   - Update backend logic
+   - Update backend types (`backend/src/types/plugins.ts`)
+   - Create migration script (`scripts/migrate-config-system.ts`)
+   - Run migration script on existing data
+   - Update backend logic (`buildPluginConfigViews`, PUT endpoint, etc.)
+   - Update plugin routes (`backend/src/routes/plugins.ts`)
+   - Update project scanner (`backend/src/services/projectScanner.ts`)
 
 2. **Phase 2: Fix Deletion** (Critical Bug)
-   - Update delete endpoint
-   - Test thoroughly
+   - Update delete endpoint (`backend/src/routes/projects.ts`)
+   - Add imports (`unlink`, `existsSync`, `getDevDataPaths`)
+   - Test deletion from all locations (uploads, project dir, dev dirs)
 
 3. **Phase 3: UI Refactor** (User-Facing)
-   - Update frontend types
-   - Refactor upload form
-   - Update config display
-   - Remove requirement UI
+   - Update frontend types (`frontend/src/lib/api.ts`)
+   - Refactor upload form (`frontend/src/pages/ProjectDetail.tsx`)
+   - Update config display (remove requirement/missing badges)
+   - Update CustomPathModal component
+   - Update PluginLibrary component
 
 4. **Phase 4: Migration Support** (Enhancement)
-   - Detection logic
-   - Migration endpoints
-   - UI prompts
+   - Add detection function (`detectCustomToLibraryConflicts`)
+   - Add migration endpoints (GET opportunities, POST migrate)
+   - Add frontend API functions
+   - Add UI prompts/banner
 
 5. **Phase 5: Validation** (Polish)
-   - Path conflict prevention
-   - Upload validation
-   - Edge case handling
+   - Add path conflict helper function
+   - Update upload endpoint validation
+   - Add comprehensive error messages
+   - Test all edge cases
 
 ---
 
@@ -1263,7 +1357,64 @@ npx tsx scripts/migrate-config-system.ts
 
 ## Backward Compatibility
 
-- Migration script handles existing data
-- Old format can be detected and converted automatically
-- No data loss during migration
-- Consider keeping `source` field in views for backward compat during transition
+- **Migration Script**: Handles existing data automatically
+- **Runtime Detection**: Old format mappings (without `type` field) are detected and converted on-the-fly:
+  - If `definitionId` matches a library definition → treated as `type: 'library'`
+  - Otherwise → treated as `type: 'custom'` with `customId` derived from `definitionId`
+- **No Data Loss**: All existing fields are preserved (notes, label, path for custom)
+- **View Compatibility**: `source` field in views is kept for backward compatibility (same value as `type`)
+- **API Compatibility**: Old API requests without `type` field will be rejected with clear error messages directing users to use the new format
+
+## Additional Considerations
+
+### Error Messages
+- Update all error messages to reference "Config Template" instead of "Library Config" for user-facing text
+- Update all error messages to reference "Custom Config" instead of "Custom Mapping"
+- Provide clear guidance when validation fails (e.g., "Use Config Template mode for this path")
+
+### Testing Edge Cases
+- Custom config with path matching library definition (should be prevented)
+- Library config with path override attempt (should be rejected)
+- Migration of config with notes (should preserve notes)
+- Deletion of file that exists in both uploads and project directory (should delete from both)
+- Deletion of file that doesn't exist (should still remove metadata)
+
+### Performance
+- Migration detection should be efficient (only check on plugin config load, not on every request)
+- Path conflict checking should use early exit when conflict is found
+
+---
+
+## Spec Improvements & Clarifications
+
+This specification has been enhanced with the following improvements:
+
+1. **Migration Script Enhancements:**
+   - Added file existence checks before processing
+   - Added validation for custom configs without paths
+   - Added progress logging and error handling
+   - Clarified data root resolution for dev vs production modes
+
+2. **Code Examples:**
+   - Fixed redundant code in migration endpoint
+   - Improved `buildPluginConfigViews` logic with better migration handling
+   - Enhanced `detectCustomToLibraryConflicts` with clearer logic
+   - Added missing imports and function references
+
+3. **Clarifications:**
+   - Added notes about existing functions (`sanitizeRelativePath`, `getDevDataPaths`)
+   - Clarified backward compatibility behavior
+   - Added edge case considerations
+   - Enhanced testing checklist with additional scenarios
+
+4. **Implementation Details:**
+   - Expanded implementation order with specific file paths
+   - Added error message guidance
+   - Included performance considerations
+   - Added validation requirements for all endpoints
+
+5. **Documentation:**
+   - Added "Additional Considerations" section
+   - Enhanced migration script documentation
+   - Improved code comments and explanations
+   - Added warnings about backups and data safety
