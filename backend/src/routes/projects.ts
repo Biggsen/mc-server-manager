@@ -1649,6 +1649,73 @@ router.put("/:id/plugins/:pluginId/configs", async (req: Request, res: Response)
   }
 });
 
+async function listAllProjectConfigs(project: StoredProject): Promise<ConfigFileSummary[]> {
+  const uploadedSummaries = await listUploadedConfigFiles(project);
+  const uploadedPaths = new Set(uploadedSummaries.map(s => s.path));
+  
+  // Also include scanned configs from project.configs that aren't already in uploadedSummaries
+  const scannedSummaries: ConfigFileSummary[] = [];
+  for (const config of project.configs ?? []) {
+    // Skip if already in uploaded summaries
+    if (uploadedPaths.has(config.path)) {
+      continue;
+    }
+    
+    // Try to get file stats - check both project directory and dev directory
+    const projectRoot = join(getProjectsRoot(), project.id);
+    const projectPath = join(projectRoot, config.path);
+    
+    let filePath: string | undefined;
+    let stats: Awaited<ReturnType<typeof stat>> | undefined;
+    
+    // Check project directory first
+    try {
+      stats = await stat(projectPath);
+      filePath = projectPath;
+    } catch (error) {
+      // If not in project directory, check dev directory (for Electron mode)
+      if (process.env.ELECTRON_MODE === "true") {
+        const devDataPaths = getDevDataPaths();
+        for (const devDataPath of devDataPaths) {
+          const devPath = join(devDataPath, "projects", project.id, config.path);
+          try {
+            stats = await stat(devPath);
+            filePath = devPath;
+            break;
+          } catch {
+            continue;
+          }
+        }
+      }
+    }
+    
+    if (stats && filePath) {
+      scannedSummaries.push({
+        path: config.path,
+        size: Number(stats.size),
+        modifiedAt: stats.mtime.toISOString(),
+        sha256: config.sha256,
+        pluginId: config.pluginId,
+        definitionId: config.definitionId,
+      });
+    } else {
+      // File doesn't exist, but still include it as a summary
+      scannedSummaries.push({
+        path: config.path,
+        size: 0,
+        modifiedAt: new Date().toISOString(),
+        sha256: config.sha256,
+        pluginId: config.pluginId,
+        definitionId: config.definitionId,
+      });
+    }
+  }
+  
+  const allSummaries = [...uploadedSummaries, ...scannedSummaries];
+  allSummaries.sort((a, b) => a.path.localeCompare(b.path));
+  return allSummaries;
+}
+
 router.get("/:id/configs", async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
@@ -1657,7 +1724,7 @@ router.get("/:id/configs", async (req: Request, res: Response) => {
       res.status(404).json({ error: "Project not found" });
       return;
     }
-    const configs = await listUploadedConfigFiles(project);
+    const configs = await listAllProjectConfigs(project);
     res.json({ configs });
   } catch (error) {
     console.error("Failed to list project configs", error);
@@ -1887,7 +1954,7 @@ router.post(
       }
       
       const refreshed = (await findProject(id)) ?? project;
-      const configs = await listUploadedConfigFiles(refreshed);
+      const configs = await listAllProjectConfigs(refreshed);
       res.status(201).json({ configs });
     } catch (error) {
       console.error("Failed to upload config file", error);
@@ -2043,7 +2110,7 @@ router.delete("/:id/configs/file", async (req: Request, res: Response) => {
     await removeProjectConfigMetadata(id, project, sanitized);
     
     const refreshed = (await findProject(id)) ?? project;
-    const configs = await listUploadedConfigFiles(refreshed);
+    const configs = await listAllProjectConfigs(refreshed);
     res.status(200).json({ configs });
   } catch (error) {
     console.error("Failed to delete config file", error);
