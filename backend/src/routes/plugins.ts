@@ -14,7 +14,6 @@ import {
 } from "../storage/pluginsStore";
 import type {
   PluginConfigDefinition,
-  PluginConfigRequirement,
   PluginProvider,
   PluginSourceReference,
 } from "../types/plugins";

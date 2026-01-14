@@ -8,6 +8,85 @@ Comprehensive refactor of the config system to:
 4. Improve UI/UX with proper terminology (Config Template vs Custom Config)
 5. Prevent path conflicts (validate custom configs don't match library definitions)
 
+---
+
+## Config Storage Architecture: `config/uploads/` vs Materialized Locations
+
+### How It Works
+
+The system uses a two-stage storage pattern for configuration files:
+
+#### 1. **`config/uploads/` (Staging Area)**
+- **Location**: `{projectRoot}/config/uploads/{relativePath}`
+- **Example**: `config/uploads/plugins/advancedachievements/config.yml`
+- **Purpose**: This is the **source of truth** and **staging area** for user-uploaded configurations
+- **Lifecycle**:
+  - Files are uploaded here via the UI (`POST /:id/configs/upload`)
+  - Files persist here **even after builds are completed**
+  - This directory is read by `collectUploadedConfigMaterials()` during builds
+  - Files are managed directly by users through the UI
+- **Persistence**: Files remain in this location indefinitely until explicitly deleted
+
+#### 2. **Materialized Locations (Runtime)**
+- **Location**: `{projectRoot}/{relativePath}` (e.g., `plugins/advancedachievements/config.yml`)
+- **Purpose**: This is where the **server actually reads configurations from at runtime**
+- **Lifecycle**:
+  - Files are written here during builds by `materializeConfigs()` function (line 439 in `buildQueue.ts`)
+  - The function `writeProjectFileBuffer()` writes to these locations
+  - These files are created from the staging area (`config/uploads/`) during each build
+  - Both staging and materialized files are included in the build zip artifact
+- **Generation**: Created fresh on each build from staging area + rendered configs
+
+### Why This Design?
+
+1. **Separation of Concerns**:
+   - `config/uploads/`: User-managed, persistent source files
+   - Materialized locations: Build-generated, runtime files
+
+2. **Build Process**:
+   - Builds read from `config/uploads/` (via `collectUploadedConfigMaterials()`)
+   - Builds write to materialized locations (via `writeProjectFileBuffer()`)
+   - This ensures builds always use the latest user-uploaded configs
+
+3. **Similar Pattern to Plugins**:
+   - Plugins follow a similar pattern: uploaded plugins go to `plugins/uploads/` first, then are materialized to `plugins/` during builds
+
+### Deletion Behavior
+
+**Critical Issue (Fixed)**: When deleting a config file, both locations must be cleaned up:
+
+1. **Staging Area** (`config/uploads/`): Must be deleted to prevent the config from being included in future builds
+2. **Materialized Location**: Must be deleted to remove the file from the current project state
+
+**Previous Bug**: The deletion logic only attempted one location at a time. If a file existed in both:
+- Deleting from `config/uploads/` would succeed, but the materialized file would remain
+- This caused stale configs to persist and potentially reappear on scans
+
+**Fixed Behavior**: The deletion endpoint now:
+1. Always attempts to delete from `config/uploads/` (staging area)
+2. Always attempts to delete from the materialized location (project root)
+3. Both operations are independent - one failing doesn't prevent the other
+4. Metadata is always removed regardless of file deletion success
+
+### Example Flow
+
+1. **Upload**: User uploads `plugins/advancedachievements/config.yml`
+   - File saved to: `config/uploads/plugins/advancedachievements/config.yml`
+   - Metadata added to `project.configs[]`
+
+2. **Build**: Build process runs
+   - `collectUploadedConfigMaterials()` reads from `config/uploads/plugins/advancedachievements/config.yml`
+   - `materializeConfigs()` writes to `plugins/advancedachievements/config.yml`
+   - Both files now exist in the project
+
+3. **Runtime**: Server reads from `plugins/advancedachievements/config.yml` (materialized location)
+
+4. **Delete**: User deletes the config
+   - Both `config/uploads/plugins/advancedachievements/config.yml` AND `plugins/advancedachievements/config.yml` are deleted
+   - Metadata removed from `project.configs[]`
+
+---
+
 ## Goals
 - **Type Safety**: Discriminated union makes library vs custom distinction explicit
 - **Simplicity**: Remove requirement field that adds no functional value

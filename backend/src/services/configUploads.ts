@@ -134,6 +134,31 @@ export async function deleteUploadedConfigFile(
 ): Promise<void> {
   const sanitized = sanitizeRelativePath(relativePath);
   const target = join(getUploadsRoot(project), sanitized);
+  
+  // Check if target exists and is a file before attempting to delete
+  try {
+    const stats = await stat(target);
+    if (!stats.isFile()) {
+      // If it's a directory, don't try to unlink it - just prune empty directories
+      await pruneEmptyDirectories(getUploadsRoot(project), target).catch((error) => {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== "ENOENT" && code !== "ENOTEMPTY" && code !== "EPERM") {
+          throw error;
+        }
+      });
+      return;
+    }
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") {
+      // File doesn't exist - that's fine, just return
+      return;
+    }
+    // Other errors should be re-thrown
+    throw error;
+  }
+  
+  // Target exists and is a file - delete it
   await unlink(target);
   await pruneEmptyDirectories(getUploadsRoot(project), target).catch((error) => {
     const code = (error as NodeJS.ErrnoException).code;

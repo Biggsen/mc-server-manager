@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef, type FormEvent } from 'react'
-import { Stack, Group, TextInput, NativeSelect } from '@mantine/core'
+import { Stack, Group, TextInput } from '@mantine/core'
 import { FloppyDisk, Plus } from '@phosphor-icons/react'
 import { Button } from './ui/button'
 import { Modal } from './ui/modal'

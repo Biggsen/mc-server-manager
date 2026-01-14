@@ -261,23 +261,24 @@ export async function setProjectAssets(id: string, payload: AssetsPayload): Prom
       project.plugins = Array.from(existingMap.values());
     }
     if (payload.configs) {
-      const configMap = new Map<
-        string,
-        NonNullable<StoredProject["configs"]>[number]
-      >();
+      // Important: `payload.configs` is the full desired set of config assets.
+      // We must REPLACE (not merge) so deletions are respected.
+      const previousMap = new Map<string, NonNullable<StoredProject["configs"]>[number]>();
       for (const existing of project.configs ?? []) {
-        configMap.set(existing.path, { ...existing });
+        previousMap.set(existing.path, { ...existing });
       }
-      for (const config of payload.configs) {
-        const previous = configMap.get(config.path);
-        configMap.set(config.path, {
+
+      const next = payload.configs.map((config) => {
+        const previous = previousMap.get(config.path);
+        return {
           path: config.path,
           sha256: config.sha256 ?? previous?.sha256 ?? "<pending>",
           pluginId: config.pluginId ?? previous?.pluginId,
           definitionId: config.definitionId ?? previous?.definitionId,
-        });
-      }
-      project.configs = Array.from(configMap.values());
+        };
+      });
+
+      project.configs = next;
     }
     return project;
   });

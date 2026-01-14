@@ -331,31 +331,11 @@ function GenerateProfile() {
   const [saveMessage, setSaveMessage] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
 
-  const missingRequiredConfigs = useMemo(() => {
-    const missing: Array<{ pluginId: string; definitionId: string; path: string }> = []
-    if (!project?.plugins) {
-      return missing
-    }
-    const configPaths = new Set(configs.map((config) => config.path))
-    for (const plugin of project.plugins) {
-      for (const mapping of plugin.configMappings ?? []) {
-        if (mapping.requirement !== 'required') {
-          continue
-        }
-        const path = (mapping.path ?? '').trim()
-        if (!path) {
-          continue
-        }
-        if (!configPaths.has(path)) {
-          missing.push({
-            pluginId: plugin.id,
-            definitionId: mapping.definitionId,
-            path,
-          })
-        }
-      }
-    }
-    return missing
+  const missingRequiredConfigs = useMemo((): Array<{ pluginId: string; definitionId: string; path: string }> => {
+    // Note: Requirement field was removed in config system refactor
+    // This feature is disabled until requirement checking is reimplemented
+    // if needed (e.g., based on library definitions)
+    return []
   }, [project?.plugins, configs])
 
   useEffect(() => {

@@ -132,9 +132,22 @@ export async function scanProjectAssets(project: StoredProject): Promise<Scanned
   const mappingIndex = new Map<string, { pluginId: string; definitionId?: string }>();
   for (const plugin of project.plugins ?? []) {
     for (const mapping of plugin.configMappings ?? []) {
-      const resolvedPath = mapping.path?.trim();
-      if (resolvedPath) {
-        mappingIndex.set(resolvedPath, { pluginId: plugin.id, definitionId: mapping.definitionId });
+      // Only custom mappings and old-format mappings have paths
+      if ('type' in mapping) {
+        if (mapping.type === 'custom') {
+          const resolvedPath = mapping.path?.trim();
+          if (resolvedPath) {
+            mappingIndex.set(resolvedPath, { pluginId: plugin.id, definitionId: mapping.customId });
+          }
+        }
+        // Library mappings don't have paths, skip
+      } else {
+        // Old format: check for path
+        const oldMapping = mapping as any;
+        const resolvedPath = oldMapping.path?.trim();
+        if (resolvedPath) {
+          mappingIndex.set(resolvedPath, { pluginId: plugin.id, definitionId: oldMapping.definitionId });
+        }
       }
     }
   }

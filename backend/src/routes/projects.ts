@@ -1957,56 +1957,90 @@ router.delete("/:id/configs/file", async (req: Request, res: Response) => {
     }
     
     const sanitized = sanitizeRelativePath(path);
-    let deleted = false;
     
-    // Try to delete from config/uploads first
-    try {
-      await deleteUploadedConfigFile(project, path);
-      deleted = true;
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code !== "ENOENT") {
-        throw error;
+    // Find the config entry BEFORE removing it to check if it's a custom config
+    const configEntry = (project.configs ?? []).find((entry) => entry.path === sanitized);
+    
+    // If it's a custom config, remove from configMappings as well
+    if (configEntry?.pluginId && configEntry?.definitionId && configEntry.definitionId.startsWith('custom/')) {
+      const plugin = project.plugins?.find((p) => p.id === configEntry.pluginId);
+      if (plugin) {
+        const currentMappings = plugin.configMappings ?? [];
+        const updatedMappings = currentMappings.filter((mapping) => {
+          // Remove custom mappings that match this definitionId
+          if (isNewFormatMapping(mapping) && mapping.type === 'custom') {
+            return mapping.customId !== configEntry.definitionId;
+          }
+          // Old format: check if definitionId matches and path matches (for custom configs)
+          const oldMapping = mapping as any;
+          if (oldMapping.definitionId === configEntry.definitionId) {
+            // Only remove if path matches (to avoid removing library configs)
+            return oldMapping.path !== sanitized;
+          }
+          return true;
+        });
+        
+        // Only update if mappings changed
+        if (updatedMappings.length !== currentMappings.length) {
+          await upsertProjectPlugin(id, {
+            ...plugin,
+            configMappings: updatedMappings,
+          });
+        }
       }
-      // File not in uploads directory, try project directory
     }
     
-    // If not found in uploads, try the actual project directory
-    if (!deleted) {
-      const projectRoot = join(getProjectsRoot(), project.id);
-      const projectPath = join(projectRoot, sanitized);
-      
-      let filePath: string | undefined;
-      if (existsSync(projectPath)) {
-        filePath = projectPath;
-      } else {
-        // Also check dev directory paths
-        const devDataPaths = getDevDataPaths();
-        for (const devDataPath of devDataPaths) {
-          const devPath = join(devDataPath, "projects", project.id, sanitized);
-          if (existsSync(devPath)) {
-            filePath = devPath;
-            break;
-          }
+    // Delete from config/uploads (staging area) - this is the source of truth
+    // This file persists after builds and is used by materializeConfigs()
+    try {
+      await deleteUploadedConfigFile(project, path);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      // Handle file not found and directory errors gracefully - these don't prevent metadata removal
+      if (code !== "ENOENT" && code !== "EISDIR" && code !== "ERR_FS_EISDIR") {
+        // Only throw if it's not a "file not found" or "is a directory" error
+        throw error;
+      }
+      // ENOENT/EISDIR are fine - file might not exist or might be a directory in staging area
+    }
+    
+    // Also delete from materialized location (where server reads from at runtime)
+    // This is written during builds by materializeConfigs() via writeProjectFileBuffer()
+    // Both locations can exist simultaneously, so we need to clean up both
+    const projectRoot = join(getProjectsRoot(), project.id);
+    const projectPath = join(projectRoot, sanitized);
+    
+    let filePath: string | undefined;
+    if (existsSync(projectPath)) {
+      filePath = projectPath;
+    } else {
+      // Also check dev directory paths
+      const devDataPaths = getDevDataPaths();
+      for (const devDataPath of devDataPaths) {
+        const devPath = join(devDataPath, "projects", project.id, sanitized);
+        if (existsSync(devPath)) {
+          filePath = devPath;
+          break;
         }
       }
-      
-      if (filePath) {
-        try {
-          await unlink(filePath);
-          deleted = true;
-        } catch (error) {
-          const code = (error as NodeJS.ErrnoException).code;
-          if (code !== "ENOENT") {
-            throw error;
-          }
+    }
+    
+    if (filePath) {
+      try {
+        await unlink(filePath);
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== "ENOENT") {
+          // Only throw if it's not a "file not found" error
+          throw error;
         }
+        // ENOENT is fine - file might not exist in materialized location
       }
     }
     
     // Always remove metadata entry, even if file wasn't found
     // (file might have been manually deleted or never existed)
-    await removeProjectConfigMetadata(id, project, path);
+    await removeProjectConfigMetadata(id, project, sanitized);
     
     const refreshed = (await findProject(id)) ?? project;
     const configs = await listUploadedConfigFiles(refreshed);
