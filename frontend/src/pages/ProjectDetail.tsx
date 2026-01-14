@@ -2238,17 +2238,19 @@ useEffect(() => {
                       </Group>
                       {project.plugins && project.plugins.length > 0 ? (
                         <Stack gap="md">
-                          {project.plugins.map((plugin) => (
-                            <PluginCard
-                              key={`${plugin.id}:${plugin.version}`}
-                              plugin={plugin}
-                              pluginDefinitions={pluginDefinitionCache[plugin.id] ?? []}
-                              onRemove={handleRemovePlugin}
-                              onEditCustomPath={handleEditCustomPath}
-                              onRemoveCustomPath={handleRemoveCustomPath}
-                              onAddCustomPath={handleAddCustomPath}
-                            />
-                          ))}
+                          {[...project.plugins]
+                            .sort((a, b) => a.id.localeCompare(b.id, undefined, { sensitivity: 'base' }))
+                            .map((plugin) => (
+                              <PluginCard
+                                key={`${plugin.id}:${plugin.version}`}
+                                plugin={plugin}
+                                pluginDefinitions={pluginDefinitionCache[plugin.id] ?? []}
+                                onRemove={handleRemovePlugin}
+                                onEditCustomPath={handleEditCustomPath}
+                                onRemoveCustomPath={handleRemoveCustomPath}
+                                onAddCustomPath={handleAddCustomPath}
+                              />
+                            ))}
                         </Stack>
                       ) : (
                         <Text size="sm" c="dimmed">No plugins configured yet.</Text>

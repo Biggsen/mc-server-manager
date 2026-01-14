@@ -7,8 +7,9 @@ import type {
   RepoMetadata,
   StoredProject,
 } from "../types/storage";
-import type { ProjectPlugin } from "../types/plugins";
+import type { ProjectPlugin, ProjectPluginConfigMapping, PluginConfigDefinition } from "../types/plugins";
 import { getDataRoot } from "../config";
+import { findStoredPlugin } from "./pluginsStore";
 
 // Helper functions to compute paths at runtime (not at module load)
 function getDataDir(): string {
@@ -201,6 +202,106 @@ export async function updateProject(
   const updated = (result as StoredProject) ?? draft;
   updated.updatedAt = new Date().toISOString();
 
+  // Normalize configMappings for all plugins before saving
+  if (updated.plugins) {
+    for (const plugin of updated.plugins) {
+      if (plugin.configMappings && plugin.configMappings.length > 0 && plugin.version) {
+        // Load current library definitions
+        const stored = await findStoredPlugin(plugin.id, plugin.version);
+        const libraryDefinitions = stored?.configDefinitions ?? [];
+        
+        // Normalize mappings
+        plugin.configMappings = normalizeConfigMappings(plugin.configMappings, libraryDefinitions);
+      }
+    }
+  }
+
+  // Update project.configs definitionIds when custom configs are converted to library configs
+  if (updated.plugins && updated.configs) {
+    for (const plugin of updated.plugins) {
+      if (!plugin.version) continue;
+      
+      const stored = await findStoredPlugin(plugin.id, plugin.version);
+      if (!stored?.configDefinitions) continue;
+
+      // Build map of path -> library definition
+      const pathToDefinitionMap = new Map<string, PluginConfigDefinition>();
+      for (const definition of stored.configDefinitions) {
+        pathToDefinitionMap.set(definition.path, definition);
+      }
+
+      // Update configs that have custom definitionIds but paths matching library definitions
+      for (const config of updated.configs) {
+        if (config.pluginId === plugin.id && config.path) {
+          const matchingDefinition = pathToDefinitionMap.get(config.path);
+          if (matchingDefinition) {
+            // Path matches a library definition - ensure definitionId is correct
+            if (config.definitionId !== matchingDefinition.id) {
+              // Update to use library definitionId
+              config.definitionId = matchingDefinition.id;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Update project.configs paths if library definition paths changed
+  if (updated.plugins && updated.configs) {
+    const configsMap = new Map<string, typeof updated.configs[0]>();
+    // Build initial map from current configs
+    for (const config of updated.configs) {
+      configsMap.set(config.path, { ...config });
+    }
+
+    for (const plugin of updated.plugins) {
+      if (!plugin.version) continue;
+      
+      const stored = await findStoredPlugin(plugin.id, plugin.version);
+      if (!stored?.configDefinitions) continue;
+
+      // Build map of definitionId -> current path
+      const definitionPathMap = new Map<string, string>();
+      for (const definition of stored.configDefinitions) {
+        definitionPathMap.set(definition.id, definition.path);
+      }
+
+      // Check all configs for this plugin and update paths if needed
+      const configsToUpdate: Array<{ oldPath: string; newPath: string; config: typeof updated.configs[0] }> = [];
+      for (const config of updated.configs) {
+        if (config.pluginId === plugin.id && config.definitionId) {
+          const currentPath = definitionPathMap.get(config.definitionId);
+          if (currentPath && currentPath !== config.path) {
+            // Library definition path changed - mark for update
+            const existingConfig = configsMap.get(config.path);
+            if (existingConfig) {
+              configsToUpdate.push({
+                oldPath: config.path,
+                newPath: currentPath,
+                config: existingConfig,
+              });
+            }
+          }
+        }
+      }
+
+      // Apply path updates
+      for (const { oldPath, newPath, config: configToUpdate } of configsToUpdate) {
+        configsMap.delete(oldPath);
+        // Only add if new path doesn't already exist (avoid duplicates)
+        if (!configsMap.has(newPath)) {
+          configsMap.set(newPath, {
+            ...configToUpdate,
+            path: newPath,
+          });
+        }
+      }
+    }
+
+    // Update configs array with normalized paths
+    updated.configs = Array.from(configsMap.values());
+  }
+
   snapshot.projects[index] = updated;
   snapshot.projects.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
   await persistSnapshot(snapshot);
@@ -324,6 +425,108 @@ export async function deleteProjectRecord(id: string): Promise<StoredProject | u
   const [removed] = snapshot.projects.splice(index, 1);
   await persistSnapshot(snapshot);
   return removed;
+}
+
+function isNewFormatMapping(mapping: ProjectPluginConfigMapping): mapping is Extract<ProjectPluginConfigMapping, { type: 'library' }> | Extract<ProjectPluginConfigMapping, { type: 'custom' }> {
+  return 'type' in mapping && (mapping.type === 'library' || mapping.type === 'custom');
+}
+
+function normalizeConfigMappings(
+  mappings: ProjectPluginConfigMapping[],
+  libraryDefinitions: PluginConfigDefinition[]
+): ProjectPluginConfigMapping[] {
+  const definitionMap = new Map<string, PluginConfigDefinition>();
+  const pathToDefinitionMap = new Map<string, PluginConfigDefinition>();
+  for (const definition of libraryDefinitions) {
+    definitionMap.set(definition.id, definition);
+    pathToDefinitionMap.set(definition.path, definition);
+  }
+
+  const normalized = mappings.map((mapping) => {
+    // Already in new format
+    if (isNewFormatMapping(mapping)) {
+      if (mapping.type === 'library') {
+        // Ensure library definition still exists
+        if (!definitionMap.has(mapping.definitionId)) {
+          return null; // Remove invalid library mapping
+        }
+        return mapping;
+      } else {
+        // Custom mapping - check if path matches a library definition
+        const matchingDefinition = pathToDefinitionMap.get(mapping.path);
+        if (matchingDefinition) {
+          // Convert custom config to library config (path matches library definition)
+          return {
+            type: 'library',
+            definitionId: matchingDefinition.id,
+            notes: mapping.notes,
+          };
+        }
+        // Keep as custom
+        return mapping;
+      }
+    }
+
+    // Old format - migrate
+    const oldMapping = mapping as any;
+    const definitionId = oldMapping.definitionId;
+    
+    if (definitionMap.has(definitionId)) {
+      // Library config
+      return {
+        type: 'library',
+        definitionId,
+        notes: oldMapping.notes,
+      };
+    } else {
+      // Custom config - check if path matches a library definition
+      const path = oldMapping.path;
+      if (path) {
+        const matchingDefinition = pathToDefinitionMap.get(path);
+        if (matchingDefinition) {
+          // Convert to library config
+          return {
+            type: 'library',
+            definitionId: matchingDefinition.id,
+            notes: oldMapping.notes,
+          };
+        }
+      }
+      
+      if (!path) {
+        return null; // Invalid custom config without path
+      }
+      
+      const customId = definitionId.startsWith('custom/')
+        ? definitionId
+        : `custom/${definitionId}`;
+      
+      return {
+        type: 'custom',
+        customId,
+        label: oldMapping.label || customId,
+        path,
+        notes: oldMapping.notes,
+      };
+    }
+  }).filter((m): m is ProjectPluginConfigMapping => m !== null);
+
+  // Deduplicate library configs - if multiple library configs have the same definitionId, keep the first one
+  const seenLibraryIds = new Set<string>();
+  const deduplicated: ProjectPluginConfigMapping[] = [];
+  
+  for (const mapping of normalized) {
+    if (isNewFormatMapping(mapping) && mapping.type === 'library') {
+      if (seenLibraryIds.has(mapping.definitionId)) {
+        // Skip duplicate library config
+        continue;
+      }
+      seenLibraryIds.add(mapping.definitionId);
+    }
+    deduplicated.push(mapping);
+  }
+
+  return deduplicated;
 }
 
 function createRepoMetadataFromUrl(repoUrl: string, defaultBranch: string): RepoMetadata | undefined {

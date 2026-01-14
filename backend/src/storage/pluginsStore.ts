@@ -56,7 +56,12 @@ function keyFor(record: Pick<StoredPluginRecord, "id" | "version">): string {
 
 export async function listStoredPlugins(): Promise<StoredPluginRecord[]> {
   const snapshot = await loadSnapshot();
-  return snapshot.plugins.slice().sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
+  return snapshot.plugins.slice().sort((a, b) => {
+    const idCompare = a.id.localeCompare(b.id, undefined, { sensitivity: 'base' });
+    if (idCompare !== 0) return idCompare;
+    // If IDs are the same, sort by version (newest first)
+    return b.version.localeCompare(a.version, undefined, { numeric: true, sensitivity: 'base' });
+  });
 }
 
 export async function deleteStoredPlugin(id: string, version: string): Promise<boolean> {
