@@ -242,122 +242,93 @@ const PluginCard = memo(function PluginCard({
             </Group>
           </Group>
 
-          <Accordion
-            styles={{
-              item: {
-                borderBottom: 'none',
-              },
-              content: {
-                paddingBottom: 0,
-              },
-            }}
-          >
-            <Accordion.Item value={`config-paths-${plugin.id}`}>
-              <Accordion.Control>
-                <Group gap="xs" justify="space-between" style={{ flex: 1 }}>
-                  <Text size="sm" fw={500}>
-                    Config Paths
-                  </Text>
-                  <Group gap="xs">
-                    {totalCount > 0 && (
-                      <Badge variant="default">
-                        {totalCount} path{totalCount !== 1 ? 's' : ''}
+          <Stack gap="md" mt="xs">
+            <Stack gap="xs">
+              <Text size="xs" fw={600} c="dimmed" tt="uppercase">
+                Config Paths
+              </Text>
+              {pluginDefinitions.map((definition) => (
+                <Group key={definition.id} justify="space-between" align="flex-start" wrap="nowrap">
+                  <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
+                    <Group gap="xs" wrap="wrap">
+                      <Badge variant={definition.type === 'library' ? 'accent' : 'outline'}>
+                        {definition.type === 'library' ? 'Template' : 'Custom'}
                       </Badge>
-                    )}
-                  </Group>
-                </Group>
-              </Accordion.Control>
-              <Accordion.Panel>
-                <Stack gap="md" mt="xs">
-                  <Stack gap="xs">
-                    <Text size="xs" fw={600} c="dimmed" tt="uppercase">
-                      Config Paths
+                      <Text size="sm" fw={500}>
+                        {definition.label || definition.id}
+                      </Text>
+                      {definition.uploaded ? (
+                        <Badge variant="success">
+                          Uploaded
+                        </Badge>
+                      ) : null}
+                    </Group>
+                    <Text size="xs" c="dimmed" style={{ wordBreak: 'break-all' }}>
+                      {definition.resolvedPath}
                     </Text>
-                    {pluginDefinitions.map((definition) => (
-                      <Group key={definition.id} justify="space-between" align="flex-start" wrap="nowrap">
-                        <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
-                          <Group gap="xs" wrap="wrap">
-                            <Badge variant={definition.type === 'library' ? 'accent' : 'outline'}>
-                              {definition.type === 'library' ? 'Template' : 'Custom'}
-                            </Badge>
-                            <Text size="sm" fw={500}>
-                              {definition.label || definition.id}
-                            </Text>
-                            {definition.uploaded ? (
-                              <Badge variant="success">
-                                Uploaded
-                              </Badge>
-                            ) : null}
-                          </Group>
-                          <Text size="xs" c="dimmed" style={{ wordBreak: 'break-all' }}>
-                            {definition.resolvedPath}
-                          </Text>
-                          {definition.description && (
-                            <Text size="xs" c="dimmed">
-                              {definition.description}
-                            </Text>
-                          )}
-                          {definition.notes && (
-                            <Text size="xs" c="dimmed">
-                              Notes: {definition.notes}
-                            </Text>
-                          )}
-                        </Stack>
-                        {definition.type === 'custom' && (
-                          <Group gap="xs">
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => {
-                                onEditCustomPath({
-                                  pluginId: plugin.id,
-                                  definitionId: definition.id,
-                                  label: definition.label ?? '',
-                                  path: definition.resolvedPath,
-                                  notes: definition.notes ?? '',
-                                })
-                              }}
-                              icon={<PencilSimple size={16} weight="fill" aria-hidden="true" />}
-                            >
-                              Edit
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => {
-                                onRemoveCustomPath({
-                                  pluginId: plugin.id,
-                                  definitionId: definition.id,
-                                  path: definition.resolvedPath,
-                                })
-                              }}
-                              icon={<Trash size={16} weight="fill" aria-hidden="true" />}
-                            >
-                              Remove
-                            </Button>
-                          </Group>
-                        )}
-                      </Group>
-                    ))}
+                    {definition.description && (
+                      <Text size="xs" c="dimmed">
+                        {definition.description}
+                      </Text>
+                    )}
+                    {definition.notes && (
+                      <Text size="xs" c="dimmed">
+                        Notes: {definition.notes}
+                      </Text>
+                    )}
                   </Stack>
+                  {definition.type === 'custom' && (
+                    <Group gap="xs">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          onEditCustomPath({
+                            pluginId: plugin.id,
+                            definitionId: definition.id,
+                            label: definition.label ?? '',
+                            path: definition.resolvedPath,
+                            notes: definition.notes ?? '',
+                          })
+                        }}
+                        icon={<PencilSimple size={16} weight="fill" aria-hidden="true" />}
+                      >
+                        Edit
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          onRemoveCustomPath({
+                            pluginId: plugin.id,
+                            definitionId: definition.id,
+                            path: definition.resolvedPath,
+                          })
+                        }}
+                        icon={<Trash size={16} weight="fill" aria-hidden="true" />}
+                      >
+                        Remove
+                      </Button>
+                    </Group>
+                  )}
+                </Group>
+              ))}
+            </Stack>
 
-                  <Group>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => onAddCustomPath(plugin.id)}
-                      icon={<Plus size={16} weight="fill" aria-hidden="true" />}
-                    >
-                      Add custom config
-                    </Button>
-                  </Group>
-                </Stack>
-              </Accordion.Panel>
-            </Accordion.Item>
-          </Accordion>
+            <Group>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => onAddCustomPath(plugin.id)}
+                icon={<Plus size={16} weight="fill" aria-hidden="true" />}
+              >
+                Add custom config
+              </Button>
+            </Group>
+          </Stack>
         </Stack>
       </CardContent>
     </Card>
