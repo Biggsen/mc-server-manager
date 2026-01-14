@@ -4,15 +4,12 @@ import { FloppyDisk, Plus } from '@phosphor-icons/react'
 import { Button } from './ui/button'
 import { Modal } from './ui/modal'
 import { useToast } from './ui/toast'
-import type { PluginConfigRequirement } from '../lib/api'
-
 export interface CustomPathModalState {
   opened: boolean
   pluginId: string
   definitionId?: string
   label: string
   path: string
-  requirement: PluginConfigRequirement
   notes: string
 }
 
@@ -44,7 +41,6 @@ export function CustomPathModal({ modal, onClose, onSubmit }: CustomPathModalPro
         definitionId: modal.definitionId,
         label: modal.label,
         path: modal.path,
-        requirement: modal.requirement,
         notes: modal.notes,
       })
       lastOpenedRef.current = true
@@ -104,22 +100,6 @@ export function CustomPathModal({ modal, onClose, onSubmit }: CustomPathModalPro
             }
             placeholder="plugins/example/config.yml"
             required
-            disabled={saving}
-          />
-          <NativeSelect
-            label="Requirement"
-            id="custom-path-requirement"
-            value={formState.requirement}
-            onChange={(event) =>
-              setFormState((prev) =>
-                prev ? { ...prev, requirement: event.target.value as PluginConfigRequirement } : null,
-              )
-            }
-            data={[
-              { value: 'required', label: 'Required' },
-              { value: 'optional', label: 'Optional' },
-              { value: 'generated', label: 'Generated' },
-            ]}
             disabled={saving}
           />
           <TextInput

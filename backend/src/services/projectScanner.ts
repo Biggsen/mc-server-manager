@@ -148,8 +148,17 @@ export async function scanProjectAssets(project: StoredProject): Promise<Scanned
     if (!stored?.configDefinitions) continue;
     
     for (const definition of stored.configDefinitions) {
-      const mapping = plugin.configMappings?.find((m) => m.definitionId === definition.id);
-      const resolvedPath = mapping?.path ?? definition.path;
+      const mapping = plugin.configMappings?.find((m) => {
+        // Handle both old and new format
+        if ('type' in m && m.type === 'library') {
+          return m.definitionId === definition.id;
+        }
+        // Old format
+        return (m as any).definitionId === definition.id;
+      });
+      // For library definitions: always use definition.path
+      const resolvedPath = definition.path;  // No override
+      // mapping.path is ignored for library configs
       if (!resolvedPath) continue;
       
       // Check in the actual project directory first, not the template

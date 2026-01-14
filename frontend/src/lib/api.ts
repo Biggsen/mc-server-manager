@@ -22,24 +22,27 @@ export interface PluginSearchResult {
   projectUrl?: string
 }
 
-export type PluginConfigRequirement = 'required' | 'optional' | 'generated'
-
 export interface PluginConfigDefinition {
   id: string
   path: string
   label?: string
-  requirement?: PluginConfigRequirement
   description?: string
   tags?: string[]
 }
 
-export interface ProjectPluginConfigMapping {
-  definitionId: string
-  label?: string
-  path?: string
-  requirement?: PluginConfigRequirement
-  notes?: string
-}
+export type ProjectPluginConfigMapping =
+  | {
+      type: 'library'
+      definitionId: string
+      notes?: string
+    }
+  | {
+      type: 'custom'
+      customId: string
+      label: string
+      path: string
+      notes?: string
+    }
 
 export interface StoredPluginRecord {
   id: string
@@ -645,17 +648,16 @@ export interface ProjectConfigSummary {
 
 export interface PluginConfigDefinitionView {
   id: string
-  source: 'library' | 'custom'
+  type: 'library' | 'custom'  // NEW
+  source: 'library' | 'custom'  // Keep for backward compat
   label?: string
   description?: string
   tags?: string[]
   defaultPath: string
   resolvedPath: string
-  requirement: PluginConfigRequirement
   notes?: string
   mapping?: ProjectPluginConfigMapping
   uploaded?: ProjectConfigSummary
-  missing: boolean
 }
 
 export interface ProjectPluginConfigsResponse {
@@ -673,16 +675,29 @@ export async function fetchProjectConfigs(projectId: string): Promise<ProjectCon
 
 export async function uploadProjectConfig(
   projectId: string,
-  payload: { path: string; file: File; pluginId?: string; definitionId?: string },
+  payload: {
+    path: string
+    file: File
+    type: 'library' | 'custom'
+    pluginId?: string
+    definitionId?: string
+    customId?: string
+    label?: string
+  },
 ): Promise<ProjectConfigSummary[]> {
   const form = new FormData()
   form.append('relativePath', payload.path)
   form.append('file', payload.file)
+  form.append('type', payload.type)
   if (payload.pluginId) {
     form.append('pluginId', payload.pluginId)
   }
   if (payload.definitionId) {
     form.append('definitionId', payload.definitionId)
+  }
+  if (payload.customId && payload.label) {
+    form.append('customId', payload.customId)
+    form.append('label', payload.label)
   }
   const response = await fetch(`${API_BASE}/projects/${projectId}/configs/upload`, {
     method: 'POST',

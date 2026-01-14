@@ -63,9 +63,11 @@ export function createApp(): express.Application {
     // Allow requests from Electron (localhost origins) and file:// protocol
     if (origin && (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:'))) {
       res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
     } else if (!origin || origin.startsWith('file://')) {
       // Allow requests without origin or from file:// (Electron in production)
       res.setHeader('Access-Control-Allow-Origin', '*');
+      // Note: Cannot use credentials with wildcard origin
     }
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');

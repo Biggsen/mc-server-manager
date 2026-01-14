@@ -9,7 +9,6 @@ import {
   type StoredPluginRecord,
   type ProjectSummary,
   type PluginConfigDefinition,
-  type PluginConfigRequirement,
 } from '../lib/api'
 import {
   Anchor,
@@ -46,16 +45,9 @@ type ConfigDefinitionDraft = {
   key: string
   id: string
   path: string
-  requirement: PluginConfigRequirement
   label: string
   description: string
 }
-
-const requirementOptions: { value: PluginConfigRequirement; label: string }[] = [
-  { value: 'required', label: 'Required' },
-  { value: 'optional', label: 'Optional' },
-  { value: 'generated', label: 'Generated' },
-]
 
 function definitionToDraft(definition: PluginConfigDefinition, index: number): ConfigDefinitionDraft {
   return {
@@ -64,7 +56,6 @@ function definitionToDraft(definition: PluginConfigDefinition, index: number): C
     path: definition.path ?? '',
     label: definition.label ?? '',
     description: definition.description ?? '',
-    requirement: definition.requirement ?? 'optional',
   }
 }
 
@@ -75,7 +66,6 @@ function createEmptyDraft(): ConfigDefinitionDraft {
     path: '',
     label: '',
     description: '',
-    requirement: 'optional',
   }
 }
 
@@ -506,7 +496,6 @@ function PluginLibrary() {
                                     : prev,
                                 )
                               }}
-                              placeholder="WorldGuard regions"
                             />
                           </Stack>
                           <Stack gap={4}>
@@ -530,35 +519,7 @@ function PluginLibrary() {
                                     : prev,
                                 )
                               }}
-                              placeholder="plugins/WorldGuard/worlds/world/regions.yml"
                               required
-                            />
-                          </Stack>
-                          <Stack gap={4}>
-                            <Text size="xs" fw={600} c="dimmed">
-                              Requirement
-                            </Text>
-                            <NativeSelect
-                              id={`config-requirement-${draft.key}`}
-                              value={draft.requirement}
-                              onChange={(event) => {
-                                const value = event.currentTarget.value as PluginConfigRequirement
-                                setConfigEditor((prev) =>
-                                  prev
-                                    ? {
-                                        ...prev,
-                                        touched: true,
-                                        drafts: prev.drafts.map((item) =>
-                                          item.key === draft.key ? { ...item, requirement: value } : item,
-                                        ),
-                                      }
-                                    : prev,
-                                )
-                              }}
-                              data={requirementOptions.map((option) => ({
-                                value: option.value,
-                                label: option.label,
-                              }))}
                             />
                           </Stack>
                           <Stack gap={4}>
@@ -582,7 +543,6 @@ function PluginLibrary() {
                                     : prev,
                                 )
                               }}
-                              placeholder="Optional details for teammates"
                             />
                           </Stack>
                         </SimpleGrid>
@@ -659,7 +619,6 @@ function PluginLibrary() {
                         path,
                         label: draft.label.trim() || undefined,
                         description: draft.description.trim() || undefined,
-                        requirement: draft.requirement,
                       })
                     }
                     try {

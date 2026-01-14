@@ -38,7 +38,7 @@ import {
   type RunLogEntry,
   type StoredPluginRecord,
 } from '../lib/api'
-import { Accordion, Alert, Anchor, Checkbox, Code, Group, Loader, NativeSelect, ScrollArea, SimpleGrid, Stack, Table, Tabs, Text, Textarea, TextInput, Title } from '@mantine/core'
+import { Accordion, Alert, Anchor, Checkbox, Code, Group, Loader, NativeSelect, Radio, ScrollArea, SimpleGrid, Stack, Table, Tabs, Text, Textarea, TextInput, Title } from '@mantine/core'
 import { Badge, Button, Card, CardContent, CardHeader, Modal, Skeleton } from '../components/ui'
 import { useToast } from '../components/ui/toast'
 import { ContentSection } from '../components/layout'
@@ -196,20 +196,7 @@ const PluginCard = memo(function PluginCard({
   )
   const sourceKind = useMemo(() => getStoredPluginSourceKind(plugin), [plugin])
 
-  // Memoize filter operations to avoid recalculating on every render
-  const libraryDefinitions = useMemo(
-    () => pluginDefinitions.filter((def) => def.source === 'library'),
-    [pluginDefinitions],
-  )
-  const customDefinitions = useMemo(
-    () => pluginDefinitions.filter((def) => def.source === 'custom'),
-    [pluginDefinitions],
-  )
-  const missingCount = useMemo(
-    () => pluginDefinitions.filter((def) => def.missing).length,
-    [pluginDefinitions],
-  )
-  const totalCount = useMemo(() => libraryDefinitions.length + customDefinitions.length, [libraryDefinitions.length, customDefinitions.length])
+  const totalCount = useMemo(() => pluginDefinitions.length, [pluginDefinitions.length])
 
   return (
     <Card key={`${plugin.id}:${plugin.version}`}>
@@ -277,107 +264,46 @@ const PluginCard = memo(function PluginCard({
                         {totalCount} path{totalCount !== 1 ? 's' : ''}
                       </Badge>
                     )}
-                    {missingCount > 0 && (
-                      <Badge variant="warning">
-                        {missingCount} missing
-                      </Badge>
-                    )}
                   </Group>
                 </Group>
               </Accordion.Control>
               <Accordion.Panel>
                 <Stack gap="md" mt="xs">
-                  {libraryDefinitions.length > 0 && (
-                    <Stack gap="xs">
-                      <Text size="xs" fw={600} c="dimmed" tt="uppercase">
-                        Library Paths
-                      </Text>
-                      {libraryDefinitions.map((definition) => (
-                        <Group key={definition.id} justify="space-between" align="flex-start" wrap="nowrap">
-                          <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
-                            <Group gap="xs" wrap="wrap">
-                              <Text size="sm" fw={500}>
-                                {definition.label || definition.id}
-                              </Text>
-                              <Badge
-                                variant={
-                                  definition.requirement === 'required'
-                                    ? 'danger'
-                                    : definition.requirement === 'optional'
-                                      ? 'outline'
-                                      : 'accent'
-                                }
-                              >
-                                {definition.requirement}
-                              </Badge>
-                              {definition.uploaded ? (
-                                <Badge variant="success">
-                                  Uploaded
-                                </Badge>
-                              ) : definition.missing ? (
-                                <Badge variant="warning">
-                                  Missing
-                                </Badge>
-                              ) : null}
-                            </Group>
-                            <Text size="xs" c="dimmed" style={{ wordBreak: 'break-all' }}>
-                              {definition.resolvedPath}
+                  <Stack gap="xs">
+                    <Text size="xs" fw={600} c="dimmed" tt="uppercase">
+                      Config Paths
+                    </Text>
+                    {pluginDefinitions.map((definition) => (
+                      <Group key={definition.id} justify="space-between" align="flex-start" wrap="nowrap">
+                        <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
+                          <Group gap="xs" wrap="wrap">
+                            <Badge variant={definition.type === 'library' ? 'accent' : 'outline'}>
+                              {definition.type === 'library' ? 'Template' : 'Custom'}
+                            </Badge>
+                            <Text size="sm" fw={500}>
+                              {definition.label || definition.id}
                             </Text>
-                            {definition.description && (
-                              <Text size="xs" c="dimmed">
-                                {definition.description}
-                              </Text>
-                            )}
-                          </Stack>
-                        </Group>
-                      ))}
-                    </Stack>
-                  )}
-
-                  {customDefinitions.length > 0 && (
-                    <Stack gap="xs">
-                      <Group justify="space-between" align="center">
-                        <Text size="xs" fw={600} c="dimmed" tt="uppercase">
-                          Custom Paths
-                        </Text>
-                      </Group>
-                      {customDefinitions.map((definition) => (
-                        <Group key={definition.id} justify="space-between" align="flex-start" wrap="nowrap">
-                          <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
-                            <Group gap="xs" wrap="wrap">
-                              <Text size="sm" fw={500}>
-                                {definition.label || definition.id}
-                              </Text>
-                              <Badge
-                                variant={
-                                  definition.requirement === 'required'
-                                    ? 'danger'
-                                    : definition.requirement === 'optional'
-                                      ? 'outline'
-                                      : 'accent'
-                                }
-                              >
-                                {definition.requirement}
+                            {definition.uploaded ? (
+                              <Badge variant="success">
+                                Uploaded
                               </Badge>
-                              {definition.uploaded ? (
-                                <Badge variant="success">
-                                  Uploaded
-                                </Badge>
-                              ) : definition.missing ? (
-                                <Badge variant="warning">
-                                  Missing
-                                </Badge>
-                              ) : null}
-                            </Group>
-                            <Text size="xs" c="dimmed" style={{ wordBreak: 'break-all' }}>
-                              {definition.resolvedPath}
+                            ) : null}
+                          </Group>
+                          <Text size="xs" c="dimmed" style={{ wordBreak: 'break-all' }}>
+                            {definition.resolvedPath}
+                          </Text>
+                          {definition.description && (
+                            <Text size="xs" c="dimmed">
+                              {definition.description}
                             </Text>
-                            {definition.notes && (
-                              <Text size="xs" c="dimmed">
-                                {definition.notes}
-                              </Text>
-                            )}
-                          </Stack>
+                          )}
+                          {definition.notes && (
+                            <Text size="xs" c="dimmed">
+                              Notes: {definition.notes}
+                            </Text>
+                          )}
+                        </Stack>
+                        {definition.type === 'custom' && (
                           <Group gap="xs">
                             <Button
                               type="button"
@@ -389,7 +315,6 @@ const PluginCard = memo(function PluginCard({
                                   definitionId: definition.id,
                                   label: definition.label ?? '',
                                   path: definition.resolvedPath,
-                                  requirement: definition.requirement,
                                   notes: definition.notes ?? '',
                                 })
                               }}
@@ -413,10 +338,10 @@ const PluginCard = memo(function PluginCard({
                               Remove
                             </Button>
                           </Group>
-                        </Group>
-                      ))}
-                    </Stack>
-                  )}
+                        )}
+                      </Group>
+                    ))}
+                  </Stack>
 
                   <Group>
                     <Button
@@ -467,7 +392,9 @@ function ProjectDetail() {
   const [configUploadPath, setConfigUploadPath] = useState('')
   const [configUploadFile, setConfigUploadFile] = useState<File | null>(null)
   const [configUploadPlugin, setConfigUploadPlugin] = useState('')
+  const [configUploadType, setConfigUploadType] = useState<'template' | 'custom'>('template')
   const [configUploadDefinition, setConfigUploadDefinition] = useState('')
+  const [configUploadName, setConfigUploadName] = useState('')
   const [configUploadPathDirty, setConfigUploadPathDirty] = useState(false)
   const [configUploadBusy, setConfigUploadBusy] = useState(false)
   const [configUploadModalOpened, setConfigUploadModalOpened] = useState(false)
@@ -756,9 +683,13 @@ function ProjectDetail() {
 
     for (const plugin of project?.plugins ?? []) {
       const mappings = plugin.configMappings ?? []
-      map[plugin.id] = mappings.map((mapping) =>
-        formatOption(mapping.definitionId, mapping.path ?? '', mapping.definitionId),
-      )
+      map[plugin.id] = mappings
+        .filter((mapping): mapping is Extract<ProjectPluginConfigMapping, { type: 'library' }> => 
+          mapping.type === 'library'
+        )
+        .map((mapping) =>
+          formatOption(mapping.definitionId, '', mapping.definitionId),
+        )
       const cachedDefinitions = pluginDefinitionCache[plugin.id]
       if (cachedDefinitions) {
         map[plugin.id] = cachedDefinitions.map((definition) =>
@@ -1225,19 +1156,120 @@ useEffect(() => {
     async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault()
       if (!id) return
-      if (!configUploadFile || !configUploadPath.trim()) {
-        setConfigsError('Config path and file are required.')
+      
+      // Get the actual form value in case state is stale
+      const form = event.currentTarget
+      const templateSelect = form.querySelector<HTMLSelectElement>('#config-upload-definition')
+      const actualDefinitionValue = templateSelect?.value || configUploadDefinition
+      
+      let finalPath = configUploadPath.trim()
+      let selectedDefinition: { definitionId: string; path: string; label: string } | undefined
+      
+      if (configUploadType === 'template') {
+        const options = pluginDefinitionOptions[configUploadPlugin] ?? []
+        
+        // If definitionId is not set but path is, try to find it from the path
+        // Also check the actual form element value in case state is stale
+        let definitionId = actualDefinitionValue?.trim() || configUploadDefinition?.trim()
+        if (!definitionId && configUploadPath.trim()) {
+          const foundByPath = options.find((option) => option.path === configUploadPath.trim())
+          if (foundByPath) {
+            definitionId = foundByPath.definitionId
+          }
+        }
+        
+        if (!definitionId) {
+          setConfigsError('Config template is required.')
+          return
+        }
+        
+        // Verify the selected definition exists in the options
+        selectedDefinition = options.find((option) => option.definitionId === definitionId)
+        if (!selectedDefinition) {
+          setConfigsError('Please select a valid config template.')
+          return
+        }
+        
+        // Ensure path is set from the selected definition
+        if (!finalPath && selectedDefinition.path) {
+          finalPath = selectedDefinition.path
+          setConfigUploadPath(selectedDefinition.path)
+        }
+        
+        // Update the definitionId in case we found it by path
+        if (definitionId !== configUploadDefinition?.trim()) {
+          setConfigUploadDefinition(definitionId)
+        }
+        
+        // Final validation - path must be set
+        if (!finalPath) {
+          setConfigsError('Config path is required. Please select a valid template.')
+          return
+        }
+      } else {
+        if (!configUploadName.trim() || !finalPath) {
+          setConfigsError('Config name and path are required.')
+          return
+        }
+      }
+      
+      if (!configUploadFile) {
+        setConfigsError('Config file is required.')
         return
       }
+      
+      // Final validation - path must be set
+      if (!finalPath) {
+        setConfigsError('Config path is required.')
+        return
+      }
+      
       try {
         setConfigUploadBusy(true)
-        const isReplacement = configFiles.some((f) => f.path === configUploadPath.trim())
-        const configs = await uploadProjectConfig(id, {
-          path: configUploadPath.trim(),
+        
+        const isReplacement = configFiles.some((f) => f.path === finalPath)
+        
+        // Determine payload based on type
+        const payload: {
+          path: string
+          file: File
+          type: 'library' | 'custom'
+          pluginId?: string
+          definitionId?: string
+          customId?: string
+          label?: string
+        } = {
+          path: finalPath,
           file: configUploadFile,
-          pluginId: configUploadPlugin.trim() ? configUploadPlugin.trim() : undefined,
-          definitionId: configUploadDefinition.trim() ? configUploadDefinition.trim() : undefined,
-        })
+          type: configUploadType === 'template' ? 'library' : 'custom',
+        }
+        
+        if (configUploadPlugin.trim()) {
+          payload.pluginId = configUploadPlugin.trim()
+        }
+        
+        if (configUploadType === 'template') {
+          // Get the definitionId - use the one we validated/found above
+          const options = pluginDefinitionOptions[configUploadPlugin] ?? []
+          let definitionId = actualDefinitionValue?.trim() || configUploadDefinition?.trim()
+          if (!definitionId && configUploadPath.trim()) {
+            const foundByPath = options.find((option) => option.path === configUploadPath.trim())
+            if (foundByPath) {
+              definitionId = foundByPath.definitionId
+            }
+          }
+          if (definitionId) {
+            payload.definitionId = definitionId
+          } else {
+            setConfigsError('Config template is required.')
+            return
+          }
+        } else {
+          payload.customId = `custom/${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+          payload.label = configUploadName.trim()
+        }
+        
+        const configs = await uploadProjectConfig(id, payload)
         setConfigFiles(configs)
         setConfigsError(null)
         toast({
@@ -1248,7 +1280,9 @@ useEffect(() => {
         setConfigUploadPath('')
         setConfigUploadFile(null)
         setConfigUploadPlugin('')
+        setConfigUploadType('template')
         setConfigUploadDefinition('')
+        setConfigUploadName('')
         setConfigUploadPathDirty(false)
         setConfigUploadModalOpened(false)
         if (event.currentTarget instanceof HTMLFormElement) {
@@ -1276,13 +1310,16 @@ useEffect(() => {
       }
     },
     [
+      configUploadType,
       configUploadDefinition,
+      configUploadName,
       configUploadFile,
       configUploadPath,
       configUploadPlugin,
       configFiles,
       id,
       pluginDefinitionCache,
+      pluginDefinitionOptions,
       toast,
     ],
   )
@@ -1337,13 +1374,16 @@ useEffect(() => {
       if (!id) return
       const currentMappings = project?.plugins?.find((p) => p.id === data.pluginId)?.configMappings ?? []
       const existingIndex = data.definitionId
-        ? currentMappings.findIndex((m) => m.definitionId === data.definitionId)
+        ? currentMappings.findIndex((m) => 
+            m.type === 'custom' && m.customId === data.definitionId
+          )
         : -1
+      const customId = data.definitionId ?? `custom/${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
       const newMapping: ProjectPluginConfigMapping = {
-        definitionId: data.definitionId ?? `custom/${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
-        label: data.label.trim() || undefined,
+        type: 'custom',
+        customId,
+        label: data.label.trim(),
         path: data.path.trim(),
-        requirement: data.requirement,
         notes: data.notes.trim() || undefined,
       }
       const updatedMappings =
@@ -1399,7 +1439,6 @@ useEffect(() => {
       pluginId,
       label: '',
       path: '',
-      requirement: 'optional',
       notes: '',
     })
   }, [])
@@ -2558,46 +2597,79 @@ useEffect(() => {
                   }),
               ]}
             />
-            <NativeSelect
-              label="Config mapping"
-              id="config-upload-definition"
-              value={configUploadDefinition}
-              onChange={(event) => {
-                const value = event.target.value
-                setConfigUploadDefinition(value)
+            <Radio.Group
+              label="Config Type"
+              value={configUploadType}
+              onChange={(value) => {
+                setConfigUploadType(value as 'template' | 'custom')
+                setConfigUploadDefinition('')
+                setConfigUploadName('')
+                setConfigUploadPath('')
                 setConfigUploadPathDirty(false)
-                const options = pluginDefinitionOptions[configUploadPlugin] ?? []
-                const selected = options.find((option) => option.definitionId === value)
-                if (selected) {
-                  setConfigUploadPath(selected.path)
-                } else if (!value) {
-                  setConfigUploadPath('')
-                }
               }}
-              disabled={!configUploadPlugin}
-              data={[
-                { value: '', label: 'None' },
-                ...(pluginDefinitionOptions[configUploadPlugin] ?? []).map((option) => ({
-                  value: option.definitionId,
-                  label: option.label,
-                })),
-              ]}
-            />
-            {selectedDefinition?.path && (
-              <Text size="sm" c="dimmed">
-                Suggested path: {selectedDefinition.path}
-              </Text>
+            >
+              <Radio value="template" label="Use Config Template" />
+              <Radio value="custom" label="Create Custom Config" />
+            </Radio.Group>
+
+            {configUploadType === 'template' && (
+              <>
+                <NativeSelect
+                  label="Config Template"
+                  id="config-upload-definition"
+                  value={configUploadDefinition}
+                  onChange={(event) => {
+                    const value = event.currentTarget.value
+                    setConfigUploadDefinition(value)
+                    const options = pluginDefinitionOptions[configUploadPlugin] ?? []
+                    const selected = options.find((option) => option.definitionId === value)
+                    if (selected) {
+                      setConfigUploadPath(selected.path)
+                      setConfigUploadPathDirty(false)
+                    }
+                  }}
+                  disabled={!configUploadPlugin}
+                  required
+                  data={[
+                    ...(pluginDefinitionOptions[configUploadPlugin] ?? []).map((option) => ({
+                      value: option.definitionId,
+                      label: option.label,
+                    })),
+                  ]}
+                />
+                {selectedDefinition?.path && (
+                  <TextInput
+                    label="Path"
+                    value={selectedDefinition.path}
+                    readOnly
+                    disabled
+                    styles={{ input: { backgroundColor: 'var(--mantine-color-gray-1)' } }}
+                  />
+                )}
+              </>
             )}
-            <TextInput
-              label="Relative path"
-              id="config-upload-path"
-              value={configUploadPath}
-              onChange={(event) => {
-                setConfigUploadPath(event.target.value)
-                setConfigUploadPathDirty(true)
-              }}
-              placeholder="plugins/WorldGuard/worlds/world/regions.yml"
-            />
+
+            {configUploadType === 'custom' && (
+              <>
+                <TextInput
+                  label="Config Name"
+                  value={configUploadName}
+                  onChange={(event) => setConfigUploadName(event.target.value)}
+                  placeholder="My Custom Config"
+                  required
+                />
+                <TextInput
+                  label="Relative Path"
+                  value={configUploadPath}
+                  onChange={(event) => {
+                    setConfigUploadPath(event.target.value)
+                    setConfigUploadPathDirty(true)
+                  }}
+                  placeholder="plugins/MyPlugin/config.yml"
+                  required
+                />
+              </>
+            )}
             <div>
               <label htmlFor="config-upload-file" style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem' }}>
                 Config file
@@ -2744,7 +2816,7 @@ useEffect(() => {
                     if (!plugin) return
                     const currentMappings = plugin.configMappings ?? []
                     const updatedMappings = currentMappings.filter(
-                      (m) => m.definitionId !== removeCustomPathConfirm.definitionId,
+                      (m) => !(m.type === 'custom' && m.customId === removeCustomPathConfirm.definitionId),
                     )
                     const response = await updateProjectPluginConfigs(id, removeCustomPathConfirm.pluginId, {
                       mappings: updatedMappings,

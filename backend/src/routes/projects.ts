@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import { Router } from "express";
-import { writeFile, stat } from "fs/promises";
+import { writeFile, stat, unlink } from "fs/promises";
+import { existsSync } from "fs";
 import { join } from "path";
 import multer from "multer";
 import { createHash } from "crypto";
@@ -23,7 +24,6 @@ import type {
   PluginProvider,
   PluginSourceReference,
   PluginConfigDefinition,
-  PluginConfigRequirement,
   ProjectPlugin,
   ProjectPluginConfigMapping,
 } from "../types/plugins";
@@ -50,6 +50,7 @@ import {
   deleteUploadedConfigFile,
   collectUploadedConfigMaterials,
   type ConfigFileSummary,
+  sanitizeRelativePath,
 } from "../services/configUploads";
 import { optionalAuth } from "../middleware/auth";
 
@@ -101,37 +102,32 @@ function sanitizeOptionalConfigPath(input: unknown): string | undefined {
   return sanitizeConfigPathStrict(trimmed);
 }
 
-const PLUGIN_CONFIG_REQUIREMENTS: PluginConfigRequirement[] = ["required", "optional", "generated"];
-
-function normalizeRequirement(
-  value: unknown,
-  fallback: PluginConfigRequirement = "optional",
-): PluginConfigRequirement {
-  if (typeof value !== "string" || value.trim().length === 0) {
-    return fallback;
-  }
-  const normalized = value.trim().toLowerCase() as PluginConfigRequirement;
-  if (!PLUGIN_CONFIG_REQUIREMENTS.includes(normalized)) {
-    throw new Error(
-      `Requirement must be one of ${PLUGIN_CONFIG_REQUIREMENTS.join(", ")}`,
-    );
-  }
-  return normalized;
-}
-
 interface PluginConfigDefinitionView {
   id: string;
-  source: "library" | "custom";
+  type: 'library' | 'custom';  // NEW
+  source: 'library' | 'custom';  // Keep for backward compat, same as type
   label?: string;
   description?: string;
   tags?: string[];
   defaultPath: string;
   resolvedPath: string;
-  requirement: PluginConfigRequirement;
   notes?: string;
   mapping?: ProjectPluginConfigMapping;
   uploaded?: ConfigFileSummary;
-  missing: boolean;
+}
+
+// Type guard to check if mapping is new format (discriminated union)
+function isNewFormatMapping(mapping: ProjectPluginConfigMapping): mapping is Extract<ProjectPluginConfigMapping, { type: 'library' }> | Extract<ProjectPluginConfigMapping, { type: 'custom' }> {
+  return 'type' in mapping && (mapping.type === 'library' || mapping.type === 'custom');
+}
+
+// Helper to get definitionId from old or new format
+function getDefinitionId(mapping: ProjectPluginConfigMapping): string {
+  if (isNewFormatMapping(mapping)) {
+    return mapping.type === 'library' ? mapping.definitionId : mapping.customId;
+  }
+  // Old format
+  return (mapping as any).definitionId;
 }
 
 function buildPluginConfigViews(
@@ -147,12 +143,13 @@ function buildPluginConfigViews(
   const mappings = plugin.configMappings ?? [];
   const mappingById = new Map<string, ProjectPluginConfigMapping>();
   for (const mapping of mappings) {
-    mappingById.set(mapping.definitionId, mapping);
+    const id = getDefinitionId(mapping);
+    mappingById.set(id, mapping);
   }
 
   const relevantDefinitionIds = new Set<string>([
     ...libraryDefinitions.map((definition) => definition.id),
-    ...mappings.map((mapping) => mapping.definitionId),
+    ...mappings.map((mapping) => getDefinitionId(mapping)),
   ]);
 
   const pluginSummaries = summaries.filter((summary) => {
@@ -200,53 +197,119 @@ function buildPluginConfigViews(
 
   for (const definition of libraryDefinitions) {
     const mapping = mappingById.get(definition.id);
-    const resolvedPath = mapping?.path ?? definition.path;
-    const resolvedRequirement = mapping
-      ? normalizeRequirement(mapping.requirement, definition.requirement ?? "optional")
-      : normalizeRequirement(definition.requirement, "optional");
+    // Library configs: ALWAYS use definition.path, never mapping.path
+    const resolvedPath = definition.path;  // No override allowed
     const uploaded = resolveUpload(definition.id, resolvedPath);
     if (uploaded) {
       matchedSummaries.add(uploaded);
     }
+    
+    // Handle migration: old format without type field
+    let normalizedMapping: ProjectPluginConfigMapping | undefined;
+    if (mapping) {
+      if (isNewFormatMapping(mapping) && mapping.type === 'library') {
+        normalizedMapping = {
+          type: 'library',
+          definitionId: definition.id,
+          notes: mapping.notes,
+        };
+      } else if (isNewFormatMapping(mapping) && mapping.type === 'custom') {
+        // This shouldn't happen for library definitions, but handle gracefully
+        continue;
+      } else {
+        // Old format: treat as library mapping
+        const oldMapping = mapping as any;
+        normalizedMapping = {
+          type: 'library',
+          definitionId: definition.id,
+          notes: oldMapping.notes,
+        };
+      }
+    }
+    
     views.push({
       id: definition.id,
-      source: "library",
+      type: 'library',
+      source: 'library',
       label: definition.label,
       description: definition.description,
       tags: definition.tags,
       defaultPath: definition.path,
-      resolvedPath,
-      requirement: resolvedRequirement,
-      notes: mapping?.notes,
-      mapping,
+      resolvedPath,  // Always same as defaultPath for library
+      notes: normalizedMapping?.notes,
+      mapping: normalizedMapping,
       uploaded,
-      missing: resolvedRequirement === "required" && !uploaded,
     });
   }
 
   for (const mapping of mappings) {
-    if (definitionMap.has(mapping.definitionId)) {
+    const mappingDefId = getDefinitionId(mapping);
+    
+    // Skip if this is already handled as a library config
+    if (definitionMap.has(mappingDefId)) {
       continue;
     }
-    const resolvedPath = mapping.path ?? "";
-    const resolvedRequirement = normalizeRequirement(mapping.requirement, "optional");
-    const uploaded = resolveUpload(mapping.definitionId, resolvedPath);
+    
+    // Determine if this is a custom config
+    // Migration: old format without type field - treat as custom if not in library
+    const isCustom = isNewFormatMapping(mapping) && mapping.type === 'custom' || 
+                     (!isNewFormatMapping(mapping) && !definitionMap.has(mappingDefId));
+    
+    if (!isCustom) {
+      continue;  // Skip non-custom mappings that aren't in library
+    }
+    
+    // For custom configs, path is required
+    // Old format: use definitionId as customId if it starts with 'custom/'
+    // New format: use customId field
+    let customId: string;
+    let resolvedPath: string;
+    let label: string;
+    let notes: string | undefined;
+    
+    if (isNewFormatMapping(mapping) && mapping.type === 'custom') {
+      customId = mapping.customId;
+      resolvedPath = mapping.path;
+      label = mapping.label;
+      notes = mapping.notes;
+    } else {
+      // Old format
+      const oldMapping = mapping as any;
+      customId = oldMapping.definitionId.startsWith('custom/')
+        ? oldMapping.definitionId
+        : `custom/${oldMapping.definitionId}`;
+      resolvedPath = oldMapping.path ?? '';
+      label = oldMapping.label ?? customId;
+      notes = oldMapping.notes;
+    }
+    
+    if (!resolvedPath) {
+      continue;  // Invalid custom config without path
+    }
+    
+    const uploaded = resolveUpload(customId, resolvedPath);
     if (uploaded) {
       matchedSummaries.add(uploaded);
     }
+    
     views.push({
-      id: mapping.definitionId,
-      source: "custom",
-      label: mapping.label ?? mapping.definitionId,
+      id: customId,
+      type: 'custom',
+      source: 'custom',
+      label,
       description: undefined,
       tags: undefined,
       defaultPath: resolvedPath,
       resolvedPath,
-      requirement: resolvedRequirement,
-      notes: mapping.notes,
-      mapping,
+      notes,
+      mapping: {
+        type: 'custom',
+        customId,
+        label,
+        path: resolvedPath,
+        notes,
+      },
       uploaded,
-      missing: resolvedRequirement === "required" && !uploaded,
     });
   }
 
@@ -263,8 +326,45 @@ function findPluginMappingForPath(
 ): { pluginId: string; definitionId?: string } | undefined {
   for (const plugin of project.plugins ?? []) {
     for (const mapping of plugin.configMappings ?? []) {
-      if (mapping.path === path) {
-        return { pluginId: plugin.id, definitionId: mapping.definitionId };
+      // Handle new format (discriminated union)
+      if ('type' in mapping) {
+        if (mapping.type === 'custom' && mapping.path === path) {
+          return { pluginId: plugin.id, definitionId: mapping.customId };
+        } else if (mapping.type === 'library') {
+          // Library configs use definition path, check against stored plugin definition
+          // This is handled elsewhere, skip here
+          continue;
+        }
+      } else {
+        // Old format: check path
+        const oldMapping = mapping as any;
+        if (oldMapping.path === path) {
+          return { pluginId: plugin.id, definitionId: oldMapping.definitionId };
+        }
+      }
+    }
+  }
+  return undefined;
+}
+
+// Helper function to find library definition for a given path
+async function findLibraryDefinitionForPath(
+  project: StoredProject,
+  path: string,
+): Promise<{ pluginId: string; definitionId: string; label?: string } | undefined> {
+  for (const plugin of project.plugins ?? []) {
+    if (!plugin.version) continue;
+    
+    const stored = await findStoredPlugin(plugin.id, plugin.version);
+    if (!stored?.configDefinitions) continue;
+    
+    for (const definition of stored.configDefinitions) {
+      if (definition.path === path) {
+        return {
+          pluginId: plugin.id,
+          definitionId: definition.id,
+          label: definition.label,
+        };
       }
     }
   }
@@ -280,27 +380,35 @@ async function reconcilePluginConfigMetadata(
   const mappings = plugin.configMappings ?? [];
   const mappingById = new Map<string, ProjectPluginConfigMapping>();
   for (const mapping of mappings) {
-    mappingById.set(mapping.definitionId, mapping);
+    const id = getDefinitionId(mapping);
+    mappingById.set(id, mapping);
   }
 
   const resolvedPathMap = new Map<string, { pluginId: string; definitionId: string }>();
   for (const definition of libraryDefinitions) {
     const mapping = mappingById.get(definition.id);
-    const resolvedPath = mapping?.path ?? definition.path;
+    // Library configs always use definition.path (no override)
+    const resolvedPath = definition.path;
     if (resolvedPath) {
       resolvedPathMap.set(resolvedPath, { pluginId: plugin.id, definitionId: definition.id });
     }
   }
   for (const mapping of mappings) {
-    if (!mapping.path) {
-      continue;
+    // Only custom mappings have paths
+    if ('type' in mapping && mapping.type === 'custom') {
+      resolvedPathMap.set(mapping.path, { pluginId: plugin.id, definitionId: mapping.customId });
+    } else if (!('type' in mapping)) {
+      // Old format
+      const oldMapping = mapping as any;
+      if (oldMapping.path) {
+        resolvedPathMap.set(oldMapping.path, { pluginId: plugin.id, definitionId: oldMapping.definitionId });
+      }
     }
-    resolvedPathMap.set(mapping.path, { pluginId: plugin.id, definitionId: mapping.definitionId });
   }
 
   const knownDefinitionIds = new Set<string>([
     ...libraryDefinitions.map((definition) => definition.id),
-    ...mappings.map((mapping) => mapping.definitionId),
+    ...mappings.map((mapping) => getDefinitionId(mapping)),
   ]);
 
   let changed = false;
@@ -947,9 +1055,8 @@ router.post("/:id/plugins", async (req: Request, res: Response) => {
     const configDefinitions = stored.configDefinitions ?? [];
     const defaultMappings: ProjectPluginConfigMapping[] =
       configDefinitions.map((definition) => ({
+        type: 'library',
         definitionId: definition.id,
-        path: definition.path,
-        requirement: definition.requirement,
       })) ?? [];
 
     const updatedProject =
@@ -1043,9 +1150,8 @@ router.post(
       const configDefinitions = stored.configDefinitions ?? [];
       const defaultMappings: ProjectPluginConfigMapping[] =
         configDefinitions.map((definition) => ({
+          type: 'library',
           definitionId: definition.id,
-          path: definition.path,
-          requirement: definition.requirement,
         })) ?? [];
 
       const updatedProject =
@@ -1407,41 +1513,12 @@ router.put("/:id/plugins/:pluginId/configs", async (req: Request, res: Response)
         res.status(400).json({ error: `mappings[${index}] must be an object` });
         return;
       }
-      const definitionIdValue =
-        typeof (raw as { definitionId?: unknown }).definitionId === "string"
-          ? (raw as { definitionId: string }).definitionId.trim()
-          : "";
-      if (!definitionIdValue) {
-        res.status(400).json({ error: `mappings[${index}].definitionId is required` });
+      
+      // Parse type field
+      const typeValue = (raw as { type?: unknown }).type;
+      if (typeValue !== 'library' && typeValue !== 'custom') {
+        res.status(400).json({ error: `mappings[${index}].type must be 'library' or 'custom'` });
         return;
-      }
-
-      let pathValue: string | undefined;
-      try {
-        pathValue = sanitizeOptionalConfigPath((raw as { path?: unknown }).path);
-      } catch (error) {
-        res.status(400).json({
-          error:
-            error instanceof Error
-              ? `mappings[${index}].path: ${error.message}`
-              : `Invalid path for mappings[${index}]`,
-        });
-        return;
-      }
-
-      let requirementValue: PluginConfigRequirement | undefined;
-      if ("requirement" in (raw as Record<string, unknown>)) {
-        try {
-          requirementValue = normalizeRequirement((raw as { requirement?: unknown }).requirement, "optional");
-        } catch (error) {
-          res.status(400).json({
-            error:
-              error instanceof Error
-                ? `mappings[${index}].requirement: ${error.message}`
-                : `Invalid requirement for mappings[${index}]`,
-          });
-          return;
-        }
       }
 
       const notesValue =
@@ -1449,22 +1526,83 @@ router.put("/:id/plugins/:pluginId/configs", async (req: Request, res: Response)
           ? (raw as { notes: string }).notes.trim() || undefined
           : undefined;
 
-      const labelValue =
-        typeof (raw as { label?: unknown }).label === "string"
-          ? (raw as { label: string }).label.trim() || undefined
-          : undefined;
+      let normalized: ProjectPluginConfigMapping;
+      let orderKey: string;
 
-      const normalized: ProjectPluginConfigMapping = {
-        definitionId: definitionIdValue,
-        label: labelValue,
-        path: pathValue,
-        requirement: requirementValue,
-        notes: notesValue,
-      };
-      if (!order.includes(definitionIdValue)) {
-        order.push(definitionIdValue);
+      if (typeValue === 'library') {
+        // Library mapping validation
+        const definitionIdValue =
+          typeof (raw as { definitionId?: unknown }).definitionId === "string"
+            ? (raw as { definitionId: string }).definitionId.trim()
+            : "";
+        if (!definitionIdValue) {
+          res.status(400).json({ error: `mappings[${index}].definitionId is required for library type` });
+          return;
+        }
+        // Validate definitionId references library definition
+        if (!libraryDefinitions.some(d => d.id === definitionIdValue)) {
+          res.status(400).json({ error: `mappings[${index}].definitionId must reference a library definition` });
+          return;
+        }
+        // Reject path if provided (library configs can't override path)
+        if ((raw as { path?: unknown }).path !== undefined) {
+          res.status(400).json({ error: `mappings[${index}].path cannot be provided for library type` });
+          return;
+        }
+        normalized = {
+          type: 'library',
+          definitionId: definitionIdValue,
+          notes: notesValue,
+        };
+        orderKey = definitionIdValue;
+      } else {
+        // Custom mapping validation
+        const pathValue = (raw as { path?: unknown }).path;
+        if (typeof pathValue !== "string" || pathValue.trim().length === 0) {
+          res.status(400).json({ error: `mappings[${index}].path is required for custom type` });
+          return;
+        }
+        let sanitizedPath: string;
+        try {
+          sanitizedPath = sanitizeConfigPathStrict(pathValue.trim());
+        } catch (error) {
+          res.status(400).json({
+            error:
+              error instanceof Error
+                ? `mappings[${index}].path: ${error.message}`
+                : `Invalid path for mappings[${index}]`,
+          });
+          return;
+        }
+        
+        const labelValue =
+          typeof (raw as { label?: unknown }).label === "string"
+            ? (raw as { label: string }).label.trim()
+            : undefined;
+        if (!labelValue) {
+          res.status(400).json({ error: `mappings[${index}].label is required for custom type` });
+          return;
+        }
+        
+        // Generate customId if not provided
+        const customIdValue = typeof (raw as { customId?: unknown }).customId === "string"
+          ? (raw as { customId: string }).customId.trim()
+          : `custom/${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+        
+        normalized = {
+          type: 'custom',
+          customId: customIdValue,
+          label: labelValue,
+          path: sanitizedPath,
+          notes: notesValue,
+        };
+        orderKey = customIdValue;
       }
-      mappingById.set(definitionIdValue, normalized);
+      
+      if (!order.includes(orderKey)) {
+        order.push(orderKey);
+      }
+      mappingById.set(orderKey, normalized);
     }
 
     const normalizedMappings: ProjectPluginConfigMapping[] = order
@@ -1609,6 +1747,45 @@ router.post(
       const pluginIdValue = pluginIdRaw.length > 0 ? pluginIdRaw : undefined;
       const definitionIdValue = definitionIdRaw.length > 0 ? definitionIdRaw : undefined;
 
+      const typeValue = typeof req.body?.type === "string" ? req.body.type : undefined;
+      const customIdValue = typeof req.body?.customId === "string" ? req.body.customId.trim() : undefined;
+      const labelValue = typeof req.body?.label === "string" ? req.body.label.trim() : undefined;
+      
+      // Validate based on type
+      if (typeValue === 'custom') {
+        // Check if path conflicts with library definition
+        const libraryConflict = await findLibraryDefinitionForPath(project, relativePath);
+        if (libraryConflict) {
+          res.status(400).json({
+            error: `Path "${relativePath}" matches a library config template for plugin "${libraryConflict.pluginId}" (${libraryConflict.label || libraryConflict.definitionId}). Please use "Use Config Template" mode instead.`,
+          });
+          return;
+        }
+        
+        if (!labelValue) {
+          res.status(400).json({ error: "label is required for custom config" });
+          return;
+        }
+      } else if (typeValue === 'library') {
+        if (!definitionIdValue) {
+          res.status(400).json({ error: "definitionId is required for library config" });
+          return;
+        }
+        
+        // Validate path matches library definition
+        const plugin = project.plugins?.find((p) => p.id === pluginIdValue);
+        if (plugin?.version) {
+          const stored = await findStoredPlugin(plugin.id, plugin.version);
+          const definition = stored?.configDefinitions?.find((d) => d.id === definitionIdValue);
+          if (definition && definition.path !== relativePath) {
+            res.status(400).json({
+              error: `Path must match library template path: "${definition.path}"`,
+            });
+            return;
+          }
+        }
+      }
+
       const saved = await saveUploadedConfigFile(project, relativePath, file.buffer);
       const derivedMapping =
         pluginIdValue || definitionIdValue
@@ -1622,6 +1799,93 @@ router.post(
         pluginIdValue ?? derivedMapping?.pluginId,
         definitionIdValue ?? derivedMapping?.definitionId,
       );
+      
+      // Automatically create/update configMappings if plugin and type are provided
+      if (pluginIdValue && typeValue) {
+        const plugin = project.plugins?.find((p) => p.id === pluginIdValue);
+        if (plugin) {
+          const existingMappings = plugin.configMappings ?? [];
+          let needsUpdate = false;
+          let updatedMappings = [...existingMappings];
+          
+          if (typeValue === 'library' && definitionIdValue) {
+            // Check if library mapping already exists
+            const hasMapping = existingMappings.some((m) => {
+              if ('type' in m && m.type === 'library') {
+                return m.definitionId === definitionIdValue;
+              }
+              // Old format
+              return (m as any).definitionId === definitionIdValue;
+            });
+            
+            if (!hasMapping) {
+              // Create new library mapping
+              const newMapping: ProjectPluginConfigMapping = {
+                type: 'library',
+                definitionId: definitionIdValue,
+              };
+              updatedMappings.push(newMapping);
+              needsUpdate = true;
+            }
+          } else if (typeValue === 'custom' && customIdValue && labelValue) {
+            // Check if custom mapping already exists
+            const hasMapping = existingMappings.some((m) => {
+              if ('type' in m && m.type === 'custom') {
+                return m.customId === customIdValue;
+              }
+              // Old format - check by path or definitionId
+              const oldMapping = m as any;
+              return oldMapping.definitionId === customIdValue || oldMapping.path === relativePath;
+            });
+            
+            if (!hasMapping) {
+              // Create new custom mapping
+              const newMapping: ProjectPluginConfigMapping = {
+                type: 'custom',
+                customId: customIdValue,
+                label: labelValue,
+                path: relativePath,
+              };
+              updatedMappings.push(newMapping);
+              needsUpdate = true;
+            } else {
+              // Update existing custom mapping if path changed
+              updatedMappings = existingMappings.map((m) => {
+                if ('type' in m && m.type === 'custom' && m.customId === customIdValue) {
+                  if (m.path !== relativePath || m.label !== labelValue) {
+                    needsUpdate = true;
+                    return {
+                      type: 'custom',
+                      customId: customIdValue,
+                      label: labelValue,
+                      path: relativePath,
+                      notes: m.notes,
+                    };
+                  }
+                }
+                return m;
+              });
+            }
+          }
+          
+          if (needsUpdate) {
+            const updatedProject = await upsertProjectPlugin(id, {
+              ...plugin,
+              configMappings: updatedMappings,
+            });
+            if (updatedProject) {
+              const updatedPlugin = updatedProject.plugins?.find((p) => p.id === pluginIdValue);
+              if (updatedPlugin && plugin.version) {
+                const stored = await findStoredPlugin(plugin.id, plugin.version);
+                const libraryDefinitions = stored?.configDefinitions ?? [];
+                // Reconcile metadata to sync configs array with new mappings
+                await reconcilePluginConfigMetadata(id, updatedProject, updatedPlugin, libraryDefinitions);
+              }
+            }
+          }
+        }
+      }
+      
       const refreshed = (await findProject(id)) ?? project;
       const configs = await listUploadedConfigFiles(refreshed);
       res.status(201).json({ configs });
@@ -1691,17 +1955,59 @@ router.delete("/:id/configs/file", async (req: Request, res: Response) => {
       res.status(400).json({ error: "path query parameter is required" });
       return;
     }
+    
+    const sanitized = sanitizeRelativePath(path);
+    let deleted = false;
+    
+    // Try to delete from config/uploads first
     try {
       await deleteUploadedConfigFile(project, path);
+      deleted = true;
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
-      if (code === "ENOENT") {
-        res.status(404).json({ error: "Config file not found" });
-        return;
+      if (code !== "ENOENT") {
+        throw error;
       }
-      throw error;
+      // File not in uploads directory, try project directory
     }
+    
+    // If not found in uploads, try the actual project directory
+    if (!deleted) {
+      const projectRoot = join(getProjectsRoot(), project.id);
+      const projectPath = join(projectRoot, sanitized);
+      
+      let filePath: string | undefined;
+      if (existsSync(projectPath)) {
+        filePath = projectPath;
+      } else {
+        // Also check dev directory paths
+        const devDataPaths = getDevDataPaths();
+        for (const devDataPath of devDataPaths) {
+          const devPath = join(devDataPath, "projects", project.id, sanitized);
+          if (existsSync(devPath)) {
+            filePath = devPath;
+            break;
+          }
+        }
+      }
+      
+      if (filePath) {
+        try {
+          await unlink(filePath);
+          deleted = true;
+        } catch (error) {
+          const code = (error as NodeJS.ErrnoException).code;
+          if (code !== "ENOENT") {
+            throw error;
+          }
+        }
+      }
+    }
+    
+    // Always remove metadata entry, even if file wasn't found
+    // (file might have been manually deleted or never existed)
     await removeProjectConfigMetadata(id, project, path);
+    
     const refreshed = (await findProject(id)) ?? project;
     const configs = await listUploadedConfigFiles(refreshed);
     res.status(200).json({ configs });

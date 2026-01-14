@@ -72,8 +72,6 @@ function slugifyConfigId(input: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-const CONFIG_REQUIREMENTS: PluginConfigRequirement[] = ["required", "optional", "generated"];
-
 function parseConfigDefinitions(input: unknown): PluginConfigDefinition[] | undefined {
   if (input === undefined || input === null) {
     return undefined;
@@ -117,20 +115,8 @@ function parseConfigDefinitions(input: unknown): PluginConfigDefinition[] | unde
     seenIds.add(id);
     seenPaths.add(path);
 
-    let requirement: PluginConfigRequirement | undefined;
-    const incomingRequirement = (entry as { requirement?: unknown }).requirement;
-    if (incomingRequirement !== undefined) {
-      if (typeof incomingRequirement !== "string") {
-        throw new Error(`configDefinitions[${index}].requirement must be a string`);
-      }
-      const normalizedRequirement = incomingRequirement.toLowerCase() as PluginConfigRequirement;
-      if (!CONFIG_REQUIREMENTS.includes(normalizedRequirement)) {
-        throw new Error(
-          `configDefinitions[${index}].requirement must be one of ${CONFIG_REQUIREMENTS.join(", ")}`,
-        );
-      }
-      requirement = normalizedRequirement;
-    }
+    // Requirement field is ignored (for backward compatibility during migration)
+    // Simply don't parse requirement field
 
     let tags: string[] | undefined;
     const incomingTags = (entry as { tags?: unknown }).tags;
@@ -150,7 +136,6 @@ function parseConfigDefinitions(input: unknown): PluginConfigDefinition[] | unde
       id,
       path,
       label: candidateLabel?.trim() ? candidateLabel.trim() : undefined,
-      requirement,
       description: description?.trim() ? description.trim() : undefined,
       tags,
     };

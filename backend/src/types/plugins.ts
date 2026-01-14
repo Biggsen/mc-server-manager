@@ -16,24 +16,27 @@ export interface PluginSourceReference {
   cachePath?: string;
 }
 
-export type PluginConfigRequirement = "required" | "optional" | "generated";
-
 export interface PluginConfigDefinition {
   id: string;
   path: string;
   label?: string;
-  requirement?: PluginConfigRequirement;
   description?: string;
   tags?: string[];
 }
 
-export interface ProjectPluginConfigMapping {
-  definitionId: string;
-  label?: string;
-  path?: string;
-  requirement?: PluginConfigRequirement;
-  notes?: string;
-}
+export type ProjectPluginConfigMapping =
+  | {
+      type: 'library';
+      definitionId: string;  // References PluginConfigDefinition.id
+      notes?: string;
+    }
+  | {
+      type: 'custom';
+      customId: string;  // e.g., "custom/crazycrates-regioncrate"
+      label: string;  // Required
+      path: string;  // Required
+      notes?: string;
+    };
 
 export interface ProjectPlugin {
   id: string;
