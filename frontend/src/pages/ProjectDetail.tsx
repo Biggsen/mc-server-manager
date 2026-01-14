@@ -47,10 +47,6 @@ import { CustomPathModal, type CustomPathModalState } from '../components/Custom
 
 import { getApiBase } from '../lib/api'
 const API_BASE = getApiBase()
-const sourceBadgeLabel: Record<'download' | 'upload', string> = {
-  download: 'Download URL',
-  upload: 'Uploaded jar',
-}
 
 const runStatusLabel: Record<
   RunJob['status'],
@@ -62,18 +58,6 @@ const runStatusLabel: Record<
   stopped: 'Stopped',
   succeeded: 'Completed',
   failed: 'Failed',
-}
-
-type PluginWithSource =
-  | NonNullable<ProjectSummary['plugins']>[number]
-  | { source?: { uploadPath?: string | null } | null }
-
-function getStoredPluginSourceKind(plugin: PluginWithSource): 'download' | 'upload' {
-  const uploadPath =
-    typeof plugin === 'object' && plugin !== null && typeof plugin.source === 'object'
-      ? plugin.source?.uploadPath ?? null
-      : null
-  return uploadPath ? 'upload' : 'download'
 }
 
 interface ManifestPreview {
@@ -194,7 +178,6 @@ const PluginCard = memo(function PluginCard({
       ),
     [plugin.minecraftVersionMin, plugin.source?.minecraftVersionMin, plugin.minecraftVersionMax, plugin.source?.minecraftVersionMax],
   )
-  const sourceKind = useMemo(() => getStoredPluginSourceKind(plugin), [plugin])
 
   return (
     <Card key={`${plugin.id}:${plugin.version}`}>
@@ -204,7 +187,6 @@ const PluginCard = memo(function PluginCard({
             <Stack gap={4}>
               <Group gap="xs" wrap="wrap">
                 <Text fw={600}>{plugin.id}</Text>
-                <Badge variant="outline">{sourceBadgeLabel[sourceKind]}</Badge>
                 {plugin.provider && plugin.provider !== 'custom' && (
                   <Badge variant="accent">{plugin.provider}</Badge>
                 )}
@@ -214,11 +196,6 @@ const PluginCard = memo(function PluginCard({
               {plugin.source?.projectUrl && (
                 <Anchor href={plugin.source.projectUrl} target="_blank" rel="noreferrer" size="sm">
                   View project
-                </Anchor>
-              )}
-              {plugin.source?.downloadUrl && (
-                <Anchor href={plugin.source.downloadUrl} target="_blank" rel="noreferrer" size="sm">
-                  Download URL
                 </Anchor>
               )}
               {plugin.source?.uploadPath && (
