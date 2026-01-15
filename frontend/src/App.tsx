@@ -40,13 +40,12 @@ import { ActiveActionIndicator, Button, ToastProvider, ToastViewport } from './c
 import { AppShell, MainCanvas } from './components/layout'
 import { AsyncActionsProvider } from './lib/asyncActions'
 
-const ENVIRONMENT_LABEL = import.meta.env.VITE_ENV_LABEL ?? 'Local'
-
 type NavItem = {
   to: string
   label: string
   icon: ReactNode
   exact?: boolean
+  devOnly?: boolean
 }
 
 type NavSection = {
@@ -88,11 +87,13 @@ const NAV_SECTIONS: NavSection[] = [
         to: '/dev/tools',
         label: 'Dev Tools',
         icon: <Toolbox size={18} weight="fill" aria-hidden="true" />,
+        devOnly: true,
       },
       {
         to: '/styleguide',
         label: 'Style Guide',
         icon: <PaintBrush size={18} weight="fill" aria-hidden="true" />,
+        devOnly: true,
       },
     ],
   },
@@ -103,6 +104,30 @@ function App() {
   const [authStatus, setAuthStatus] = useState<AuthStatus | null>(null)
   const [authError, setAuthError] = useState<string | null>(null)
   const [signingOut, setSigningOut] = useState(false)
+  const [isDev, setIsDev] = useState<boolean | null>(null)
+
+  // Check app mode (dev vs production) on mount
+  useEffect(() => {
+    const checkAppMode = async () => {
+      const isElectron = window.electronAPI?.isElectron || window.location.protocol === 'file:';
+      
+      if (isElectron && window.electronAPI?.getAppMode) {
+        try {
+          const mode = await window.electronAPI.getAppMode();
+          setIsDev(mode.isDev);
+        } catch (error) {
+          logger.error('app-mode-check-failed', {
+            reason: 'Failed to check app mode',
+          }, error instanceof Error ? error.message : String(error));
+          setIsDev(false);
+        }
+      } else {
+        setIsDev(import.meta.env.DEV);
+      }
+    };
+    
+    checkAppMode();
+  }, []);
 
   // Check auth status on mount and route changes
   useEffect(() => {
@@ -270,6 +295,23 @@ function App() {
     return location.pathname.startsWith(item.to)
   }
 
+  const environmentLabel = useMemo(() => {
+    if (isDev === null) {
+      return import.meta.env.VITE_ENV_LABEL ?? 'Local'
+    }
+    return isDev ? 'Development' : 'Production'
+  }, [isDev])
+
+  const filteredNavSections = useMemo(() => {
+    if (isDev === null) {
+      return NAV_SECTIONS
+    }
+    return NAV_SECTIONS.map((section) => ({
+      ...section,
+      items: section.items.filter((item) => !item.devOnly || isDev),
+    }))
+  }, [isDev])
+
   const sidebar = (
     <Stack gap="xl" miw={0}>
       <Stack gap={2}>
@@ -279,7 +321,7 @@ function App() {
         </Text>
       </Stack>
 
-      {NAV_SECTIONS.map((section) => (
+      {filteredNavSections.map((section) => (
         <Box key={section.label}>
           <Text size="xs" c="dimmed" tt="uppercase" fw={600} mb="xs">
             {section.label}
@@ -303,8 +345,8 @@ function App() {
       <Divider />
 
       <Box>
-        <Badge color="green" variant="light">
-          {ENVIRONMENT_LABEL}
+        <Badge color={isDev ? "yellow" : "green"} variant="light">
+          {environmentLabel}
         </Badge>
         <Text size="xs" c="dimmed" mt={4}>
           Environment
@@ -319,7 +361,7 @@ function App() {
         <Package size={28} weight="duotone" />
         <Stack gap={2}>
           <Text size="xs" c="dimmed">
-            {ENVIRONMENT_LABEL} mode
+            {environmentLabel} mode
           </Text>
           <Title order={2}>MC Server Manager</Title>
         </Stack>
@@ -352,7 +394,7 @@ function App() {
   return (
     <AsyncActionsProvider>
       <ToastProvider>
-        <AppShell sidebar={sidebar} topbar={topbar}>
+        <AppShell sidebar={sidebar} topbar={topbar} isDev={isDev}>
           <MainCanvas data-route={location.pathname}>
               {authError && <p className="error-text">{authError}</p>}
               <Routes>
@@ -364,9 +406,9 @@ function App() {
                 <Route path="/projects/:id/profile" element={<GenerateProfile />} />
                 <Route path="/plugins" element={<PluginLibrary />} />
                 <Route path="/plugins/add" element={<AddPlugin />} />
-                <Route path="/dev/tools" element={<TestTools />} />
+                {isDev && <Route path="/dev/tools" element={<TestTools />} />}
                 <Route path="/deployments" element={<Deployments />} />
-                <Route path="/styleguide" element={<Styleguide />} />
+                {isDev && <Route path="/styleguide" element={<Styleguide />} />}
                 <Route path="*" element={<NotFound />} />
               </Routes>
           </MainCanvas>

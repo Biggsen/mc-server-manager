@@ -3,6 +3,7 @@ declare global {
   interface Window {
     electronAPI?: {
       isElectron?: boolean;
+      getAppMode?: () => Promise<{ isDev: boolean }>;
       startGitHubAuth?: (returnTo?: string) => Promise<void>;
       onAuthComplete?: (callback: (status?: { login: string }) => void) => void;
       onAuthError?: (callback: (error: { error: string }) => void) => void;

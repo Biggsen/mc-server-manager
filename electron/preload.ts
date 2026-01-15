@@ -4,6 +4,8 @@ import { contextBridge, ipcRenderer } from 'electron';
 // the ipcRenderer without exposing the entire object
 contextBridge.exposeInMainWorld('electronAPI', {
   isElectron: true,
+  // Get app mode (dev vs production)
+  getAppMode: () => ipcRenderer.invoke('get-app-mode'),
   // Required: OAuth initiation via IPC (window.location.origin doesn't work in Electron)
   startGitHubAuth: (returnTo?: string) => ipcRenderer.invoke('github-auth-start', returnTo),
   // Notify renderer that auth completed

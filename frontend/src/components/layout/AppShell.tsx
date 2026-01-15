@@ -9,6 +9,7 @@ export interface AppShellProps {
   mainClassName?: string
   sidebarClassName?: string
   topbarClassName?: string
+  isDev?: boolean | null
 }
 
 export function AppShell({
@@ -19,7 +20,14 @@ export function AppShell({
   mainClassName,
   sidebarClassName,
   topbarClassName,
+  isDev,
 }: AppShellProps) {
+  const borderColor = isDev === null 
+    ? 'var(--mantine-color-gray-6)' 
+    : isDev 
+    ? 'var(--mantine-color-yellow-6)' 
+    : 'var(--mantine-color-green-6)'
+
   return (
     <MantineAppShell
       className={className}
@@ -36,6 +44,9 @@ export function AppShell({
           width: '200px',
           minWidth: '200px',
           maxWidth: '200px',
+        },
+        header: {
+          borderLeft: `4px solid ${borderColor}`,
         },
       }}
     >

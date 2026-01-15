@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell, ipcMain, net } from 'electron';
+import { app, BrowserWindow, shell, ipcMain, net, dialog } from 'electron';
 import { join } from 'path';
 import { logger } from './src/utils/logger';
 
@@ -86,12 +86,51 @@ async function startBackendServer(): Promise<void> {
   } catch (error) {
     console.error('[Backend] Failed to start backend server:', error);
     console.error('[Backend] Error details:', error instanceof Error ? error.stack : error);
-    // Don't quit immediately - show error to user
-    if (mainWindow) {
-      mainWindow.webContents.openDevTools();
+    
+    // Check if it's a port conflict error
+    const isPortConflict = error instanceof Error && (
+      (error as NodeJS.ErrnoException).code === 'EADDRINUSE' ||
+      error.message.includes('port') ||
+      error.message.includes('address already in use') ||
+      error.message.includes('EADDRINUSE')
+    );
+    
+    if (isPortConflict) {
+      logger.error('backend-port-conflict', {
+        port: 4000,
+      }, 'main', 'Port 4000 is already in use');
+      
+      // Show user-friendly error dialog
+      await dialog.showMessageBox({
+        type: 'error',
+        title: 'Port Already In Use',
+        message: 'Port 4000 is already in use',
+        detail: 'The development backend server is already running on port 4000.\n\nPlease stop the development backend server and try again.\n\nYou can stop it by:\n- Closing the terminal where "npm run dev:be" is running\n- Or pressing Ctrl+C in that terminal',
+        buttons: ['OK'],
+      });
+      
+      // Quit the app since we can't proceed
+      app.quit();
+      return;
     }
-    // Re-throw to prevent the app from continuing if backend fails
-    throw error;
+    
+    // For other errors, show a generic error dialog
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error('backend-start-failed', {
+      error: errorMessage,
+    }, 'main', `Failed to start backend: ${errorMessage}`);
+    
+    await dialog.showMessageBox({
+      type: 'error',
+      title: 'Failed to Start Backend',
+      message: 'Failed to start the backend server',
+      detail: errorMessage,
+      buttons: ['OK'],
+    });
+    
+    // Quit the app since we can't proceed
+    app.quit();
+    return;
   }
 }
 
@@ -157,6 +196,11 @@ async function handleAuthCallback(url: string): Promise<void> {
     }
   }
 }
+
+// IPC handler to get app mode (dev vs production)
+ipcMain.handle('get-app-mode', () => {
+  return { isDev };
+});
 
 // IPC handler for OAuth initiation - opens system browser
 ipcMain.handle('github-auth-start', async (_event, returnTo?: string) => {
@@ -481,6 +525,12 @@ app.whenReady().then(async () => {
     // Start backend server first
     await startBackendServer();
     
+    // If backend failed to start, startBackendServer will have called app.quit()
+    // and returned early, so we won't reach here
+    if (!backendStarted) {
+      return;
+    }
+    
     // Give backend a moment to be ready to accept connections
     await new Promise(resolve => setTimeout(resolve, 500));
     
@@ -491,10 +541,22 @@ app.whenReady().then(async () => {
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
     logger.error('app-initialization-failed', {}, undefined, errorMsg);
-    // Create window anyway to show error to user
-    createWindow();
-    if (mainWindow) {
-      mainWindow.webContents.openDevTools();
+    // Only create window if backend actually started (shouldn't happen, but safety check)
+    if (backendStarted) {
+      createWindow();
+      if (mainWindow) {
+        mainWindow.webContents.openDevTools();
+      }
+    } else {
+      // Backend didn't start, show error and quit
+      await dialog.showMessageBox({
+        type: 'error',
+        title: 'Initialization Failed',
+        message: 'Failed to initialize the application',
+        detail: errorMsg,
+        buttons: ['OK'],
+      });
+      app.quit();
     }
   }
 
