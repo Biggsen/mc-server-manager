@@ -2,7 +2,7 @@ import { existsSync, readdirSync } from "fs";
 import { mkdir, readFile, writeFile } from "fs/promises";
 import { dirname, join } from "path";
 import Handlebars from "handlebars";
-import { parse } from "yaml";
+import { parse, stringify } from "yaml";
 import type { StoredProject } from "../types/storage";
 import { getProjectsRoot, getTemplatesRoot } from "../config";
 
@@ -16,6 +16,7 @@ interface ProfileFileEntry {
 }
 
 interface ProfileDocument {
+  plugins?: Array<{ id: string; version?: string }>;
   configs?: {
     files?: ProfileFileEntry[];
   };
@@ -191,6 +192,50 @@ export async function writeProjectFile(
   contents: string,
 ): Promise<string> {
   return writeProjectFileBuffer(project, relativePath, Buffer.from(contents, "utf-8"));
+}
+
+export async function removePluginFromYamlFiles(
+  project: StoredProject,
+  pluginId: string,
+): Promise<void> {
+  const profilePath = getProfilePath(project);
+  const profileContent = await readProjectFile(project, profilePath);
+  
+  if (profileContent) {
+    try {
+      const doc = parse(profileContent) as ProfileDocument;
+      if (doc.plugins) {
+        const originalLength = doc.plugins.length;
+        doc.plugins = doc.plugins.filter((p) => p.id !== pluginId);
+        if (doc.plugins.length !== originalLength) {
+          const updatedYaml = stringify(doc, { defaultStringType: 'QUOTE_DOUBLE' });
+          await writeProjectFile(project, profilePath, updatedYaml);
+        }
+      }
+    } catch (error) {
+      console.warn(`Failed to remove plugin from profile ${profilePath}`, error);
+    }
+  }
+
+  const overlayFiles = listOverlayFiles(project);
+  for (const overlayPath of overlayFiles) {
+    const overlayContent = await readProjectFile(project, overlayPath);
+    if (overlayContent) {
+      try {
+        const doc = parse(overlayContent) as ProfileDocument;
+        if (doc.plugins) {
+          const originalLength = doc.plugins.length;
+          doc.plugins = doc.plugins.filter((p) => p.id !== pluginId);
+          if (doc.plugins.length !== originalLength) {
+            const updatedYaml = stringify(doc, { defaultStringType: 'QUOTE_DOUBLE' });
+            await writeProjectFile(project, overlayPath, updatedYaml);
+          }
+        }
+      } catch (error) {
+        console.warn(`Failed to remove plugin from overlay ${overlayPath}`, error);
+      }
+    }
+  }
 }
 
 

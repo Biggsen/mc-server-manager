@@ -38,6 +38,7 @@ import {
   renderConfigFiles,
   writeProjectFile,
   writeProjectFileBuffer,
+  removePluginFromYamlFiles,
 } from "../services/projectFiles";
 import { enqueueRun, listRuns, resetProjectWorkspace } from "../services/runQueue";
 import { findStoredPlugin, upsertStoredPlugin } from "../storage/pluginsStore";
@@ -2127,6 +2128,7 @@ router.delete("/:id/plugins/:pluginId", async (req: Request, res: Response) => {
       return;
     }
     const updated = await removeProjectPlugin(id, pluginId);
+    await removePluginFromYamlFiles(project, pluginId);
     res.json({
       project: {
         id,
