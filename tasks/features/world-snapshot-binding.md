@@ -6,6 +6,8 @@ Add a simple world snapshot feature that allows a project to use another project
 
 This is a simplified approach compared to the original snapshot spec - instead of creating immutable snapshot artifacts, projects can directly reference other projects as snapshot sources.
 
+**Status**: ✅ **COMPLETED** - Implemented and tested
+
 ---
 
 ## User Flow
@@ -91,14 +93,16 @@ Add a new tab in the Tabs.List:
 **Tab Content**:
 - Card with title "Snapshot Source"
 - NativeSelect dropdown showing all projects (excluding current project)
-- Option to clear/remove snapshot binding
+- "Save" button to save the selection
+- "Cancel" button (when in edit mode) to cancel changes
+- Current selection display with "Change" link (when a binding is set)
 - Help text explaining what this does
 - Note about seed being ignored when using snapshots
 
-**UI Elements**:
-- Dropdown: Select snapshot source project (empty option = "None")
-- Current selection display
-- Clear button (if a binding exists)
+**UI Behavior**:
+- When no binding is set: Shows dropdown with "None" option and "Save" button
+- When a binding is set: Shows the selected project name with a "Change" link
+- Clicking "Change" switches to edit mode with dropdown and Save/Cancel buttons
 - Info text: "When 'Use snapshot' is enabled in Run Options, world data will be copied from the selected project's workspace."
 
 ### 2. Run Options Dialog Updates
@@ -191,18 +195,22 @@ async function copyWorldFromSnapshot(
     throw new Error(`Snapshot source project workspace not found. The source project may not have been run yet.`);
   }
   
-  // Read server.properties to determine world name
-  const serverPropsPath = join(targetWorkspaceDir, "server.properties");
+  // Read server.properties from SOURCE workspace to determine world name
+  // (Important: Read from source, not target, as target may not have server.properties yet)
+  const sourceServerPropsPath = join(sourceWorkspaceDir, "server.properties");
   let worldName = "world";
   
   try {
-    const serverProps = await readFile(serverPropsPath, "utf-8");
+    const serverProps = await readFile(sourceServerPropsPath, "utf-8");
     const levelNameMatch = serverProps.match(/^level-name\s*=\s*(.+)$/m);
     if (levelNameMatch && levelNameMatch[1]) {
       worldName = levelNameMatch[1].trim();
     }
+    if (!worldName) {
+      worldName = "world";
+    }
   } catch (error) {
-    appendLog(job, "system", `Could not read server.properties, using default world name "world"`);
+    appendLog(job, "system", `Could not read server.properties from source, using default world name "world"`);
   }
   
   // List of world dimensions to copy
@@ -297,6 +305,20 @@ export async function enqueueRun(project: StoredProject, options: RunOptions = {
 }
 ```
 
+**Update POST /:id/run endpoint**:
+```typescript
+router.post("/:id/run", async (req: Request, res: Response) => {
+  const options = {
+    resetWorld: Boolean(req.body?.resetWorld),
+    resetPlugins: Boolean(req.body?.resetPlugins),
+    useSnapshot: Boolean(req.body?.useSnapshot),  // IMPORTANT: Must read this from request body
+  };
+  
+  const run = await enqueueRun(project, options);
+  // ...
+});
+```
+
 ---
 
 ## Error Handling
@@ -343,6 +365,7 @@ export async function enqueueRun(project: StoredProject, options: RunOptions = {
 
 4. **Frontend UI**:
    - `frontend/src/pages/ProjectDetail.tsx` - Add World Snapshot tab, update Run Options dialog
+   - `frontend/src/pages/Projects.tsx` - Add "New Project" button
 
 ---
 
@@ -351,27 +374,32 @@ export async function enqueueRun(project: StoredProject, options: RunOptions = {
 ### Manual Testing Checklist
 
 1. **Snapshot Binding**:
-   - [ ] Can set snapshot source project
-   - [ ] Cannot set self as snapshot source
-   - [ ] Can clear snapshot binding
-   - [ ] Binding persists after page reload
+   - [x] Can set snapshot source project
+   - [x] Cannot set self as snapshot source
+   - [x] Can clear snapshot binding
+   - [x] Binding persists after page reload
+   - [x] UI shows selected server with "Change" link after saving
+   - [x] Dropdown excludes current project from selection
 
 2. **Run Options**:
-   - [ ] "Use snapshot" checkbox only appears when binding is set
-   - [ ] "Use snapshot" and "Reset world data" are mutually exclusive
-   - [ ] Both can be unchecked (normal run behavior)
+   - [x] "Use snapshot" checkbox only appears when binding is set
+   - [x] "Use snapshot" and "Reset world data" are mutually exclusive
+   - [x] Both can be unchecked (normal run behavior)
+   - [x] Disabled state shown correctly when mutual exclusion applies
 
 3. **Snapshot Copy**:
-   - [ ] Successfully copies world from source workspace
-   - [ ] Copies all dimensions (world, world_nether, world_the_end) if they exist
-   - [ ] Handles missing dimensions gracefully
-   - [ ] Shows appropriate error if source has no world data
-   - [ ] Shows appropriate error if source workspace doesn't exist
+   - [x] Successfully copies world from source workspace
+   - [x] Copies all dimensions (world, world_nether, world_the_end) if they exist
+   - [x] Handles missing dimensions gracefully
+   - [x] Shows appropriate error if source has no world data
+   - [x] Shows appropriate error if source workspace doesn't exist
+   - [x] Reads world name from source project's server.properties
 
 4. **Edge Cases**:
-   - [ ] Source project deleted after binding is set
-   - [ ] Source project workspace cleared/reset
-   - [ ] Running with snapshot when source has never been run
+   - [x] Source project workspace persistence between runs
+   - [x] World data persists when server is stopped and restarted (without snapshot)
+   - [ ] Source project deleted after binding is set (validation prevents this)
+   - [ ] Running with snapshot when source has never been run (error shown correctly)
 
 ---
 
@@ -383,13 +411,34 @@ export async function enqueueRun(project: StoredProject, options: RunOptions = {
 
 ## Implementation Order
 
-1. Add type definitions (backend and frontend)
-2. Update API endpoints to accept `snapshotSourceProjectId`
-3. Implement snapshot copy function in `runQueue.ts`
-4. Update `prepareWorkspace` and `enqueueRun` to handle snapshot option
-5. Add World Snapshot tab UI
-6. Update Run Options dialog UI
-7. Test end-to-end flow
+1. ✅ Add type definitions (backend and frontend)
+2. ✅ Update API endpoints to accept `snapshotSourceProjectId`
+3. ✅ Update POST /:id/run endpoint to accept `useSnapshot` option
+4. ✅ Implement snapshot copy function in `runQueue.ts`
+5. ✅ Update `prepareWorkspace` and `enqueueRun` to handle snapshot option
+6. ✅ Add World Snapshot tab UI
+7. ✅ Update Run Options dialog UI
+8. ✅ Add "New Project" button to Projects page
+9. ✅ Fix: Read world name from source project's server.properties (not target)
+10. ✅ Fix: Ensure `useSnapshot` is read from request body in POST endpoint
+11. ✅ Fix: Include `snapshotSourceProjectId` in all `toSummary` functions
+12. ✅ Test end-to-end flow
+
+## Implementation Notes
+
+### Important Fixes Made During Implementation
+
+1. **World Name Source**: The `copyWorldFromSnapshot` function reads `server.properties` from the **source** workspace (not target), as the target workspace may not have this file yet when copying occurs.
+
+2. **API Endpoint**: The POST `/:id/run` endpoint must explicitly read `useSnapshot` from the request body - it was initially only reading `resetWorld` and `resetPlugins`.
+
+3. **toSummary Functions**: Both `toSummary` functions (in `projectsStore.ts` and `routes/projects.ts`) must include `snapshotSourceProjectId` in their return objects.
+
+4. **UI Pattern**: The World Snapshot tab uses a save/edit pattern: when a binding is set, it displays the selected project with a "Change" link. Clicking "Change" shows the dropdown with Save/Cancel buttons.
+
+## Commits
+
+- **Commit**: `d04af27` - "Add world snapshot feature" - Initial implementation
 
 ---
 
