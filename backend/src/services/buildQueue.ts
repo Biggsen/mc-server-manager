@@ -22,7 +22,7 @@ import { scanProjectAssets } from "./projectScanner";
 import { commitFiles, getOctokitWithToken } from "./githubClient";
 import { fetchPluginArtifact } from "./pluginRegistry";
 import type { ProjectPlugin } from "../types/plugins";
-import { collectUploadedConfigMaterials } from "./configUploads";
+import { collectUploadedConfigMaterials, isBinaryFile } from "./configUploads";
 import { getBuildsRoot } from "../config";
 
 const DATA_DIR = getBuildsRoot();
@@ -225,7 +225,17 @@ async function runBuild(
       zipEntries.set(path, Buffer.from(content, "utf-8"));
     }
     for (const config of configs) {
-      zipEntries.set(config.path, Buffer.from(config.content, "utf-8"));
+      // Handle binary files that are base64-encoded vs text files that are UTF-8
+      const isBinary = isBinaryFile(config.path);
+      let buffer: Buffer;
+      if (isBinary && isBase64String(config.content)) {
+        // Binary file: decode from base64
+        buffer = Buffer.from(config.content, "base64");
+      } else {
+        // Text file: use UTF-8
+        buffer = Buffer.from(config.content, "utf-8");
+      }
+      zipEntries.set(config.path, buffer);
     }
     for (const plugin of plugins) {
       zipEntries.set(plugin.relativePath, plugin.buffer);
@@ -411,6 +421,17 @@ async function materializePlugins(
   return results;
 }
 
+// Helper to check if a string looks like base64 encoded binary data
+function isBase64String(str: string): boolean {
+  // Base64 strings contain only A-Z, a-z, 0-9, +, /, and = padding
+  // They are typically longer and have length divisible by 4 (after padding)
+  if (!str || str.length < 4) {
+    return false;
+  }
+  const base64Regex = /^[A-Za-z0-9+/]*={0,2}$/;
+  return base64Regex.test(str) && str.length % 4 === 0;
+}
+
 async function materializeConfigs(project: StoredProject): Promise<ConfigMaterialization[]> {
   const rendered = await renderConfigFiles(project);
   const uploaded = await collectUploadedConfigMaterials(project);
@@ -436,7 +457,18 @@ async function materializeConfigs(project: StoredProject): Promise<ConfigMateria
 
   const results = Array.from(map.values());
   for (const entry of results) {
-    await writeProjectFileBuffer(project, entry.path, Buffer.from(entry.content, "utf-8"));
+    // Detect if content is base64-encoded binary or UTF-8 text
+    // Binary files are encoded as base64 when stored in ConfigFileContent
+    const isBinary = isBinaryFile(entry.path);
+    let buffer: Buffer;
+    if (isBinary && isBase64String(entry.content)) {
+      // Binary file: decode from base64
+      buffer = Buffer.from(entry.content, "base64");
+    } else {
+      // Text file: use UTF-8
+      buffer = Buffer.from(entry.content, "utf-8");
+    }
+    await writeProjectFileBuffer(project, entry.path, buffer);
   }
 
   return results;

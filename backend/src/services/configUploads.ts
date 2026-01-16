@@ -7,6 +7,23 @@ import { getProjectsRoot } from "../config";
 const PROJECTS_ROOT = getProjectsRoot();
 const UPLOAD_ROOT_SEGMENTS = ["config", "uploads"];
 
+// Binary file extensions that must be handled as binary data
+const BINARY_EXTENSIONS = new Set([
+  ".schem",
+  ".schematic",
+  ".dat",
+  ".mca",
+  ".nbt",
+  ".gz",
+  ".zip",
+  ".jar",
+]);
+
+export function isBinaryFile(path: string): boolean {
+  const ext = path.toLowerCase().match(/\.[^.]+$/)?.[0] || "";
+  return BINARY_EXTENSIONS.has(ext);
+}
+
 export function sanitizeRelativePath(input: string | undefined | null): string {
   if (typeof input !== "string") {
     throw new Error("relativePath is required");
@@ -83,11 +100,25 @@ export async function saveUploadedConfigFile(
   
   await writeFile(target, buffer);
   const sha256 = createHash("sha256").update(buffer).digest("hex");
+  // For binary files, encode as base64 to preserve binary data in JSON API
+  // For text files, use UTF-8 string
+  const content = isBinaryFile(sanitized)
+    ? buffer.toString("base64")
+    : buffer.toString("utf-8");
   return {
     path: sanitized,
-    content: buffer.toString("utf-8"),
+    content,
     sha256,
   };
+}
+
+// Helper to check if a string looks like base64 encoded binary data
+function isBase64String(str: string): boolean {
+  if (!str || str.length < 4) {
+    return false;
+  }
+  const base64Regex = /^[A-Za-z0-9+/]*={0,2}$/;
+  return base64Regex.test(str) && str.length % 4 === 0;
 }
 
 export async function overwriteUploadedConfigFile(
@@ -96,7 +127,16 @@ export async function overwriteUploadedConfigFile(
   content: string,
 ): Promise<ConfigFileContent> {
   const sanitized = sanitizeRelativePath(relativePath);
-  const buffer = Buffer.from(content, "utf-8");
+  // Handle binary files that may be base64-encoded vs text files that are UTF-8
+  const isBinary = isBinaryFile(sanitized);
+  let buffer: Buffer;
+  if (isBinary && isBase64String(content)) {
+    // Binary file: decode from base64
+    buffer = Buffer.from(content, "base64");
+  } else {
+    // Text file: use UTF-8
+    buffer = Buffer.from(content, "utf-8");
+  }
   const uploadsRoot = getUploadsRoot(project);
   const target = join(uploadsRoot, sanitized);
   
@@ -106,9 +146,13 @@ export async function overwriteUploadedConfigFile(
   
   await writeFile(target, buffer);
   const sha256 = createHash("sha256").update(buffer).digest("hex");
+  // Return content in the same format as saveUploadedConfigFile (base64 for binary, UTF-8 for text)
+  const returnContent = isBinary
+    ? buffer.toString("base64")
+    : buffer.toString("utf-8");
   return {
     path: sanitized,
-    content,
+    content: returnContent,
     sha256,
   };
 }
@@ -119,11 +163,17 @@ export async function readUploadedConfigFile(
 ): Promise<ConfigFileContent> {
   const sanitized = sanitizeRelativePath(relativePath);
   const target = join(getUploadsRoot(project), sanitized);
-  const buffer = await readFile(target, "utf-8");
+  // Read as binary (Buffer) to preserve binary files like .schem, .gz, etc.
+  const buffer = await readFile(target);
   const sha256 = createHash("sha256").update(buffer).digest("hex");
+  // For binary files, encode as base64 to preserve binary data in JSON API
+  // For text files, use UTF-8 string
+  const content = isBinaryFile(sanitized)
+    ? buffer.toString("base64")
+    : buffer.toString("utf-8");
   return {
     path: sanitized,
-    content: buffer,
+    content,
     sha256,
   };
 }
@@ -232,11 +282,17 @@ export async function collectUploadedConfigMaterials(
     const sanitized = sanitizeRelativePath(entry.path);
     const target = join(uploadsRoot, sanitized);
     try {
-      const buffer = await readFile(target, "utf-8");
+      // Read as binary (Buffer) to preserve binary files like .schem, .gz, etc.
+      const buffer = await readFile(target);
       const sha256 = createHash("sha256").update(buffer).digest("hex");
+      // For binary files, encode as base64 to preserve binary data
+      // For text files, use UTF-8 string
+      const content = isBinaryFile(sanitized)
+        ? buffer.toString("base64")
+        : buffer.toString("utf-8");
       results.push({
         path: sanitized,
-        content: buffer,
+        content,
         sha256,
       });
     } catch (error) {
