@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { Buildings, Stop } from '@phosphor-icons/react'
+import { Link, useNavigate } from 'react-router-dom'
+import { Buildings, Stop, Plus } from '@phosphor-icons/react'
 import {
   fetchProjects,
   fetchBuilds,
@@ -58,6 +58,7 @@ function describeRunStatus(run: RunJob): string {
 }
 
 function Projects() {
+  const navigate = useNavigate()
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -213,14 +214,23 @@ function Projects() {
   return (
     <ContentSection as="section" padding="xl">
       <Stack gap="lg">
-        <Group gap="sm">
-          <Buildings size={24} weight="fill" aria-hidden="true" />
-          <Stack gap={2}>
-            <Title order={2}>All Projects</Title>
-            <Text c="dimmed" size="sm">
-              Projects synced with your GitHub account will appear here.
-            </Text>
-          </Stack>
+        <Group justify="space-between" align="flex-start">
+          <Group gap="sm">
+            <Buildings size={24} weight="fill" aria-hidden="true" />
+            <Stack gap={2}>
+              <Title order={2}>All Projects</Title>
+              <Text c="dimmed" size="sm">
+                Projects synced with your GitHub account will appear here.
+              </Text>
+            </Stack>
+          </Group>
+          <Button
+            variant="primary"
+            icon={<Plus size={16} weight="fill" aria-hidden="true" />}
+            onClick={() => navigate('/projects/new')}
+          >
+            New Project
+          </Button>
         </Group>
 
         {loading && (

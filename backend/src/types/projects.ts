@@ -13,5 +13,6 @@ export interface ProjectSummary {
   plugins?: ProjectPlugin[];
   configs?: StoredProject["configs"];
   repo?: RepoMetadata;
+  snapshotSourceProjectId?: string;
 }
 

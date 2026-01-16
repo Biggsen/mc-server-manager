@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile, rm, stat, readdir } from "fs/promises";
+import { mkdir, readFile, writeFile, rm, stat, readdir, access, cp } from "fs/promises";
 import { join, dirname } from "path";
 import { spawn, type ChildProcess } from "child_process";
 import { EventEmitter } from "events";
@@ -96,6 +96,7 @@ function cloneRun(run: RunJob): RunJob {
 export interface RunOptions {
   resetWorld?: boolean;
   resetPlugins?: boolean;
+  useSnapshot?: boolean;
 }
 
 export async function enqueueRun(project: StoredProject, options: RunOptions = {}): Promise<RunJob> {
@@ -117,6 +118,15 @@ export async function enqueueRun(project: StoredProject, options: RunOptions = {
     throw new Error("No successful build with an artifact available to run.");
   }
 
+  // Validate snapshot options
+  if (options.useSnapshot && !project.snapshotSourceProjectId) {
+    throw new Error("Cannot use snapshot: no snapshot source project is configured");
+  }
+  
+  if (options.useSnapshot && options.resetWorld) {
+    throw new Error("Cannot use snapshot and reset world data simultaneously");
+  }
+
   const jobId = uuid();
   const createdAt = new Date().toISOString();
   const containerName = createContainerName(project.id, jobId);
@@ -129,7 +139,7 @@ export async function enqueueRun(project: StoredProject, options: RunOptions = {
     createdAt,
     logs: [],
     containerName,
-    resetOptions: options.resetWorld || options.resetPlugins ? options : undefined,
+    resetOptions: (options.resetWorld || options.resetPlugins || options.useSnapshot) ? options : undefined,
   };
 
   jobs.set(jobId, job);
@@ -610,12 +620,94 @@ async function resetPluginData(workspaceDir: string, job: RunJob): Promise<void>
   }
 }
 
+async function copyWorldFromSnapshot(
+  targetWorkspaceDir: string,
+  sourceProjectId: string,
+  job: RunJob,
+  project: StoredProject
+): Promise<void> {
+  const sourceWorkspaceDir = getProjectWorkspacePath(sourceProjectId);
+  
+  // Check if source workspace exists
+  try {
+    await access(sourceWorkspaceDir);
+  } catch {
+    throw new Error(`Snapshot source project workspace not found. The source project may not have been run yet.`);
+  }
+  
+  // Read server.properties from SOURCE workspace to determine world name
+  const sourceServerPropsPath = join(sourceWorkspaceDir, "server.properties");
+  let worldName = "world";
+  
+  try {
+    const serverProps = await readFile(sourceServerPropsPath, "utf-8");
+    const levelNameMatch = serverProps.match(/^level-name\s*=\s*(.+)$/m);
+    if (levelNameMatch && levelNameMatch[1]) {
+      worldName = levelNameMatch[1].trim();
+    }
+    if (!worldName) {
+      worldName = "world";
+    }
+  } catch (error) {
+    appendLog(job, "system", `Could not read server.properties from source, using default world name "world"`);
+  }
+  
+  // List of world dimensions to copy
+  const worldDims = [worldName, `${worldName}_nether`, `${worldName}_the_end`];
+  
+  let copiedAny = false;
+  
+  for (const dim of worldDims) {
+    const sourcePath = join(sourceWorkspaceDir, dim);
+    const targetPath = join(targetWorkspaceDir, dim);
+    
+    try {
+      // Check if source dimension exists
+      const stats = await stat(sourcePath);
+      if (!stats.isDirectory()) {
+        continue;
+      }
+      
+      // Remove target if it exists
+      await rm(targetPath, { recursive: true, force: true });
+      
+      // Copy directory
+      await cp(sourcePath, targetPath, { recursive: true });
+      copiedAny = true;
+      appendLog(job, "system", `Copied world dimension: ${dim}`);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") {
+        // Source dimension doesn't exist - that's okay, skip it
+        continue;
+      }
+      throw new Error(`Failed to copy world dimension ${dim}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  
+  if (!copiedAny) {
+    throw new Error(`No world data found in snapshot source project workspace. The source project may need to be run first.`);
+  }
+  
+  appendLog(job, "system", `World snapshot copied successfully from project ${sourceProjectId}`);
+}
+
 async function prepareWorkspace(job: RunJob, project: StoredProject): Promise<string> {
   await mkdir(WORKSPACE_ROOT, { recursive: true });
   const workspaceDir = getProjectWorkspacePath(project.id);
   await mkdir(workspaceDir, { recursive: true });
 
   const options = job.resetOptions;
+  
+  // Handle snapshot copy BEFORE reset operations
+  if (options?.useSnapshot) {
+    if (!project.snapshotSourceProjectId) {
+      throw new Error("useSnapshot is enabled but no snapshot source project is configured");
+    }
+    await copyWorldFromSnapshot(workspaceDir, project.snapshotSourceProjectId, job, project);
+  }
+  
+  // Reset operations (mutually exclusive with snapshot)
   if (options?.resetWorld) {
     await resetWorldData(workspaceDir, job, project);
   }

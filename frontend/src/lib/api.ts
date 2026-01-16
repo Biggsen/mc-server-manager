@@ -325,6 +325,7 @@ export interface ProjectSummary {
     definitionId?: string
   }>
   repo?: RepoMetadata
+  snapshotSourceProjectId?: string
 }
 
 export type BuildStatus = 'pending' | 'running' | 'succeeded' | 'failed'
@@ -561,9 +562,9 @@ export interface RunWorkspaceStatus {
 
 export async function runProjectLocally(
   projectId: string,
-  options?: { resetWorld?: boolean; resetPlugins?: boolean }
+  options?: { resetWorld?: boolean; resetPlugins?: boolean; useSnapshot?: boolean }
 ): Promise<RunJob> {
-  const body = options && (options.resetWorld || options.resetPlugins)
+  const body = options && (options.resetWorld || options.resetPlugins || options.useSnapshot)
     ? JSON.stringify(options)
     : undefined;
   
@@ -628,6 +629,7 @@ export async function updateProject(
     minecraftVersion?: string
     loader?: string
     description?: string
+    snapshotSourceProjectId?: string
   },
 ): Promise<ProjectSummary> {
   const data = await request<{ project: ProjectSummary }>(`/projects/${projectId}`, {

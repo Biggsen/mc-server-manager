@@ -490,6 +490,7 @@ function toSummary(project: StoredProject): ProjectSummary {
     plugins: project.plugins,
     configs: project.configs,
     repo: project.repo,
+    snapshotSourceProjectId: project.snapshotSourceProjectId,
   };
 }
 
@@ -703,12 +704,27 @@ router.get("/:id", async (req: Request, res: Response) => {
 router.put("/:id", async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { name, minecraftVersion, loader, description } = req.body ?? {};
+    const { name, minecraftVersion, loader, description, snapshotSourceProjectId } = req.body ?? {};
 
     const project = await findProject(id);
     if (!project) {
       res.status(404).json({ error: "Project not found" });
       return;
+    }
+
+    // Validate snapshot source project if provided
+    if (snapshotSourceProjectId !== undefined) {
+      const trimmed = typeof snapshotSourceProjectId === "string" ? snapshotSourceProjectId.trim() : "";
+      
+      if (trimmed === id) {
+        res.status(400).json({ error: "A project cannot use itself as a snapshot source" });
+        return;
+      }
+      
+      if (trimmed && !(await findProject(trimmed))) {
+        res.status(400).json({ error: "Snapshot source project not found" });
+        return;
+      }
     }
 
     const updated = await updateProject(id, (p) => {
@@ -723,6 +739,10 @@ router.put("/:id", async (req: Request, res: Response) => {
       }
       if (typeof description === "string") {
         p.description = description.trim() || undefined;
+      }
+      if (snapshotSourceProjectId !== undefined) {
+        const trimmed = typeof snapshotSourceProjectId === "string" ? snapshotSourceProjectId.trim() : "";
+        p.snapshotSourceProjectId = trimmed || undefined;
       }
       return p;
     });
@@ -1292,6 +1312,7 @@ router.post("/:id/run", async (req: Request, res: Response) => {
     const options = {
       resetWorld: Boolean(req.body?.resetWorld),
       resetPlugins: Boolean(req.body?.resetPlugins),
+      useSnapshot: Boolean(req.body?.useSnapshot),
     };
 
     const run = await enqueueRun(project, options);

@@ -73,6 +73,7 @@ function toSummary(project: StoredProject): ProjectSummary {
     plugins,
     configs,
     repo,
+    snapshotSourceProjectId,
   } = project;
   return {
     id,
@@ -86,6 +87,7 @@ function toSummary(project: StoredProject): ProjectSummary {
     plugins,
     configs,
     repo,
+    snapshotSourceProjectId,
   };
 }
 

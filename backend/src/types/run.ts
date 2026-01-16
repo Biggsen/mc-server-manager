@@ -33,6 +33,7 @@ export interface RunJob {
   resetOptions?: {
     resetWorld?: boolean;
     resetPlugins?: boolean;
+    useSnapshot?: boolean;
   };
 }
 

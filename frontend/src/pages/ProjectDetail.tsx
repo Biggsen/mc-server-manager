@@ -12,6 +12,7 @@ import {
   fetchBuildManifest,
   fetchBuilds,
   fetchProject,
+  fetchProjects,
   fetchProjectConfigFile,
   fetchProjectConfigs,
   fetchProjectPluginConfigs,
@@ -370,7 +371,11 @@ function ProjectDetail() {
   const [descriptionBusy, setDescriptionBusy] = useState(false)
   const [activeTab, setActiveTab] = useState<string>('overview')
   const [showRunOptions, setShowRunOptions] = useState(false)
-  const [runOptions, setRunOptions] = useState({ resetWorld: false, resetPlugins: false })
+  const [runOptions, setRunOptions] = useState({ resetWorld: false, resetPlugins: false, useSnapshot: false })
+  const [allProjects, setAllProjects] = useState<ProjectSummary[]>([])
+  const [snapshotSourceBusy, setSnapshotSourceBusy] = useState(false)
+  const [snapshotSourceEditMode, setSnapshotSourceEditMode] = useState(false)
+  const [snapshotSourceDraft, setSnapshotSourceDraft] = useState<string>('')
 
   const existingProjectPlugins = useMemo(() => {
     const pluginSet = new Set<string>()
@@ -515,7 +520,7 @@ function ProjectDetail() {
       if (!id) {
         throw new Error('Project identifier missing.')
       }
-      const options = runOptions.resetWorld || runOptions.resetPlugins ? runOptions : undefined;
+      const options = runOptions.resetWorld || runOptions.resetPlugins || runOptions.useSnapshot ? runOptions : undefined;
       return runProjectLocally(id, options)
     },
     {
@@ -533,7 +538,7 @@ function ProjectDetail() {
       onSuccess: (run) => {
         setRuns((prev) => [run, ...prev.filter((item) => item.id !== run.id)])
         setShowRunOptions(false)
-        setRunOptions({ resetWorld: false, resetPlugins: false })
+        setRunOptions({ resetWorld: false, resetPlugins: false, useSnapshot: false })
       },
     },
   )
@@ -950,6 +955,24 @@ function ProjectDetail() {
       window.clearInterval(interval)
     }
   }, [id])
+
+  useEffect(() => {
+    let cancelled = false
+    const loadProjects = async () => {
+      try {
+        const projects = await fetchProjects()
+        if (!cancelled) {
+          setAllProjects(projects)
+        }
+      } catch (err) {
+        console.error('Failed to load projects for snapshot selector', err)
+      }
+    }
+    loadProjects()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     if (!id) return
@@ -1697,6 +1720,7 @@ useEffect(() => {
             <Tabs.Tab value="configs">Config Files</Tabs.Tab>
             <Tabs.Tab value="builds">Builds</Tabs.Tab>
             <Tabs.Tab value="runs">Runs</Tabs.Tab>
+            <Tabs.Tab value="snapshot">World Snapshot</Tabs.Tab>
             <Tabs.Tab value="settings">Settings</Tabs.Tab>
           </Tabs.List>
             <Tabs.Panel value="overview">
@@ -2441,6 +2465,113 @@ useEffect(() => {
               </Stack>
             </Tabs.Panel>
 
+            <Tabs.Panel value="snapshot">
+              <Stack gap="lg" pt="lg">
+                <Card>
+                  <CardContent>
+                    <Stack gap="md">
+                      <Title order={3}>Snapshot Source</Title>
+                      <Text size="sm" c="dimmed">
+                        Select a project to use as a snapshot source. When &apos;Use snapshot&apos; is enabled in Run Options, world data will be copied from the selected project&apos;s workspace.
+                      </Text>
+                      <Text size="sm" c="dimmed">
+                        Note: When using a snapshot, the world seed configured in the profile is ignored since the world is copied, not generated.
+                      </Text>
+                      {project?.snapshotSourceProjectId && !snapshotSourceEditMode && snapshotSourceDraft === '' ? (
+                        <Stack gap="sm">
+                          <Group gap="sm" align="center">
+                            <Text size="sm" fw={500}>
+                              Snapshot source:
+                            </Text>
+                            <Text size="sm">
+                              {allProjects.find((p) => p.id === project.snapshotSourceProjectId)?.name || project.snapshotSourceProjectId}
+                            </Text>
+                            <Anchor
+                              size="sm"
+                              component="button"
+                              type="button"
+                              onClick={() => {
+                                setSnapshotSourceEditMode(true)
+                                setSnapshotSourceDraft(project.snapshotSourceProjectId || '')
+                              }}
+                            >
+                              Change
+                            </Anchor>
+                          </Group>
+                        </Stack>
+                      ) : (
+                        <Stack gap="sm">
+                          <NativeSelect
+                            label="Snapshot source project"
+                            value={snapshotSourceDraft !== '' ? snapshotSourceDraft : (project?.snapshotSourceProjectId || '')}
+                            onChange={(event) => {
+                              setSnapshotSourceDraft(event.currentTarget.value)
+                            }}
+                            disabled={snapshotSourceBusy}
+                            data={[
+                              { value: '', label: 'None' },
+                              ...allProjects
+                                .filter((p) => p.id !== id)
+                                .map((p) => ({ value: p.id, label: p.name })),
+                            ]}
+                          />
+                          <Group>
+                            <Button
+                              variant="primary"
+                              onClick={async () => {
+                                if (!id) return
+                                const currentDraft = snapshotSourceDraft !== '' ? snapshotSourceDraft : (project?.snapshotSourceProjectId || '')
+                                const newValue = currentDraft || undefined
+                                setSnapshotSourceBusy(true)
+                                try {
+                                  const updated = await updateProject(id, {
+                                    snapshotSourceProjectId: newValue,
+                                  })
+                                  setProject(updated)
+                                  setSnapshotSourceEditMode(false)
+                                  setSnapshotSourceDraft('')
+                                  toast({
+                                    title: 'Snapshot source updated',
+                                    description: newValue
+                                      ? `Snapshot source set to ${allProjects.find((p) => p.id === newValue)?.name || 'selected project'}`
+                                      : 'Snapshot source cleared',
+                                    variant: 'success',
+                                  })
+                                } catch (err) {
+                                  toast({
+                                    title: 'Update failed',
+                                    description: err instanceof Error ? err.message : 'Failed to update snapshot source',
+                                    variant: 'danger',
+                                  })
+                                } finally {
+                                  setSnapshotSourceBusy(false)
+                                }
+                              }}
+                              disabled={snapshotSourceBusy}
+                            >
+                              Save
+                            </Button>
+                            {snapshotSourceEditMode && (
+                              <Button
+                                variant="ghost"
+                                onClick={() => {
+                                  setSnapshotSourceEditMode(false)
+                                  setSnapshotSourceDraft('')
+                                }}
+                                disabled={snapshotSourceBusy}
+                              >
+                                Cancel
+                              </Button>
+                            )}
+                          </Group>
+                        </Stack>
+                      )}
+                    </Stack>
+                  </CardContent>
+                </Card>
+              </Stack>
+            </Tabs.Panel>
+
             <Tabs.Panel value="settings">
               <Stack gap="lg" pt="lg">
                 <Card>
@@ -2811,7 +2942,7 @@ useEffect(() => {
         opened={showRunOptions}
         onClose={() => {
           setShowRunOptions(false)
-          setRunOptions({ resetWorld: false, resetPlugins: false })
+          setRunOptions({ resetWorld: false, resetPlugins: false, useSnapshot: false })
         }}
         title="Run Options"
         size="sm"
@@ -2824,9 +2955,31 @@ useEffect(() => {
           <Checkbox
             label="Reset world data"
             checked={runOptions.resetWorld}
-            onChange={(event) => setRunOptions(prev => ({ ...prev, resetWorld: event.target.checked }))}
+            disabled={runOptions.useSnapshot}
+            onChange={(event) => {
+              if (event.target.checked) {
+                setRunOptions(prev => ({ ...prev, resetWorld: true, useSnapshot: false }))
+              } else {
+                setRunOptions(prev => ({ ...prev, resetWorld: false }))
+              }
+            }}
             description="Deletes the world directory to start fresh"
           />
+          {project?.snapshotSourceProjectId && (
+            <Checkbox
+              label="Use snapshot"
+              checked={runOptions.useSnapshot}
+              disabled={runOptions.resetWorld}
+              onChange={(event) => {
+                if (event.target.checked) {
+                  setRunOptions(prev => ({ ...prev, useSnapshot: true, resetWorld: false }))
+                } else {
+                  setRunOptions(prev => ({ ...prev, useSnapshot: false }))
+                }
+              }}
+              description={`Copy world from ${allProjects.find((p) => p.id === project.snapshotSourceProjectId)?.name || 'snapshot source'}`}
+            />
+          )}
           <Checkbox
             label="Reset plugin data"
             checked={runOptions.resetPlugins}
@@ -2838,7 +2991,7 @@ useEffect(() => {
               variant="ghost"
               onClick={() => {
                 setShowRunOptions(false)
-                setRunOptions({ resetWorld: false, resetPlugins: false })
+                setRunOptions({ resetWorld: false, resetPlugins: false, useSnapshot: false })
               }}
             >
               Cancel

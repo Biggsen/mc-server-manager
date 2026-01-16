@@ -30,6 +30,7 @@ export interface StoredProject {
   plugins?: ProjectPlugin[];
   configs?: StoredProjectConfigEntry[];
   manifest?: ManifestMetadata;
+  snapshotSourceProjectId?: string;
   createdAt: string;
   updatedAt: string;
 }
