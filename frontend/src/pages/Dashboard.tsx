@@ -7,6 +7,7 @@ import {
   Anchor,
   Badge,
   Card,
+  Checkbox,
   Code,
   Divider,
   Group,
@@ -19,7 +20,7 @@ import {
   TextInput,
   Title,
 } from '@mantine/core'
-import { Button, type ButtonProps } from '../components/ui'
+import { Button, type ButtonProps, Modal } from '../components/ui'
 import {
   fetchProjects,
   triggerBuild,
@@ -77,6 +78,9 @@ function Dashboard() {
   const [startingRun, setStartingRun] = useState<Record<string, boolean>>({})
   const [commandInputs, setCommandInputs] = useState<Record<string, string>>({})
   const [commandBusy, setCommandBusy] = useState<Record<string, boolean>>({})
+  const [showRunOptions, setShowRunOptions] = useState(false)
+  const [selectedProjectForRun, setSelectedProjectForRun] = useState<ProjectSummary | null>(null)
+  const [runOptions, setRunOptions] = useState({ resetWorld: false, resetPlugins: false, useSnapshot: false })
   const logRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
   const { run: queueProjectBuild } = useAsyncAction(
@@ -143,11 +147,20 @@ function Dashboard() {
     },
   )
 
-  const { run: requestRunProject } = useAsyncAction(
-    async (project: ProjectSummary) => runProjectLocally(project.id),
+  const { run: queueRunLocally } = useAsyncAction(
+    async ({
+      project,
+      options,
+    }: {
+      project: ProjectSummary
+      options?: { resetWorld?: boolean; resetPlugins?: boolean; useSnapshot?: boolean }
+    }) => {
+      const opts = options && (options.resetWorld || options.resetPlugins || options.useSnapshot) ? options : undefined
+      return runProjectLocally(project.id, opts)
+    },
     {
-      label: (project) => `Starting local run • ${project.name}`,
-      onStart: (project) => {
+      label: ({ project }) => `Starting local run • ${project.name}`,
+      onStart: ({ project }) => {
         setStartingRun((prev) => ({ ...prev, [project.id]: true }))
       },
       onSuccess: (run) => {
@@ -156,24 +169,27 @@ function Dashboard() {
           return [run, ...remaining]
         })
         setRunsError(null)
+        setShowRunOptions(false)
+        setSelectedProjectForRun(null)
+        setRunOptions({ resetWorld: false, resetPlugins: false, useSnapshot: false })
       },
       onError: (error) => {
         console.error('Failed to queue local run', error)
         setRunsError(error instanceof Error ? error.message : 'Failed to start local run')
       },
-      onFinally: (project) => {
+      onFinally: ({ project }) => {
         setStartingRun((prev) => {
           const next = { ...prev }
           delete next[project.id]
           return next
         })
       },
-      successToast: (_run, [project]) => ({
+      successToast: (_run, [{ project }]) => ({
         title: 'Run queued',
         description: `${project.name} is starting locally.`,
         variant: 'success',
       }),
-      errorToast: (error, [project]) => ({
+      errorToast: (error, [{ project }]) => ({
         title: 'Run failed',
         description:
           error instanceof Error ? error.message : `Failed to start ${project.name} locally`,
@@ -636,7 +652,8 @@ function Dashboard() {
                           icon={<Play size={18} weight="fill" aria-hidden="true" />}
                           disabled={startingRun[project.id] === true || hasActiveRun}
                           onClick={() => {
-                            void requestRunProject(project).catch(() => null)
+                            setSelectedProjectForRun(project)
+                            setShowRunOptions(true)
                           }}
                         >
                           {startingRun[project.id] === true ? 'Starting…' : 'Run locally'}
@@ -890,6 +907,85 @@ function Dashboard() {
           </Stack>
         </ContentSection>
       </Stack>
+
+      <Modal
+        opened={showRunOptions}
+        onClose={() => {
+          setShowRunOptions(false)
+          setSelectedProjectForRun(null)
+          setRunOptions({ resetWorld: false, resetPlugins: false, useSnapshot: false })
+        }}
+        title="Run Options"
+        size="sm"
+        centered
+      >
+        <Stack gap="md">
+          <Text size="sm" c="dimmed">
+            Select what to reset when starting the run:
+          </Text>
+          <Checkbox
+            label="Reset world data"
+            checked={runOptions.resetWorld}
+            disabled={runOptions.useSnapshot}
+            onChange={(event) => {
+              if (event.target.checked) {
+                setRunOptions((prev) => ({ ...prev, resetWorld: true, useSnapshot: false }))
+              } else {
+                setRunOptions((prev) => ({ ...prev, resetWorld: false }))
+              }
+            }}
+            description="Deletes the world directory to start fresh"
+          />
+          {selectedProjectForRun?.snapshotSourceProjectId && (
+            <Checkbox
+              label="Use snapshot"
+              checked={runOptions.useSnapshot}
+              disabled={runOptions.resetWorld}
+              onChange={(event) => {
+                if (event.target.checked) {
+                  setRunOptions((prev) => ({ ...prev, useSnapshot: true, resetWorld: false }))
+                } else {
+                  setRunOptions((prev) => ({ ...prev, useSnapshot: false }))
+                }
+              }}
+              description={`Copy world from ${projects.find((p) => p.id === selectedProjectForRun.snapshotSourceProjectId)?.name || 'snapshot source'}`}
+            />
+          )}
+          <Checkbox
+            label="Reset plugin data"
+            checked={runOptions.resetPlugins}
+            onChange={(event) =>
+              setRunOptions((prev) => ({ ...prev, resetPlugins: event.target.checked }))
+            }
+            description="Removes plugin data directories (keeps plugin JARs)"
+          />
+          <Group justify="flex-end" gap="sm">
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setShowRunOptions(false)
+                setSelectedProjectForRun(null)
+                setRunOptions({ resetWorld: false, resetPlugins: false, useSnapshot: false })
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() => {
+                if (selectedProjectForRun) {
+                  void queueRunLocally({ project: selectedProjectForRun, options: runOptions }).catch(() => null)
+                }
+              }}
+              disabled={!selectedProjectForRun || startingRun[selectedProjectForRun?.id ?? ''] === true}
+            >
+              {selectedProjectForRun && startingRun[selectedProjectForRun.id] === true
+                ? 'Starting...'
+                : 'Start Run'}
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
     </Stack>
   )
 }
