@@ -85,7 +85,15 @@ Complete implementation of overlay override system. Currently overlay files are 
 **Estimate:** 2-3 days (Medium complexity)  
 **Dependencies:** None
 
-### 10. [Electron App Conversion](electron-app-conversion.md)
+### 10. [Init Commands](init-commands.md)
+Execute post-start initialization commands (gamerules, plugin commands, custom commands) after server is fully ready. Replaces unreliable datapack approach with robust command execution via console/stdin.
+
+**Priority:** High  
+**Status:** Planned  
+**Estimate:** 2-3 days (Medium complexity)  
+**Dependencies:** None
+
+### 11. [Electron App Conversion](electron-app-conversion.md)
 Convert the web application to a standalone Electron desktop app. Package the entire application as a single executable that runs the backend server internally and displays the frontend in a native window.
 
 **Priority:** Medium  
