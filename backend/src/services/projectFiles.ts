@@ -20,6 +20,7 @@ interface ProfileDocument {
   configs?: {
     files?: ProfileFileEntry[];
   };
+  initCommands?: string[] | Array<{ type?: string; command: string; plugin?: string; description?: string }>;
 }
 
 function getProfilePath(project: StoredProject): string {

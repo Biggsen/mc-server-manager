@@ -19,6 +19,7 @@ interface ProfileDocument {
   configs?: {
     files?: ProfileFileEntry[];
   };
+  initCommands?: string[] | Array<{ type?: string; command: string; plugin?: string; description?: string }>;
 }
 
 async function readYamlDocument(path: string): Promise<ProfileDocument | null> {

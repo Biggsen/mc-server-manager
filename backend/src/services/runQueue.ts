@@ -11,6 +11,15 @@ import type { StoredProject } from "../types/storage";
 import type { RunJob, RunLogEntry, RunLogStream, RunWorkspaceStatus } from "../types/run";
 import { listBuilds } from "./buildQueue";
 import { getRunsRoot } from "../config";
+import {
+  shouldExecuteInitCommands,
+  getInitCommands,
+  markAsInitialized,
+  type ProfileDocument,
+} from "./initCommands";
+import { readProjectFile, resolveProjectRoot } from "./projectFiles";
+import { parse } from "yaml";
+import { existsSync, readdirSync } from "fs";
 
 const DATA_DIR = getRunsRoot();
 const LOG_PATH = join(DATA_DIR, "runs.json");
@@ -22,6 +31,7 @@ const processes = new Map<string, ChildProcess>();
 const stdinStreams = new Map<string, Writable>();
 const runEvents = new EventEmitter();
 runEvents.setMaxListeners(0);
+const initCommandsExecuted = new Set<string>();
 
 interface WorkspaceState {
   lastBuildId?: string;
@@ -364,6 +374,7 @@ async function executeCommand(job: RunJob, command: string, args: string[]): Pro
         currentJob.finishedAt = currentJob.finishedAt ?? new Date().toISOString();
         jobs.set(currentJob.id, currentJob);
         emitRunUpdate(currentJob);
+        initCommandsExecuted.delete(currentJob.id);
         void persistRuns();
         resolve();
         return;
@@ -421,7 +432,104 @@ function appendLog(job: RunJob, stream: RunLogStream, message: string): void {
     };
     job.logs.push(entry);
     emitRunLog(job, entry);
+
+    if (stream === "stdout" && job.status === "running" && !initCommandsExecuted.has(job.id)) {
+      const donePattern = /Done \(\d+\.\d+s\)! For help, type "help"/;
+      if (donePattern.test(line)) {
+        void executeInitCommandsIfNeeded(job);
+      }
+    }
   }
+}
+
+async function executeInitCommandsIfNeeded(job: RunJob): Promise<void> {
+  if (initCommandsExecuted.has(job.id)) {
+    return;
+  }
+
+  const project = await findProjectForRun(job.projectId);
+  if (!project || !job.workspacePath) {
+    return;
+  }
+
+  try {
+    const shouldExecute = await shouldExecuteInitCommands(job.workspacePath, job.buildId);
+    if (!shouldExecute) {
+      appendLog(job, "system", "Init commands already executed for this build; skipping.");
+      initCommandsExecuted.add(job.id);
+      return;
+    }
+
+    const commands = await loadInitCommands(project);
+    if (commands.length === 0) {
+      initCommandsExecuted.add(job.id);
+      return;
+    }
+
+    appendLog(job, "system", `Executing ${commands.length} init command(s)...`);
+    
+    for (const cmd of commands) {
+      await sendRunCommand(job.id, cmd);
+      await delay(300);
+    }
+
+    await markAsInitialized(job.workspacePath, commands, project.id, job.buildId);
+    appendLog(job, "system", "Init commands executed successfully.");
+    initCommandsExecuted.add(job.id);
+  } catch (error) {
+    appendLog(
+      job,
+      "system",
+      `Failed to execute init commands: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+async function findProjectForRun(projectId: string): Promise<StoredProject | null> {
+  try {
+    const { findProject } = await import("../storage/projectsStore");
+    const project = await findProject(projectId);
+    return project ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function loadInitCommands(project: StoredProject): Promise<string[]> {
+  const root = resolveProjectRoot(project);
+  const profilePath = project.profilePath ?? "profiles/base.yml";
+  const baseProfileContent = await readProjectFile(project, profilePath);
+  
+  let baseProfile: ProfileDocument | null = null;
+  if (baseProfileContent) {
+    try {
+      baseProfile = parse(baseProfileContent) as ProfileDocument;
+    } catch {
+      // Ignore parse errors
+    }
+  }
+
+  const overlayDir = join(root, "overlays");
+  let overlayFiles: string[] = [];
+  if (existsSync(overlayDir)) {
+    overlayFiles = readdirSync(overlayDir)
+      .filter((file) => file.endsWith(".yml") || file.endsWith(".yaml"))
+      .map((file) => `overlays/${file}`);
+  }
+
+  const overlays: ProfileDocument[] = [];
+  for (const overlayPath of overlayFiles) {
+    const content = await readProjectFile(project, overlayPath);
+    if (content) {
+      try {
+        overlays.push(parse(content) as ProfileDocument);
+      } catch {
+        // Ignore parse errors
+      }
+    }
+  }
+
+  return getInitCommands(baseProfile, overlays);
 }
 
 async function delay(ms: number): Promise<void> {

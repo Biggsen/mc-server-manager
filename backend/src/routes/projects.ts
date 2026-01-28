@@ -2162,5 +2162,58 @@ router.delete("/:id/plugins/:pluginId", async (req: Request, res: Response) => {
   }
 });
 
+router.get("/:id/init-status", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const project = await findProject(id);
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+
+    const { getRunsRoot } = await import("../config");
+    const { join } = await import("path");
+    const workspaceRoot = join(getRunsRoot(), "workspaces");
+    const safeProject = id.replace(/[^a-zA-Z0-9-_]/g, "-");
+    const workspacePath = join(workspaceRoot, safeProject);
+
+    const { readInitializationMarker } = await import("../services/initCommands");
+    const marker = await readInitializationMarker(workspacePath);
+
+    res.json({
+      initialized: marker !== null,
+      marker: marker ?? null,
+    });
+  } catch (error) {
+    console.error("Failed to get init status", error);
+    res.status(500).json({ error: "Failed to get init status" });
+  }
+});
+
+router.post("/:id/init-status/clear", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const project = await findProject(id);
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+
+    const { getRunsRoot } = await import("../config");
+    const { join } = await import("path");
+    const workspaceRoot = join(getRunsRoot(), "workspaces");
+    const safeProject = id.replace(/[^a-zA-Z0-9-_]/g, "-");
+    const workspacePath = join(workspaceRoot, safeProject);
+
+    const { clearInitializationMarker } = await import("../services/initCommands");
+    await clearInitializationMarker(workspacePath);
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Failed to clear init marker", error);
+    res.status(500).json({ error: "Failed to clear init marker" });
+  }
+});
+
 export default router;
 

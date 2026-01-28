@@ -617,6 +617,28 @@ export async function resetProjectWorkspace(
   return data.workspace
 }
 
+export interface InitializationMarker {
+  initializedAt: string
+  commands: string[]
+  projectId: string
+  buildId: string
+}
+
+export interface InitStatusResponse {
+  initialized: boolean
+  marker: InitializationMarker | null
+}
+
+export async function fetchInitStatus(projectId: string): Promise<InitStatusResponse> {
+  return request<InitStatusResponse>(`/projects/${projectId}/init-status`)
+}
+
+export async function clearInitMarker(projectId: string): Promise<void> {
+  await request(`/projects/${projectId}/init-status/clear`, {
+    method: 'POST',
+  })
+}
+
 export async function fetchProject(projectId: string): Promise<ProjectSummary> {
   const data = await request<{ project: ProjectSummary }>(`/projects/${projectId}`)
   return data.project

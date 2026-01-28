@@ -16,10 +16,12 @@ import {
   fetchProjectConfigFile,
   fetchProjectConfigs,
   fetchProjectPluginConfigs,
+  fetchProjectProfile,
   fetchProjectRuns,
   fetchPluginLibrary,
   resetProjectWorkspace,
   runProjectLocally,
+  saveProjectProfile,
   scanProjectAssets,
   sendRunCommand,
   stopRunJob,
@@ -30,6 +32,8 @@ import {
   updateProjectConfigFile,
   updateProjectPluginConfigs,
   uploadProjectConfig,
+  fetchInitStatus,
+  clearInitMarker,
   type BuildJob,
   type PluginConfigDefinitionView,
   type ProjectConfigSummary,
@@ -38,7 +42,9 @@ import {
   type RunJob,
   type RunLogEntry,
   type StoredPluginRecord,
+  type InitStatusResponse,
 } from '../lib/api'
+import YAML from 'yaml'
 import { Accordion, Alert, Anchor, Checkbox, Code, Group, Loader, NativeSelect, Radio, ScrollArea, SimpleGrid, Stack, Table, Tabs, Text, Textarea, TextInput, Title } from '@mantine/core'
 import { Badge, Button, Card, CardContent, CardHeader, Modal, Skeleton } from '../components/ui'
 import { useToast } from '../components/ui/toast'
@@ -376,6 +382,16 @@ function ProjectDetail() {
   const [snapshotSourceBusy, setSnapshotSourceBusy] = useState(false)
   const [snapshotSourceEditMode, setSnapshotSourceEditMode] = useState(false)
   const [snapshotSourceDraft, setSnapshotSourceDraft] = useState<string>('')
+  const [initCommands, setInitCommands] = useState<string[]>([])
+  const [savedInitCommands, setSavedInitCommands] = useState<string[]>([])
+  const [initCommandsLoading, setInitCommandsLoading] = useState(false)
+  const [initCommandsSaving, setInitCommandsSaving] = useState(false)
+  const [initCommandsError, setInitCommandsError] = useState<string | null>(null)
+  const [initStatus, setInitStatus] = useState<InitStatusResponse | null>(null)
+  const [initStatusLoading, setInitStatusLoading] = useState(false)
+  const [initStatusError, setInitStatusError] = useState<string | null>(null)
+  const [newCommandValue, setNewCommandValue] = useState('')
+  const [editingCommandIndex, setEditingCommandIndex] = useState<number | null>(null)
 
   const existingProjectPlugins = useMemo(() => {
     const pluginSet = new Set<string>()
@@ -384,6 +400,14 @@ function ProjectDetail() {
     }
     return pluginSet
   }, [project?.plugins])
+
+  const hasActiveRun = useMemo(() => {
+    return runs.some((run) => 
+      run.status === 'pending' || 
+      run.status === 'running' || 
+      run.status === 'stopping'
+    )
+  }, [runs])
 
   const resetAddPluginForms = useCallback(() => {
     setAddPluginError(null)
@@ -1084,6 +1108,86 @@ useEffect(() => {
   void loadConfigs()
 }, [loadConfigs])
 
+  useEffect(() => {
+    if (!id || activeTab !== 'init-commands') {
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      try {
+        setInitStatusLoading(true)
+        setInitStatusError(null)
+        const status = await fetchInitStatus(id)
+        if (!cancelled) {
+          setInitStatus(status)
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setInitStatusError(err instanceof Error ? err.message : 'Failed to load initialization status')
+        }
+      } finally {
+        if (!cancelled) {
+          setInitStatusLoading(false)
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [id, activeTab])
+
+  useEffect(() => {
+    if (!id || activeTab !== 'init-commands') {
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      try {
+        setInitCommandsLoading(true)
+        setInitCommandsError(null)
+        const profile = await fetchProjectProfile(id)
+        if (cancelled) return
+        
+        if (!profile) {
+          setInitCommands([])
+          return
+        }
+
+        try {
+          const parsed = YAML.parse(profile.yaml) as { initCommands?: string[] | Array<{ type?: string; command: string; plugin?: string; description?: string }> }
+          const commands = parsed.initCommands ?? []
+          
+          const normalizedCommands = commands.map((cmd) => {
+            if (typeof cmd === 'string') {
+              return cmd
+            }
+            return cmd.command
+          })
+          
+          if (!cancelled) {
+            setInitCommands(normalizedCommands)
+            setSavedInitCommands(normalizedCommands)
+          }
+        } catch (parseError) {
+          if (!cancelled) {
+            setInitCommandsError('Failed to parse profile YAML')
+            console.error('Failed to parse profile YAML', parseError)
+          }
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setInitCommandsError(err instanceof Error ? err.message : 'Failed to load profile')
+        }
+      } finally {
+        if (!cancelled) {
+          setInitCommandsLoading(false)
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [id, activeTab])
 
   useEffect(() => {
     if (!project?.repo) {
@@ -1445,6 +1549,44 @@ useEffect(() => {
     }
   }, [deleteRepo, id, navigate, project, toast])
 
+  const handleSaveInitCommands = useCallback(async () => {
+    if (!id) return
+    try {
+      setInitCommandsSaving(true)
+      setInitCommandsError(null)
+      const profile = await fetchProjectProfile(id)
+      if (!profile) {
+        throw new Error('Profile not found')
+      }
+      const parsed = YAML.parse(profile.yaml) as Record<string, unknown>
+      parsed.initCommands = initCommands
+      const updatedYaml = YAML.stringify(parsed)
+      await saveProjectProfile(id, { yaml: updatedYaml })
+      setSavedInitCommands([...initCommands])
+      toast({
+        title: 'Commands saved',
+        description: 'Init commands saved to profile.',
+        variant: 'success',
+      })
+    } catch (err) {
+      setInitCommandsError(err instanceof Error ? err.message : 'Failed to save commands')
+      toast({
+        title: 'Save failed',
+        description: err instanceof Error ? err.message : 'Failed to save init commands',
+        variant: 'danger',
+      })
+    } finally {
+      setInitCommandsSaving(false)
+    }
+  }, [id, initCommands, toast])
+
+  const hasUnsavedChanges = useMemo(() => {
+    if (initCommands.length !== savedInitCommands.length) {
+      return true
+    }
+    return initCommands.some((cmd, index) => cmd !== savedInitCommands[index])
+  }, [initCommands, savedInitCommands])
+
   if (!id) {
     return (
       <ContentSection as="section">
@@ -1718,8 +1860,14 @@ useEffect(() => {
             <Tabs.Tab value="profile">Profile</Tabs.Tab>
             <Tabs.Tab value="plugins">Plugins</Tabs.Tab>
             <Tabs.Tab value="configs">Config Files</Tabs.Tab>
+            <Tabs.Tab value="init-commands">Start Commands</Tabs.Tab>
             <Tabs.Tab value="builds">Builds</Tabs.Tab>
-            <Tabs.Tab value="runs">Runs</Tabs.Tab>
+            <Tabs.Tab 
+              value="runs"
+              leftSection={hasActiveRun ? <Play size={14} weight="fill" aria-hidden="true" /> : undefined}
+            >
+              Runs
+            </Tabs.Tab>
             <Tabs.Tab value="snapshot">World Snapshot</Tabs.Tab>
             <Tabs.Tab value="settings">Settings</Tabs.Tab>
           </Tabs.List>
@@ -2186,6 +2334,270 @@ useEffect(() => {
                     </Stack>
                   </CardContent>
                 </Card>
+              </Stack>
+            </Tabs.Panel>
+
+            <Tabs.Panel value="init-commands">
+              <Stack gap="lg" pt="lg">
+                <Card>
+                  <CardContent>
+                    <Stack gap="md">
+                      <Group justify="space-between" align="flex-start">
+                        <Stack gap={4}>
+                          <Title order={3}>Start Commands</Title>
+                          {hasUnsavedChanges && (
+                            <Text size="sm" c="orange">
+                              You have unsaved changes
+                            </Text>
+                          )}
+                        </Stack>
+                        <Button
+                          type="button"
+                          variant="primary"
+                          onClick={() => void handleSaveInitCommands()}
+                          disabled={initCommandsSaving || initCommandsLoading || !hasUnsavedChanges}
+                          icon={<FloppyDisk size={18} weight="fill" aria-hidden="true" />}
+                        >
+                          {initCommandsSaving ? 'Saving…' : 'Save Commands'}
+                        </Button>
+                      </Group>
+                      <Text size="sm" c="dimmed">
+                        Configure commands to execute automatically after the server starts. Commands are stored in your profile YAML and executed once per build. Add or edit commands below, then click "Save Commands" to persist your changes.
+                      </Text>
+                      {initCommandsError && (
+                        <Alert color="red" title="Error">
+                          {initCommandsError}
+                        </Alert>
+                      )}
+                    </Stack>
+                  </CardContent>
+                </Card>
+
+                <Group gap="lg" align="stretch" wrap="nowrap">
+                  <div style={{ flex: 1 }}>
+                    <Card>
+                      <CardContent>
+                      <Stack gap="md">
+                        <Title order={4}>Commands</Title>
+                        {initCommandsLoading && <Loader size="sm" />}
+                        {!initCommandsLoading && (
+                          <>
+                            {initCommands.length === 0 ? (
+                              <Text size="sm" c="dimmed">
+                                No commands configured. Add a command below to get started.
+                              </Text>
+                            ) : (
+                              <Stack gap="sm">
+                                {initCommands.map((cmd, index) => (
+                                  <Group key={index} gap="sm" align="center" wrap="nowrap">
+                                    <Text size="sm" style={{ fontFamily: 'monospace', flex: 1 }}>
+                                      {cmd}
+                                    </Text>
+                                    {editingCommandIndex === index ? null : (
+                                      <Group gap="xs">
+                                        <Button
+                                          type="button"
+                                          variant="ghost"
+                                          size="sm"
+                                          icon={<PencilSimple size={16} weight="fill" aria-hidden="true" />}
+                                          onClick={() => {
+                                            setEditingCommandIndex(index)
+                                            setNewCommandValue(cmd)
+                                          }}
+                                        >
+                                          Edit
+                                        </Button>
+                                        <Button
+                                          type="button"
+                                          variant="ghost"
+                                          size="sm"
+                                          icon={<Trash size={16} weight="fill" aria-hidden="true" />}
+                                          onClick={() => {
+                                            setInitCommands((prev) => prev.filter((_, i) => i !== index))
+                                          }}
+                                        >
+                                          Remove
+                                        </Button>
+                                      </Group>
+                                    )}
+                                  </Group>
+                                ))}
+                              </Stack>
+                            )}
+                            <Stack gap="sm">
+                              {editingCommandIndex !== null ? (
+                                <>
+                                  <TextInput
+                                    label="Edit command"
+                                    value={newCommandValue}
+                                    onChange={(e) => setNewCommandValue(e.currentTarget.value)}
+                                    placeholder="gamerule keepInventory true"
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter' && newCommandValue.trim()) {
+                                        e.preventDefault()
+                                        setInitCommands((prev) => {
+                                          const next = [...prev]
+                                          next[editingCommandIndex] = newCommandValue.trim()
+                                          return next
+                                        })
+                                        setEditingCommandIndex(null)
+                                        setNewCommandValue('')
+                                      } else if (e.key === 'Escape') {
+                                        setEditingCommandIndex(null)
+                                        setNewCommandValue('')
+                                      }
+                                    }}
+                                  />
+                                  <Group>
+                                    <Button
+                                      type="button"
+                                      variant="primary"
+                                      onClick={() => {
+                                        if (newCommandValue.trim()) {
+                                          setInitCommands((prev) => {
+                                            const next = [...prev]
+                                            next[editingCommandIndex] = newCommandValue.trim()
+                                            return next
+                                          })
+                                          setEditingCommandIndex(null)
+                                          setNewCommandValue('')
+                                        }
+                                      }}
+                                      disabled={!newCommandValue.trim()}
+                                    >
+                                      Save
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      onClick={() => {
+                                        setEditingCommandIndex(null)
+                                        setNewCommandValue('')
+                                      }}
+                                    >
+                                      Cancel
+                                    </Button>
+                                  </Group>
+                                </>
+                              ) : (
+                                <>
+                                  <TextInput
+                                    label="Add command"
+                                    value={newCommandValue}
+                                    onChange={(e) => setNewCommandValue(e.currentTarget.value)}
+                                    placeholder="gamerule keepInventory true"
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter' && newCommandValue.trim()) {
+                                        e.preventDefault()
+                                        setInitCommands((prev) => [...prev, newCommandValue.trim()])
+                                        setNewCommandValue('')
+                                      }
+                                    }}
+                                  />
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    onClick={() => {
+                                      if (newCommandValue.trim()) {
+                                        setInitCommands((prev) => [...prev, newCommandValue.trim()])
+                                        setNewCommandValue('')
+                                      }
+                                    }}
+                                    disabled={!newCommandValue.trim()}
+                                    icon={<Plus size={18} weight="fill" aria-hidden="true" />}
+                                  >
+                                    Add Command
+                                  </Button>
+                                </>
+                              )}
+                            </Stack>
+                          </>
+                        )}
+                      </Stack>
+                    </CardContent>
+                    </Card>
+                  </div>
+
+                  <div style={{ flex: 1 }}>
+                    <Card>
+                      <CardContent>
+                      <Stack gap="md">
+                        <Title order={4}>Initialization Status</Title>
+                        {initStatusLoading && <Loader size="sm" />}
+                        {initStatusError && (
+                          <Alert color="red" title="Error">
+                            {initStatusError}
+                          </Alert>
+                        )}
+                        {!initStatusLoading && !initStatusError && initStatus && (
+                          <Stack gap="sm">
+                            {initStatus.initialized && initStatus.marker ? (
+                              <>
+                                <Group gap="xs">
+                                  <Badge variant="success">Initialized</Badge>
+                                  <Text size="sm" c="dimmed">
+                                    Build: {initStatus.marker.buildId}
+                                  </Text>
+                                </Group>
+                                <Text size="sm" c="dimmed">
+                                  Initialized at: {new Date(initStatus.marker.initializedAt).toLocaleString()}
+                                </Text>
+                                <Text size="sm" c="dimmed">
+                                  Commands executed: {initStatus.marker.commands.length}
+                                </Text>
+                                {initStatus.marker.commands.length > 0 && (
+                                  <Stack gap={4}>
+                                    {initStatus.marker.commands.map((cmd, idx) => (
+                                      <Text key={idx} size="xs" c="dimmed" style={{ fontFamily: 'monospace' }}>
+                                        {cmd}
+                                      </Text>
+                                    ))}
+                                  </Stack>
+                                )}
+                                <Group>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    onClick={async () => {
+                                      if (!id) return
+                                      try {
+                                        setInitStatusLoading(true)
+                                        await clearInitMarker(id)
+                                        const status = await fetchInitStatus(id)
+                                        setInitStatus(status)
+                                        toast({
+                                          title: 'Marker cleared',
+                                          description: 'Init commands will execute on next server start.',
+                                          variant: 'success',
+                                        })
+                                      } catch (err) {
+                                        toast({
+                                          title: 'Failed to clear marker',
+                                          description: err instanceof Error ? err.message : 'Failed to clear initialization marker',
+                                          variant: 'danger',
+                                        })
+                                      } finally {
+                                        setInitStatusLoading(false)
+                                      }
+                                    }}
+                                    disabled={initStatusLoading}
+                                  >
+                                    Clear Marker
+                                  </Button>
+                                </Group>
+                              </>
+                            ) : (
+                              <Text size="sm" c="dimmed">
+                                Not initialized. Commands will execute on next server start.
+                              </Text>
+                            )}
+                          </Stack>
+                        )}
+                      </Stack>
+                    </CardContent>
+                    </Card>
+                  </div>
+                </Group>
               </Stack>
             </Tabs.Panel>
 
