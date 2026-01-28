@@ -25,17 +25,22 @@ Add support for executing Minecraft server commands automatically after the serv
    - Add `initCommands` section to profile YAML structure
    - Store as array of command objects with optional metadata
    - Separate from `configs` and `gamerules` (these are runtime commands, not static config)
+   - Merge `initCommands` from profile overlays (like plugins/configs) - base profile has common commands, overlays can add environment-specific ones
 
 3. **Execution Timing:**
-   - Monitor server logs for "Done (X.XXXs)! For help, type "help"" message
+   - Check marker file first (before monitoring logs)
+   - If marker exists and buildId matches current build → skip execution
+   - If marker missing or buildId differs → monitor server logs for "Done (X.XXXs)! For help, type "help"" message
    - Execute commands immediately after server is fully ready
-   - Run once per world using marker file mechanism
+   - Run once per build using marker file mechanism
 
 4. **Marker File System:**
-   - Write `.initialized` marker file in workspace after successful execution
+   - Write `.initialized` marker file in workspace after all commands succeed
    - Check marker file before executing commands
-   - Skip execution if marker exists (prevents re-running on server restart)
-   - Option to force re-execution (clear marker)
+   - Compare marker's `buildId` with current build's `buildId`
+   - Skip execution if marker exists and buildId matches (prevents re-running on server restart)
+   - Execute if marker missing or buildId differs (new build may have different commands)
+   - Option to force re-execution (clear marker via UI)
 
 ### Profile Schema
 
@@ -66,12 +71,13 @@ initCommands:
 ### Execution Flow
 
 1. Server starts → logs captured via stdout/stderr
-2. Monitor logs for pattern: `Done (X.XXXs)! For help, type "help"`
-3. Check for marker file: `workspace/.initialized`
-4. If marker exists → skip execution
-5. If marker missing → execute all init commands sequentially
-6. After successful execution → write marker file
-7. Log execution results
+2. Check for marker file: `workspace/.initialized`
+3. If marker exists and `buildId` matches current build → skip execution
+4. If marker missing or `buildId` differs → monitor logs for pattern: `Done (X.XXXs)! For help, type "help"`
+5. When "Done" message detected → execute all init commands sequentially
+6. If all commands succeed → write marker file with current `buildId`
+7. If any command fails → do not write marker file (will retry on next start)
+8. Log execution results
 
 ### Marker File
 
@@ -101,16 +107,17 @@ initCommands:
 
 ### 1. Frontend Changes
 
-**GenerateProfile.tsx:**
-- Add "Init Commands" section (separate from Server Properties and Gamerules)
+**ProjectDetail.tsx:**
+- Add new "Start Commands" tab between "Config Files" and "Builds" tabs
 - UI for common gamerules (keepInventory toggle, etc.)
 - UI for plugin commands (lp import, aach board init checkboxes)
 - UI for custom commands (text input for arbitrary commands)
-- Extract init commands from existing profile on load
-- Include init commands in `buildProfileDocument` output
+- Extract init commands from existing profile on load (merge from base profile and overlays)
+- Include init commands in profile save operation
+- Display marker file status (initialized at, buildId, commands executed)
+- Button to clear marker file (force re-execution on next run)
 
 **UI Layout:**
-- Place "Init Commands" card after "Gamerules" section
 - **Gamerules subsection:**
   - Toggle for "Keep Inventory"
   - Future: Additional common gamerules
@@ -122,34 +129,43 @@ initCommands:
   - Text input for custom command
   - Add/remove buttons for multiple custom commands
   - Description field for each command
+- **Status section:**
+  - Show if workspace is initialized (read marker file)
+  - Display initialization timestamp and buildId
+  - Button to clear marker (force re-execution)
 
 ### 2. Backend Changes
 
 **Profile Parsing:**
 - Update profile extraction logic to read `initCommands` section
+- Merge `initCommands` from base profile and overlays (like plugins/configs)
 - Handle missing initCommands section gracefully (default to empty array)
 - Support both simple string array and object array formats
 
 **Run Queue (`runQueue.ts`):**
-- Add log monitoring for "Done" message pattern
+- Check marker file first (before monitoring logs)
+- Compare marker's `buildId` with current job's `buildId`
+- If marker exists and buildId matches → skip execution
+- If marker missing or buildId differs → add log monitoring for "Done" message pattern
 - Add `executeInitCommands()` function
-- Check marker file before execution
-- Execute commands sequentially via `sendRunCommand()`
-- Write marker file after successful execution
-- Handle command execution errors gracefully
+- Execute commands sequentially via `sendRunCommand()` (fire-and-forget)
+- Write marker file only if all commands succeed
+- Handle command execution errors gracefully (continue with remaining commands, but don't write marker)
 
 **Init Commands Service:**
 - Create `services/initCommands.ts`
-- Function: `shouldExecuteInitCommands(workspacePath: string, projectId: string, buildId: string): boolean`
-- Function: `getInitCommands(profile: ProfileDocument): string[]`
+- Function: `shouldExecuteInitCommands(workspacePath: string, currentBuildId: string): boolean` - checks marker and compares buildId
+- Function: `getInitCommands(profile: ProfileDocument, overlays: ProfileDocument[]): string[]` - merges from base and overlays
 - Function: `markAsInitialized(workspacePath: string, commands: string[], projectId: string, buildId: string): Promise<void>`
 - Function: `clearInitializationMarker(workspacePath: string): Promise<void>`
+- Function: `readInitializationMarker(workspacePath: string): Promise<InitializationMarker | null>`
 
 **Log Monitoring:**
+- Only start monitoring if marker check indicates execution is needed
 - Monitor stdout logs in `appendLog()` or separate listener
 - Detect "Done" pattern: `/Done \(\d+\.\d+s\)! For help, type "help"/`
 - Trigger init command execution when pattern matches
-- Ensure commands only execute once per server start
+- Ensure commands only execute once per server start (via marker check)
 
 ### 3. Type Definitions
 
@@ -198,32 +214,37 @@ interface InitCommandsFields {
 
 **Execution Method:**
 - Use existing `sendRunCommand()` function via stdin
-- Commands sent sequentially with small delays between commands
-- Wait for command completion (optional - may not be necessary for most commands)
-- Log each command execution with success/failure status
+- Fire-and-forget approach: send command, wait delay, send next command
+- Commands sent sequentially with small delays between commands (100-500ms)
+- Log each command execution (sent status, not waiting for response)
+- No waiting for command completion/acknowledgment
 
 **Error Handling:**
-- If a command fails, log error but continue with remaining commands
-- Track which commands succeeded/failed in marker file
+- If a command fails (detected via log monitoring), log error but continue with remaining commands
+- Only write marker file if all commands succeed
+- If any command fails, marker file is not written (will retry on next start)
 - Provide UI feedback about execution status
 
 **Timing:**
 - Execute immediately after "Done" message detected
 - Small delay (100-500ms) between commands to avoid overwhelming server
-- Timeout protection (don't wait indefinitely for command responses)
+- Fine-tune delays if necessary based on testing
 
 ## Workflow
 
-1. User opens Generate Profile page
+1. User opens ProjectDetail page → "Start Commands" tab
 2. Configures init commands (gamerules, plugin commands, custom commands)
-3. Saves profile → init commands stored in `profiles/base.yml`
+3. Saves profile → init commands stored in `profiles/base.yml` (and overlays if applicable)
 4. User builds project
 5. User starts server run
-6. Server starts → logs monitored
-7. "Done" message detected → check marker file
-8. If marker missing → execute all init commands
-9. Write marker file after successful execution
-10. Subsequent server starts skip execution (marker exists)
+6. Server starts → check marker file first
+7. If marker exists and buildId matches → skip execution
+8. If marker missing or buildId differs → monitor logs for "Done" message
+9. "Done" message detected → execute all init commands sequentially
+10. If all commands succeed → write marker file with current buildId
+11. If any command fails → do not write marker (will retry on next start)
+12. Subsequent server starts with same buildId skip execution (marker exists)
+13. New build deployed → marker buildId differs → commands execute again
 
 ## Benefits
 
@@ -237,12 +258,13 @@ interface InitCommandsFields {
 
 ## Edge Cases
 
-- **Server restart:** Marker file prevents re-execution (by design)
-- **Force re-execution:** Provide UI option to clear marker and re-run
-- **Command failures:** Continue with remaining commands, log failures
+- **Server restart (same build):** Marker file with matching buildId prevents re-execution (by design)
+- **New build deployed:** Marker buildId differs → commands execute again (may have changed)
+- **Force re-execution:** UI button in Start Commands tab to clear marker and re-run
+- **Command failures:** Continue with remaining commands, log failures, but don't write marker (will retry)
 - **Server crashes before marker:** Commands will re-execute on next start (acceptable)
 - **Multiple worlds:** Each world workspace gets its own marker file
-- **Build updates:** Marker tied to buildId - new builds can re-execute if needed
+- **Profile overlays:** Init commands merged from base profile and overlays (dev/live can have different commands)
 - **RCON unavailable:** Falls back gracefully (commands sent via stdin work without RCON)
 
 ## Future Enhancements
@@ -257,8 +279,7 @@ interface InitCommandsFields {
 
 ## Migration from Datapack Approach
 
-- Remove datapack generation code (`datapackGenerator.ts`)
-- Update `GenerateProfile.tsx` to use init commands instead of gamerules array
+- Remove datapack generation code (`datapackGenerator.ts`) if it exists
 - Convert existing gamerules in profiles to init commands format
 - Update spec documentation to reflect new approach
 
