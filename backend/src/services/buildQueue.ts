@@ -1,4 +1,5 @@
 import { createHash } from "crypto";
+import { existsSync, readdirSync } from "fs";
 import { mkdir, readFile, writeFile, rm, readdir } from "fs/promises";
 import { dirname, join } from "path";
 import { v4 as uuid } from "uuid";
@@ -17,6 +18,7 @@ import {
   renderConfigFiles,
   resolveProjectRoot,
   writeProjectFileBuffer,
+  TEMPLATE_ROOT,
 } from "./projectFiles";
 import { scanProjectAssets } from "./projectScanner";
 import { commitFiles, getOctokitWithToken } from "./githubClient";
@@ -496,6 +498,112 @@ async function createArtifactZip(
   });
 }
 
+/**
+ * Collect project source files for committing to GitHub.
+ * Includes profiles, plugin registry, overlays, config templates, and uploaded configs.
+ */
+async function collectSourceFilesForCommit(
+  project: StoredProject,
+): Promise<Record<string, string>> {
+  const files: Record<string, string> = {};
+
+  // Collect definition files (profiles, plugins/registry.yml, overlays)
+  const definitionFiles = await collectProjectDefinitionFiles(project);
+  Object.assign(files, definitionFiles);
+
+  const projectRoot = resolveProjectRoot(project);
+
+  // Collect config templates from configs/ folder
+  const configsDirs = [
+    join(projectRoot, "configs"),
+    ...(projectRoot !== TEMPLATE_ROOT ? [join(TEMPLATE_ROOT, "configs")] : []),
+  ];
+
+  for (const configsDir of configsDirs) {
+    if (!existsSync(configsDir)) {
+      continue;
+    }
+
+    try {
+      const entries = readdirSync(configsDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isFile()) {
+          continue;
+        }
+        // Include .hbs templates and .yml/.yaml config files
+        if (
+          entry.name.endsWith(".hbs") ||
+          entry.name.endsWith(".yml") ||
+          entry.name.endsWith(".yaml")
+        ) {
+          const relativePath = `configs/${entry.name}`;
+          // Skip if already collected (project overrides template)
+          if (files[relativePath]) {
+            continue;
+          }
+          try {
+            const content = await readFile(join(configsDir, entry.name), "utf-8");
+            files[relativePath] = content;
+          } catch {
+            // Skip files that can't be read
+          }
+        }
+      }
+    } catch {
+      // Skip directories that can't be read
+    }
+  }
+
+  // Collect uploaded/edited config files from config/ folder (including config/uploads/)
+  const configDir = join(projectRoot, "config");
+  if (existsSync(configDir)) {
+    await collectConfigFilesRecursively(configDir, "config", files);
+  }
+
+  return files;
+}
+
+/**
+ * Recursively collect text config files from a directory.
+ * Skips binary files (.schem, .dat, .gz, .zip, .jar, etc.)
+ */
+async function collectConfigFilesRecursively(
+  absoluteDir: string,
+  relativePrefix: string,
+  files: Record<string, string>,
+): Promise<void> {
+  let entries;
+  try {
+    entries = readdirSync(absoluteDir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+
+  for (const entry of entries) {
+    const absolutePath = join(absoluteDir, entry.name);
+    const relativePath = `${relativePrefix}/${entry.name}`;
+
+    if (entry.isDirectory()) {
+      await collectConfigFilesRecursively(absolutePath, relativePath, files);
+    } else if (entry.isFile()) {
+      // Skip binary files
+      if (isBinaryFile(entry.name)) {
+        continue;
+      }
+      // Skip if already collected
+      if (files[relativePath]) {
+        continue;
+      }
+      try {
+        const content = await readFile(absolutePath, "utf-8");
+        files[relativePath] = content;
+      } catch {
+        // Skip files that can't be read
+      }
+    }
+  }
+}
+
 async function pushBuildToRepository(
   params: {
     project: StoredProject;
@@ -516,8 +624,15 @@ async function pushBuildToRepository(
   const octokit = await getOctokitWithToken(githubToken);
   const branch = repo.defaultBranch ?? params.project.defaultBranch ?? "main";
 
-  const files = {
+  // Collect source files (profiles, configs, registry, overlays)
+  const sourceFiles = await collectSourceFilesForCommit(params.project);
+
+  const files: Record<string, string | { content: string; encoding: "base64" }> = {
+    // Source files
+    ...sourceFiles,
+    // Manifest
     [`manifests/${params.buildId}.json`]: params.manifestContent,
+    // Artifact
     [params.artifactRelativePath]: {
       content: params.zipBuffer.toString("base64"),
       encoding: "base64" as const,

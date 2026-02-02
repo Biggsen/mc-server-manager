@@ -26,18 +26,27 @@ Add ongoing form-based editing for `server.properties` and `paper-global.yml` wi
 **Estimate:** 2-3 days (Medium complexity)  
 **Dependencies:** None
 
-### 3. [Diff & History UI](diff-history-ui.md)
+### 3. [Source File Versioning](source-file-versioning.md)
+Commit project source files (configs, profiles, plugin registry) to GitHub alongside build artifacts. Currently only manifests and ZIPs are committed, making it impossible to see actual config diffs.
+
+**Priority:** High  
+**Status:** Planned  
+**MVP Gap:** Yes - prerequisite for meaningful diff history  
+**Estimate:** 1-2 days (Low-Medium complexity)  
+**Dependencies:** None
+
+### 4. [Diff & History UI](diff-history-ui.md)
 Add UI to view GitHub commit history and diffs between builds.
 
 **Priority:** Medium  
 **Status:** Planned  
 **MVP Gap:** Yes - listed as main feature in spec  
 **Estimate:** 3-5 days (Medium-High complexity)  
-**Dependencies:** GitHub API integration
+**Dependencies:** #3 Source File Versioning (for meaningful diffs)
 
 ### Other Enhancements
 
-### 4. [Plugin Lockfile Generation](plugin-lockfile.md)
+### 5. [Plugin Lockfile Generation](plugin-lockfile.md)
 Generate `plugins/lock.yml` files that record exact resolved plugin versions, URLs, and checksums for reproducibility.
 
 **Priority:** Low  
@@ -45,7 +54,7 @@ Generate `plugins/lock.yml` files that record exact resolved plugin versions, UR
 **Estimate:** 1 day (Low complexity)  
 **Dependencies:** None
 
-### 5. [GitHub Pending Commits Queue](github-pending-commits.md)
+### 6. [GitHub Pending Commits Queue](github-pending-commits.md)
 Implement a local queue system for failed GitHub commits, automatically retrying when connectivity is restored.
 
 **Priority:** Medium  
@@ -53,15 +62,15 @@ Implement a local queue system for failed GitHub commits, automatically retrying
 **Estimate:** 2-3 days (Medium complexity)  
 **Dependencies:** None
 
-### 6. [GitHub Conflict Resolution](github-conflict-resolution.md)
+### 7. [GitHub Conflict Resolution](github-conflict-resolution.md)
 Automatically handle push conflicts by fetching, rebasing, and retrying commits. Fallback to PR creation for complex conflicts.
 
 **Priority:** Low  
 **Status:** Planned  
 **Estimate:** 3-4 days (Medium-High complexity)  
-**Dependencies:** Could benefit from #5 (Pending Commits Queue)
+**Dependencies:** Could benefit from #6 (Pending Commits Queue)
 
-### 7. [Deterministic Config Hashing](deterministic-config-hashing.md)
+### 8. [Deterministic Config Hashing](deterministic-config-hashing.md)
 Normalize config files to UTF-8 + LF line endings before hashing to ensure consistent checksums across platforms.
 
 **Priority:** Low  
@@ -69,7 +78,7 @@ Normalize config files to UTF-8 + LF line endings before hashing to ensure consi
 **Estimate:** 1 day (Low complexity)  
 **Dependencies:** None
 
-### 8. [Deterministic Folder Hashing](deterministic-folder-hashing.md)
+### 9. [Deterministic Folder Hashing](deterministic-folder-hashing.md)
 Sort file paths deterministically when computing folder hashes (e.g., for datapacks) to ensure consistency across filesystems.
 
 **Priority:** Low  
@@ -77,7 +86,7 @@ Sort file paths deterministically when computing folder hashes (e.g., for datapa
 **Estimate:** 1-2 days (Low-Medium complexity)  
 **Dependencies:** None
 
-### 9. [Overlays Specification](overlays-spec.md)
+### 10. [Overlays Specification](overlays-spec.md)
 Complete implementation of overlay override system. Currently overlay files are read and plugin/config arrays are merged, but path-based overrides are not yet applied to config files.
 
 **Priority:** Medium  
@@ -85,7 +94,7 @@ Complete implementation of overlay override system. Currently overlay files are 
 **Estimate:** 2-3 days (Medium complexity)  
 **Dependencies:** None
 
-### 10. [Init Commands](init-commands.md)
+### 11. [Init Commands](init-commands.md)
 Execute post-start initialization commands (gamerules, plugin commands, custom commands) after server is fully ready. Replaces unreliable datapack approach with robust command execution via console/stdin.
 
 **Priority:** High  
@@ -93,7 +102,7 @@ Execute post-start initialization commands (gamerules, plugin commands, custom c
 **Estimate:** 2-3 days (Medium complexity)  
 **Dependencies:** None
 
-### 11. [Electron App Conversion](electron-app-conversion.md)
+### 12. [Electron App Conversion](electron-app-conversion.md)
 Convert the web application to a standalone Electron desktop app. Package the entire application as a single executable that runs the backend server internally and displays the frontend in a native window.
 
 **Priority:** Medium  
@@ -104,7 +113,7 @@ Convert the web application to a standalone Electron desktop app. Package the en
 
 ## Notes
 
-- **MVP Gaps** (items 1-3) are mentioned in the main spec and should be prioritized for MVP completion
+- **MVP Gaps** (items 1-4) are mentioned in the main spec and should be prioritized for MVP completion
 - Other enhancements are optional and not required for MVP functionality
 - Current implementation works without these features
 - Enhancements can be implemented incrementally based on priority and user needs
