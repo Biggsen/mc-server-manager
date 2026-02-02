@@ -871,14 +871,29 @@ function GenerateProfile() {
                   type="button"
                   disabled={saveBusy}
                   onClick={async () => {
-                    if (!yamlPreview.trim()) {
-                      setSaveError('Nothing to save; YAML is empty.')
+                    if (!profileDocument) {
+                      setSaveError('Nothing to save; profile is empty.')
                       return
                     }
                     try {
                       setSaveBusy(true)
                       setSaveError(null)
-                      const result = await saveProjectProfile(project.id, { yaml: yamlPreview })
+                      
+                      // Fetch existing profile to preserve fields this page doesn't manage
+                      // (e.g., initCommands, gamerules, overrides, mergePolicy)
+                      const existingProfile = await fetchProjectProfile(project.id)
+                      const existingParsed = existingProfile
+                        ? (YAML.parse(existingProfile.yaml) as Record<string, unknown>)
+                        : {}
+                      
+                      // Merge: existing fields are preserved, generated fields take precedence
+                      const merged = {
+                        ...existingParsed,
+                        ...profileDocument,
+                      }
+                      
+                      const yamlToSave = YAML.stringify(merged, { defaultStringType: 'QUOTE_DOUBLE' })
+                      const result = await saveProjectProfile(project.id, { yaml: yamlToSave })
                       setProject((prev) =>
                         prev
                           ? {
