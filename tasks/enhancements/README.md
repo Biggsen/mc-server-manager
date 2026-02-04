@@ -119,6 +119,14 @@ Convert the web application to a standalone Electron desktop app. Package the en
 **Estimate:** Completed  
 **Dependencies:** None
 
+### 14. [Active Indicator: Backend Jobs](active-indicator-backend-jobs.md)
+Make the header's idle indicator reflect long-running backend work (builds, runs) instead of only in-flight HTTP requests. Uses existing runs SSE and build polling; no new backend APIs.
+
+**Priority:** Medium  
+**Status:** Planned  
+**Estimate:** 4–6 hours (Low–Medium complexity)  
+**Dependencies:** None
+
 ## Notes
 
 - **MVP Gaps** (items 1-4) are mentioned in the main spec and should be prioritized for MVP completion
