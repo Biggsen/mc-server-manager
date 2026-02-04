@@ -1,7 +1,7 @@
 import { createContext, useContext } from 'react'
 
 export interface ActiveAsyncAction {
-  id: number
+  id: number | string
   label: string
   startedAt: number
 }
@@ -10,6 +10,8 @@ export interface AsyncActionsContextValue {
   actions: ActiveAsyncAction[]
   register: (label: string) => number
   complete: (id: number) => void
+  registerBackendJob: (key: string, label: string) => void
+  completeBackendJob: (key: string) => void
 }
 
 export const AsyncActionsContext = createContext<AsyncActionsContextValue | null>(null)

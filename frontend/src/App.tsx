@@ -38,6 +38,7 @@ import GenerateProfile from './pages/GenerateProfile'
 import Styleguide from './pages/Styleguide'
 import { ActiveActionIndicator, Button, ToastProvider, ToastViewport } from './components/ui'
 import { AppShell, MainCanvas } from './components/layout'
+import { ActiveBackendJobsProvider } from './components/ActiveBackendJobsProvider'
 import { AsyncActionsProvider } from './lib/asyncActions'
 
 type NavItem = {
@@ -393,9 +394,10 @@ function App() {
 
   return (
     <AsyncActionsProvider>
-      <ToastProvider>
-        <AppShell sidebar={sidebar} topbar={topbar} isDev={isDev}>
-          <MainCanvas data-route={location.pathname}>
+      <ActiveBackendJobsProvider isAuthenticated={authStatus?.authenticated ?? false}>
+        <ToastProvider>
+          <AppShell sidebar={sidebar} topbar={topbar} isDev={isDev}>
+            <MainCanvas data-route={location.pathname}>
               {authError && <p className="error-text">{authError}</p>}
               <Routes>
                 <Route path="/" element={<Dashboard />} />
@@ -411,10 +413,11 @@ function App() {
                 {isDev && <Route path="/styleguide" element={<Styleguide />} />}
                 <Route path="*" element={<NotFound />} />
               </Routes>
-          </MainCanvas>
-        </AppShell>
-        <ToastViewport />
-      </ToastProvider>
+            </MainCanvas>
+          </AppShell>
+          <ToastViewport />
+        </ToastProvider>
+      </ActiveBackendJobsProvider>
     </AsyncActionsProvider>
   )
 }
