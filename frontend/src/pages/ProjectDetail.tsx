@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, memo, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { Play, FileText, MagnifyingGlass, Package as PackageIcon, Upload, PencilSimple, ArrowsClockwise, Trash, FloppyDisk, Plus } from '@phosphor-icons/react'
+import { Play, FileText, MagnifyingGlass, Package as PackageIcon, Upload, PencilSimple, ArrowsClockwise, Trash, FloppyDisk, Plus, Copy } from '@phosphor-icons/react'
 import CodeMirror from '@uiw/react-codemirror'
 import { yaml } from '@codemirror/lang-yaml'
 import { oneDark } from '@codemirror/theme-one-dark'
 import {
   addProjectPlugin,
+  copyProjectPluginsFrom,
   deleteProject,
   deleteProjectConfigFile,
   deleteProjectPlugin,
@@ -379,6 +380,11 @@ function ProjectDetail() {
   const [showRunOptions, setShowRunOptions] = useState(false)
   const [runOptions, setRunOptions] = useState({ resetWorld: false, resetPlugins: false, useSnapshot: false })
   const [allProjects, setAllProjects] = useState<ProjectSummary[]>([])
+  const [copyFromOpen, setCopyFromOpen] = useState(false)
+  const [copyFromSourceId, setCopyFromSourceId] = useState('')
+  const [copyFromMode, setCopyFromMode] = useState<'replace' | 'merge'>('replace')
+  const [copyFromBusy, setCopyFromBusy] = useState(false)
+  const [copyFromError, setCopyFromError] = useState<string | null>(null)
   const [snapshotSourceBusy, setSnapshotSourceBusy] = useState(false)
   const [snapshotSourceEditMode, setSnapshotSourceEditMode] = useState(false)
   const [snapshotSourceDraft, setSnapshotSourceDraft] = useState<string>('')
@@ -400,6 +406,11 @@ function ProjectDetail() {
     }
     return pluginSet
   }, [project?.plugins])
+
+  const otherProjects = useMemo(
+    () => (id ? allProjects.filter((p) => p.id !== id) : []),
+    [allProjects, id],
+  )
 
   const hasActiveRun = useMemo(() => {
     return runs.some((run) => 
@@ -425,6 +436,34 @@ function ProjectDetail() {
     resetAddPluginForms()
   }, [resetAddPluginForms])
 
+  const handleCopyFromProject = useCallback(async () => {
+    if (!id || !copyFromSourceId) return
+    setCopyFromBusy(true)
+    setCopyFromError(null)
+    try {
+      const result = await copyProjectPluginsFrom(id, copyFromSourceId, {
+        mode: copyFromMode,
+      })
+      const refreshed = await fetchProject(id)
+      setProject(refreshed)
+      setCopyFromOpen(false)
+      setCopyFromSourceId('')
+      const sourceName = otherProjects.find((p) => p.id === copyFromSourceId)?.name ?? 'project'
+      const skipped = result.skippedPluginIds?.length ?? 0
+      const copiedCount = result.copiedCount
+      if (skipped > 0 && copiedCount !== undefined) {
+        toast({ variant: 'success', title: `Copied ${copiedCount} plugins from ${sourceName}; ${skipped} already present and skipped.` })
+      } else if (skipped > 0) {
+        toast({ variant: 'success', title: `Plugins copied from ${sourceName}; ${skipped} already present and skipped.` })
+      } else {
+        toast({ variant: 'success', title: `Plugins copied from ${sourceName}.` })
+      }
+    } catch (err) {
+      setCopyFromError(err instanceof Error ? err.message : 'Failed to copy plugins')
+    } finally {
+      setCopyFromBusy(false)
+    }
+  }, [id, copyFromSourceId, copyFromMode, otherProjects, toast])
 
   const handleRefreshLibrary = useCallback(async () => {
     setLibraryLoading(true)
@@ -2608,15 +2647,30 @@ useEffect(() => {
                     <Stack gap="md">
                       <Group justify="space-between" align="flex-start">
                         <Title order={3}>Configured Plugins</Title>
-                        <Button
-                          type="button"
-                          variant="primary"
-                          onClick={openAddPluginPanel}
-                          disabled={addPluginBusy}
-                          icon={<Plus size={18} weight="fill" aria-hidden="true" />}
-                        >
-                          Add plugin
-                        </Button>
+                        <Group>
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            onClick={() => {
+                              setCopyFromError(null)
+                              setCopyFromSourceId('')
+                              setCopyFromOpen(true)
+                            }}
+                            disabled={otherProjects.length === 0}
+                            icon={<Copy size={18} weight="bold" aria-hidden="true" />}
+                          >
+                            Copy from project…
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="primary"
+                            onClick={openAddPluginPanel}
+                            disabled={addPluginBusy}
+                            icon={<Plus size={18} weight="fill" aria-hidden="true" />}
+                          >
+                            Add plugin
+                          </Button>
+                        </Group>
                       </Group>
                       {project.plugins && project.plugins.length > 0 ? (
                         <Stack gap="md">
@@ -2737,6 +2791,82 @@ useEffect(() => {
                         </Group>
                       </Stack>
                     </form>
+                  )}
+                </Stack>
+              </Modal>
+
+              <Modal
+                opened={copyFromOpen}
+                onClose={() => {
+                  if (!copyFromBusy) {
+                    setCopyFromOpen(false)
+                    setCopyFromError(null)
+                  }
+                }}
+                title="Copy plugin list from project"
+                size="md"
+                centered
+              >
+                <Stack gap="md">
+                  {copyFromError && (
+                    <Alert color="red" title="Error">
+                      {copyFromError}
+                    </Alert>
+                  )}
+                  {otherProjects.length === 0 ? (
+                    <Text size="sm" c="dimmed">
+                      No other projects. Create another project first to copy plugins from it.
+                    </Text>
+                  ) : (
+                    <>
+                      <NativeSelect
+                        label="Source project"
+                        value={copyFromSourceId}
+                        onChange={(e) => setCopyFromSourceId(e.target.value)}
+                        data={[
+                          { value: '', label: 'Select a project' },
+                          ...otherProjects.map((p) => ({
+                            value: p.id,
+                            label: `${p.name} (${p.plugins?.length ?? 0} plugins)`,
+                          })),
+                        ]}
+                      />
+                      <Radio.Group
+                        label="Mode"
+                        value={copyFromMode}
+                        onChange={(v) => setCopyFromMode(v as 'replace' | 'merge')}
+                      >
+                        <Stack gap="xs" mt="xs">
+                          <Radio value="replace" label="Replace — set this project's plugin list to the source's list" />
+                          <Radio value="merge" label="Merge — add source plugins; skip any already on this project" />
+                        </Stack>
+                      </Radio.Group>
+                      {copyFromSourceId && project && (
+                        <Text size="sm" c="dimmed">
+                          {copyFromMode === 'replace'
+                            ? `This will replace the plugin list of "${project.name}" with the ${otherProjects.find((p) => p.id === copyFromSourceId)?.plugins?.length ?? 0} plugins from "${otherProjects.find((p) => p.id === copyFromSourceId)?.name ?? ''}". Continue?`
+                            : `This will add plugins from "${otherProjects.find((p) => p.id === copyFromSourceId)?.name ?? ''}" to "${project.name}". Plugins already on this project will be skipped.`}
+                        </Text>
+                      )}
+                      <Group justify="flex-end">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          onClick={() => setCopyFromOpen(false)}
+                          disabled={copyFromBusy}
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="primary"
+                          onClick={() => void handleCopyFromProject()}
+                          disabled={!copyFromSourceId || copyFromBusy}
+                        >
+                          {copyFromBusy ? 'Copying…' : 'Copy plugins'}
+                        </Button>
+                      </Group>
+                    </>
                   )}
                 </Stack>
               </Modal>

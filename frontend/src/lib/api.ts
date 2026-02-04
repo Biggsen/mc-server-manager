@@ -983,6 +983,30 @@ export async function deleteProjectPlugin(
   return data.project.plugins
 }
 
+export interface CopyProjectPluginsResult {
+  project: { id: string; plugins: NonNullable<ProjectSummary['plugins']> }
+  skippedPluginIds?: string[]
+  copiedCount?: number
+}
+
+export async function copyProjectPluginsFrom(
+  targetId: string,
+  sourceProjectId: string,
+  options?: { mode?: 'replace' | 'merge' },
+): Promise<CopyProjectPluginsResult> {
+  const params = new URLSearchParams()
+  if (options?.mode === 'merge') {
+    params.set('mode', 'merge')
+  }
+  const query = params.toString()
+  const path = `/projects/${encodeURIComponent(targetId)}/plugins/copy-from/${encodeURIComponent(sourceProjectId)}${query ? `?${query}` : ''}`
+  const data = await request<CopyProjectPluginsResult>(path, {
+    method: 'POST',
+  })
+  emitProjectsUpdated()
+  return data
+}
+
 export type DeploymentType = 'folder' | 'sftp'
 
 export interface DeploymentTarget {

@@ -1214,6 +1214,141 @@ router.post(
   },
 );
 
+router.post("/:id/plugins/copy-from/:sourceProjectId", async (req: Request, res: Response) => {
+  try {
+    const targetId = req.params.id;
+    const sourceProjectId = req.params.sourceProjectId;
+    const mode = (typeof req.query.mode === "string" && req.query.mode === "merge")
+      ? "merge"
+      : "replace";
+
+    if (!targetId || !sourceProjectId) {
+      res.status(400).json({ error: "target and source project ids are required" });
+      return;
+    }
+
+    if (sourceProjectId === targetId) {
+      res.status(400).json({ error: "Source and target project cannot be the same" });
+      return;
+    }
+
+    const sourceProject = await findProject(sourceProjectId);
+    const targetProject = await findProject(targetId);
+
+    if (!sourceProject) {
+      res.status(404).json({ error: "Source project not found" });
+      return;
+    }
+    if (!targetProject) {
+      res.status(404).json({ error: "Target project not found" });
+      return;
+    }
+
+    const sourcePlugins = sourceProject.plugins ?? [];
+    const skippedPluginIds: string[] = [];
+
+    if (sourcePlugins.length === 0) {
+      if (mode === "replace") {
+        await setProjectAssets(targetId, { plugins: [] });
+      }
+      const refreshed = (await findProject(targetId)) ?? targetProject;
+      const payload: { project: { id: string; plugins: ProjectPlugin[] }; skippedPluginIds?: string[] } = {
+        project: { id: targetId, plugins: refreshed.plugins ?? [] },
+      };
+      if (mode === "merge") {
+        payload.skippedPluginIds = [];
+      }
+      res.status(200).json(payload);
+      return;
+    }
+
+    const targetPluginIds = new Set((targetProject.plugins ?? []).map((p) => p.id));
+    const resolvedPlugins: ProjectPlugin[] = [];
+
+    for (const sourcePlugin of sourcePlugins) {
+      if (mode === "merge" && targetPluginIds.has(sourcePlugin.id)) {
+        skippedPluginIds.push(sourcePlugin.id);
+        continue;
+      }
+
+      let stored = await findStoredPlugin(sourcePlugin.id, sourcePlugin.version);
+      if (!stored) {
+        const sourceRef = sourcePlugin.source;
+        const finalMin = sourcePlugin.minecraftVersionMin ?? sourceRef?.minecraftVersionMin ?? targetProject.minecraftVersion;
+        const finalMax = sourcePlugin.minecraftVersionMax ?? sourceRef?.minecraftVersionMax ?? targetProject.minecraftVersion;
+        if (!finalMin || !finalMax) {
+          res.status(500).json({
+            error: `Plugin ${sourcePlugin.id}@${sourcePlugin.version}: unable to determine Minecraft version range`,
+          });
+          return;
+        }
+        stored = await upsertStoredPlugin({
+          id: sourcePlugin.id,
+          version: sourcePlugin.version,
+          provider: sourcePlugin.provider ?? sourceRef?.provider ?? "custom",
+          sha256: sourceRef?.sha256 ?? sourcePlugin.sha256,
+          minecraftVersionMin: finalMin,
+          minecraftVersionMax: finalMax,
+          source: sourceRef,
+          cachePath: sourcePlugin.cachePath ?? sourceRef?.cachePath,
+        });
+      }
+
+      const projectPlugin: ProjectPlugin = {
+        id: sourcePlugin.id,
+        version: sourcePlugin.version,
+        provider: stored.provider ?? sourcePlugin.provider,
+        minecraftVersionMin: stored.minecraftVersionMin ?? sourcePlugin.minecraftVersionMin,
+        minecraftVersionMax: stored.minecraftVersionMax ?? sourcePlugin.minecraftVersionMax,
+        cachePath: sourcePlugin.cachePath ?? stored.cachePath,
+        source: stored.source ?? sourcePlugin.source,
+        configMappings: sourcePlugin.configMappings ?? [],
+      };
+
+      resolvedPlugins.push(projectPlugin);
+      if (mode === "merge") {
+        targetPluginIds.add(sourcePlugin.id);
+      }
+    }
+
+    if (mode === "replace") {
+      await setProjectAssets(targetId, { plugins: resolvedPlugins });
+    } else {
+      const existingPlugins = targetProject.plugins ?? [];
+      const merged = [...existingPlugins, ...resolvedPlugins];
+      await setProjectAssets(targetId, { plugins: merged });
+    }
+
+    let updatedProject = (await findProject(targetId)) ?? targetProject;
+    const finalPlugins = updatedProject.plugins ?? [];
+
+    for (const plugin of resolvedPlugins) {
+      const stored = await findStoredPlugin(plugin.id, plugin.version);
+      const libraryDefinitions = stored?.configDefinitions ?? [];
+      await reconcilePluginConfigMetadata(targetId, updatedProject, plugin, libraryDefinitions);
+      updatedProject = (await findProject(targetId)) ?? updatedProject;
+    }
+
+    const refreshed = (await findProject(targetId)) ?? updatedProject;
+    const payload: {
+      project: { id: string; plugins: ProjectPlugin[] };
+      skippedPluginIds?: string[];
+      copiedCount?: number;
+    } = {
+      project: { id: targetId, plugins: refreshed.plugins ?? [] },
+    };
+    if (mode === "merge") {
+      payload.skippedPluginIds = skippedPluginIds;
+      payload.copiedCount = resolvedPlugins.length;
+    }
+    res.status(200).json(payload);
+  } catch (error) {
+    console.error("Failed to copy plugins from project", error);
+    const message = error instanceof Error ? error.message : String(error);
+    res.status(500).json({ error: message || "Failed to copy plugins from project" });
+  }
+});
+
 router.post("/:id/manifest", async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
