@@ -46,7 +46,15 @@ Add UI to view GitHub commit history and diffs between builds.
 
 ### Other Enhancements
 
-### 5. [Plugin Lockfile Generation](plugin-lockfile.md)
+### 5. [Copy Plugin List From Project](copy-plugin-list-from-project.md)
+Copy the full plugin list (and config mappings) from one project to another via a single "Copy from project…" action. Backend endpoint copies plugins and preserves custom config paths; frontend offers a project selector and confirmation.
+
+**Priority:** Medium  
+**Status:** Planned  
+**Estimate:** 1–2 days (Low–Medium complexity)  
+**Dependencies:** None
+
+### 6. [Plugin Lockfile Generation](plugin-lockfile.md)
 Generate `plugins/lock.yml` files that record exact resolved plugin versions, URLs, and checksums for reproducibility.
 
 **Priority:** Low  
@@ -54,7 +62,7 @@ Generate `plugins/lock.yml` files that record exact resolved plugin versions, UR
 **Estimate:** 1 day (Low complexity)  
 **Dependencies:** None
 
-### 6. [GitHub Pending Commits Queue](github-pending-commits.md)
+### 7. [GitHub Pending Commits Queue](github-pending-commits.md)
 Implement a local queue system for failed GitHub commits, automatically retrying when connectivity is restored.
 
 **Priority:** Medium  
@@ -62,7 +70,7 @@ Implement a local queue system for failed GitHub commits, automatically retrying
 **Estimate:** 2-3 days (Medium complexity)  
 **Dependencies:** None
 
-### 7. [GitHub Conflict Resolution](github-conflict-resolution.md)
+### 8. [GitHub Conflict Resolution](github-conflict-resolution.md)
 Automatically handle push conflicts by fetching, rebasing, and retrying commits. Fallback to PR creation for complex conflicts.
 
 **Priority:** Low  
@@ -70,7 +78,7 @@ Automatically handle push conflicts by fetching, rebasing, and retrying commits.
 **Estimate:** 3-4 days (Medium-High complexity)  
 **Dependencies:** Could benefit from #6 (Pending Commits Queue)
 
-### 8. [Deterministic Config Hashing](deterministic-config-hashing.md)
+### 9. [Deterministic Config Hashing](deterministic-config-hashing.md)
 Normalize config files to UTF-8 + LF line endings before hashing to ensure consistent checksums across platforms.
 
 **Priority:** Low  
@@ -78,7 +86,7 @@ Normalize config files to UTF-8 + LF line endings before hashing to ensure consi
 **Estimate:** 1 day (Low complexity)  
 **Dependencies:** None
 
-### 9. [Deterministic Folder Hashing](deterministic-folder-hashing.md)
+### 10. [Deterministic Folder Hashing](deterministic-folder-hashing.md)
 Sort file paths deterministically when computing folder hashes (e.g., for datapacks) to ensure consistency across filesystems.
 
 **Priority:** Low  
@@ -86,7 +94,7 @@ Sort file paths deterministically when computing folder hashes (e.g., for datapa
 **Estimate:** 1-2 days (Low-Medium complexity)  
 **Dependencies:** None
 
-### 10. [Overlays Specification](overlays-spec.md)
+### 11. [Overlays Specification](overlays-spec.md)
 Complete implementation of overlay override system. Currently overlay files are read and plugin/config arrays are merged, but path-based overrides are not yet applied to config files.
 
 **Priority:** Medium  
@@ -94,7 +102,7 @@ Complete implementation of overlay override system. Currently overlay files are 
 **Estimate:** 2-3 days (Medium complexity)  
 **Dependencies:** None
 
-### 11. [Init Commands](init-commands.md)
+### 12. [Init Commands](init-commands.md)
 Execute post-start initialization commands (gamerules, plugin commands, custom commands) after server is fully ready. Replaces unreliable datapack approach with robust command execution via console/stdin.
 
 **Priority:** High  
@@ -102,7 +110,7 @@ Execute post-start initialization commands (gamerules, plugin commands, custom c
 **Estimate:** 2-3 days (Medium complexity)  
 **Dependencies:** None
 
-### 12. [Electron App Conversion](electron-app-conversion.md)
+### 13. [Electron App Conversion](electron-app-conversion.md)
 Convert the web application to a standalone Electron desktop app. Package the entire application as a single executable that runs the backend server internally and displays the frontend in a native window.
 
 **Priority:** Medium  
