@@ -52,6 +52,7 @@ import { useToast } from '../components/ui/toast'
 import { ContentSection } from '../components/layout'
 import { useAsyncAction } from '../lib/useAsyncAction'
 import { CustomPathModal, type CustomPathModalState } from '../components/CustomPathModal'
+import { RunLogsAndConsole } from '../components/RunLogsAndConsole'
 
 import { getApiBase } from '../lib/api'
 const API_BASE = getApiBase()
@@ -326,7 +327,7 @@ function ProjectDetail() {
   const [loading, setLoading] = useState(true)
   const initialLoadRef = useRef(true)
   const configUploadFormRef = useRef<HTMLFormElement | null>(null)
-  const logRefs = useRef<Record<string, HTMLPreElement | null>>({})
+  const logRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const configUploadFileInputRef = useRef<HTMLInputElement | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [project, setProject] = useState<ProjectSummary | null>(null)
@@ -951,7 +952,18 @@ function ProjectDetail() {
     runs.forEach((run) => {
       const element = logRefs.current[run.id]
       if (element) {
-        element.scrollTop = element.scrollHeight
+        let scrollableParent: HTMLElement | null = element.parentElement
+        while (scrollableParent) {
+          const style = window.getComputedStyle(scrollableParent)
+          if (
+            scrollableParent.scrollHeight > scrollableParent.clientHeight &&
+            (style.overflow === 'auto' || style.overflow === 'scroll' || style.overflowY === 'auto' || style.overflowY === 'scroll')
+          ) {
+            scrollableParent.scrollTop = scrollableParent.scrollHeight
+            break
+          }
+          scrollableParent = scrollableParent.parentElement
+        }
       }
     })
   }, [runs])
@@ -2210,7 +2222,7 @@ useEffect(() => {
                       {runs.length > 0 && (
                         <Stack gap="md">
                           {runs.map((run) => (
-                            <Card key={run.id}>
+                            <Card key={run.id} style={{ backgroundColor: 'var(--mantine-color-dark-7)' }}>
                               <CardContent>
                                 <Stack gap="sm">
                                   <Group justify="space-between" align="flex-start">
@@ -2288,76 +2300,22 @@ useEffect(() => {
                                     </Accordion>
                                   ) : null}
 
-                                  {run.logs.length > 0 && (
-                                    <Accordion>
-                                      <Accordion.Item value="logs">
-                                        <Accordion.Control>View logs</Accordion.Control>
-                                        <Accordion.Panel>
-                                          <ScrollArea>
-                                            <Code
-                                              block
-                                              ref={(element) => {
-                                                logRefs.current[run.id] = element as HTMLPreElement | null
-                                              }}
-                                              style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}
-                                            >
-                                              {run.logs
-                                                .map(
-                                                  (entry) =>
-                                                    `[${new Date(entry.timestamp).toLocaleTimeString()}][${
-                                                      entry.stream
-                                                    }] ${entry.message}`,
-                                                )
-                                                .join('\n')}
-                                            </Code>
-                                          </ScrollArea>
-                                        </Accordion.Panel>
-                                      </Accordion.Item>
-                                    </Accordion>
-                                  )}
-
-                                  {run.status === 'running' && (
-                                    <Stack gap="xs">
-                                      {run.consoleAvailable ? (
-                                        <form
-                                          onSubmit={(event) => {
-                                            event.preventDefault()
-                                            const command = commandInputs[run.id]?.trim() ?? ''
-                                            if (!command) {
-                                              return
-                                            }
-                                            void dispatchRunCommand(run, command)
-                                          }}
-                                        >
-                                          <Group gap="xs">
-                                            <TextInput
-                                              type="text"
-                                              aria-label="Console command"
-                                              placeholder="/say Hello"
-                                              value={commandInputs[run.id] ?? ''}
-                                              onChange={(event) =>
-                                                handleCommandChange(run.id, event.target.value)
-                                              }
-                                              disabled={Boolean(commandBusy[run.id])}
-                                              style={{ flex: 1 }}
-                                            />
-                                            <Button
-                                              type="submit"
-                                              disabled={
-                                                Boolean(commandBusy[run.id]) ||
-                                                !commandInputs[run.id] ||
-                                                commandInputs[run.id].trim().length === 0
-                                              }
-                                            >
-                                              Send
-                                            </Button>
-                                          </Group>
-                                        </form>
-                                      ) : (
-                                        <Text size="sm" c="dimmed">Console not available yet.</Text>
-                                      )}
-                                    </Stack>
-                                  )}
+                                  <RunLogsAndConsole
+                                    run={run}
+                                    registerLogRef={(id, el) => {
+                                      logRefs.current[id] = el
+                                    }}
+                                    commandValue={commandInputs[run.id] ?? ''}
+                                    onCommandChange={(value) => handleCommandChange(run.id, value)}
+                                    onSubmit={() => {
+                                      const command = commandInputs[run.id]?.trim() ?? ''
+                                      if (command) void dispatchRunCommand(run, command)
+                                    }}
+                                    onSendCommand={(command) => {
+                                      void dispatchRunCommand(run, command)
+                                    }}
+                                    commandBusy={Boolean(commandBusy[run.id])}
+                                  />
 
                                   {run.error && (
                                     <Alert color="red" title="Error">

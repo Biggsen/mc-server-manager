@@ -3,7 +3,6 @@ import type { ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Building, Plug, SquaresFour, Play, Package as PackageIcon } from '@phosphor-icons/react'
 import {
-  Accordion,
   Anchor,
   Badge,
   Card,
@@ -13,11 +12,9 @@ import {
   Group,
   Loader,
   Paper,
-  ScrollArea,
   SimpleGrid,
   Stack,
   Text,
-  TextInput,
   Title,
 } from '@mantine/core'
 import { Button, type ButtonProps, Modal } from '../components/ui'
@@ -60,6 +57,7 @@ function getPluginSourceKind(plugin: StoredPluginRecord): 'download' | 'upload' 
 }
 import { subscribeProjectsUpdated } from '../lib/events'
 import { ContentSection } from '../components/layout'
+import { RunLogsAndConsole } from '../components/RunLogsAndConsole'
 import { useAsyncAction } from '../lib/useAsyncAction'
 
 function Dashboard() {
@@ -750,83 +748,22 @@ function Dashboard() {
                         </Group>
                       </Group>
 
-                      <Accordion defaultValue={run.logs.length > 0 ? run.id : undefined}>
-                        <Accordion.Item value={run.id}>
-                          <Accordion.Control>View logs</Accordion.Control>
-                          <Accordion.Panel>
-                            <ScrollArea h={200} type="auto">
-                              <div
-                                ref={(element) => {
-                                  logRefs.current[run.id] = element
-                                }}
-                                style={{
-                                  display: 'flex',
-                                  flexDirection: 'column',
-                                  justifyContent: 'flex-end',
-                                  minHeight: '200px',
-                                }}
-                              >
-                                <Code
-                                  block
-                                  component="pre"
-                                  style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0 }}
-                                >
-                                  {run.logs.length > 0
-                                    ? run.logs
-                                        .map(
-                                          (entry) =>
-                                            `[${new Date(entry.timestamp).toLocaleTimeString()}][${
-                                              entry.stream
-                                            }] ${entry.message}`,
-                                        )
-                                        .join('\n')
-                                    : 'No log entries yet.'}
-                                </Code>
-                              </div>
-                            </ScrollArea>
-                          </Accordion.Panel>
-                        </Accordion.Item>
-                      </Accordion>
-
-                      {run.status === 'running' ? (
-                        run.consoleAvailable ? (
-                          <Group
-                            component="form"
-                            align="flex-end"
-                            onSubmit={(event) => {
-                              event.preventDefault()
-                              const command = commandInputs[run.id]?.trim() ?? ''
-                              if (!command) return
-                              void sendRunCommandAction(run, command).catch(() => null)
-                            }}
-                          >
-                            <TextInput
-                              label="Console command"
-                              placeholder="/say Hello"
-                              value={commandInputs[run.id] ?? ''}
-                              onChange={(event) =>
-                                handleCommandInputChange(run.id, event.currentTarget.value)
-                              }
-                              disabled={Boolean(commandBusy[run.id])}
-                              flex={1}
-                            />
-                            <Button
-                              type="submit"
-                              disabled={
-                                Boolean(commandBusy[run.id]) ||
-                                !commandInputs[run.id] ||
-                                commandInputs[run.id]?.trim().length === 0
-                              }
-                            >
-                              {commandBusy[run.id] ? 'Sending…' : 'Send'}
-                            </Button>
-                          </Group>
-                        ) : (
-                          <Text c="dimmed" size="sm">
-                            Console not available yet.
-                          </Text>
-                        )
-                      ) : null}
+                      <RunLogsAndConsole
+                        run={run}
+                        registerLogRef={(id, el) => {
+                          logRefs.current[id] = el
+                        }}
+                        commandValue={commandInputs[run.id] ?? ''}
+                        onCommandChange={(value) => handleCommandInputChange(run.id, value)}
+                        onSubmit={() => {
+                          const command = commandInputs[run.id]?.trim() ?? ''
+                          if (command) void sendRunCommandAction(run, command).catch(() => null)
+                        }}
+                        onSendCommand={(command) => {
+                          void sendRunCommandAction(run, command).catch(() => null)
+                        }}
+                        commandBusy={Boolean(commandBusy[run.id])}
+                      />
                     </Stack>
                   </Paper>
                 )

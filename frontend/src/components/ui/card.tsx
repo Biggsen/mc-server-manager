@@ -1,10 +1,11 @@
 import { forwardRef } from 'react'
-import type { ComponentPropsWithoutRef, ReactNode } from 'react'
+import type { ComponentPropsWithoutRef, CSSProperties, ReactNode } from 'react'
 import { Card as MantineCard, CardSection, Title, Text, Box } from '@mantine/core'
 
 export interface CardProps extends ComponentPropsWithoutRef<typeof MantineCard> {
   children?: ReactNode
   className?: string
+  style?: CSSProperties
 }
 
 export const Card = forwardRef<HTMLDivElement, CardProps>((props, ref) => (
