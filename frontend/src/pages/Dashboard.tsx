@@ -26,6 +26,7 @@ import {
   stopRunJob,
   runProjectLocally,
   sendRunCommand,
+  type BuildOptions,
   type ProjectSummary,
   type BuildJob,
   type RunJob,
@@ -79,10 +80,16 @@ function Dashboard() {
   const [showRunOptions, setShowRunOptions] = useState(false)
   const [selectedProjectForRun, setSelectedProjectForRun] = useState<ProjectSummary | null>(null)
   const [runOptions, setRunOptions] = useState({ resetWorld: false, resetPlugins: false, useSnapshot: false })
+  const [showBuildOptions, setShowBuildOptions] = useState(false)
+  const [selectedProjectForBuild, setSelectedProjectForBuild] = useState<ProjectSummary | null>(null)
+  const [buildOptions, setBuildOptions] = useState<BuildOptions>({ skipPush: false })
   const logRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
-  const { run: queueProjectBuild } = useAsyncAction(
-    async (project: ProjectSummary) => triggerBuild(project.id),
+  const { run: queueProjectBuild } = useAsyncAction<
+    [ProjectSummary, BuildOptions?],
+    BuildJob
+  >(
+    async (project, options) => triggerBuild(project.id, undefined, options),
     {
       label: (project) => `Triggering build • ${project.name}`,
       onStart: (project) => {
@@ -639,7 +646,8 @@ function Dashboard() {
                           icon={<PackageIcon size={18} weight="fill" aria-hidden="true" />}
                           disabled={building[project.id] === 'running'}
                           onClick={() => {
-                            void queueProjectBuild(project).catch(() => null)
+                            setSelectedProjectForBuild(project)
+                            setShowBuildOptions(true)
                           }}
                         >
                           {building[project.id] === 'running' ? 'Building…' : 'Build'}
@@ -919,6 +927,66 @@ function Dashboard() {
               {selectedProjectForRun && startingRun[selectedProjectForRun.id] === true
                 ? 'Starting...'
                 : 'Start Run'}
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      <Modal
+        opened={showBuildOptions}
+        onClose={() => {
+          setShowBuildOptions(false)
+          setSelectedProjectForBuild(null)
+          setBuildOptions({ skipPush: false })
+        }}
+        title="Build Options"
+        size="sm"
+        centered
+      >
+        <Stack gap="md">
+          <Text size="sm" c="dimmed">
+            Choose how to run the build:
+          </Text>
+          {selectedProjectForBuild?.repo && (
+            <Checkbox
+              label="Build only (don't sync to repository)"
+              checked={buildOptions.skipPush ?? false}
+              onChange={(event) =>
+                setBuildOptions((prev) => ({ ...prev, skipPush: event.target.checked }))
+              }
+              description="Build artifact and manifest locally without pushing to GitHub. Use when GitHub is rate limiting or offline."
+            />
+          )}
+          <Group justify="flex-end" gap="sm">
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setShowBuildOptions(false)
+                setSelectedProjectForBuild(null)
+                setBuildOptions({ skipPush: false })
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() => {
+                if (selectedProjectForBuild) {
+                  setShowBuildOptions(false)
+                  setSelectedProjectForBuild(null)
+                  setBuildOptions({ skipPush: false })
+                  void queueProjectBuild(selectedProjectForBuild, buildOptions).catch(() => null)
+                }
+              }}
+              disabled={
+                !selectedProjectForBuild ||
+                building[selectedProjectForBuild?.id ?? ''] === 'running'
+              }
+            >
+              {selectedProjectForBuild &&
+              building[selectedProjectForBuild.id] === 'running'
+                ? 'Starting...'
+                : 'Start build'}
             </Button>
           </Group>
         </Stack>

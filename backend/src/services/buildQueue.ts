@@ -54,6 +54,7 @@ interface ConfigMaterialization {
 interface EnqueueOptions {
   overrides?: ManifestOverrides;
   githubToken?: string;
+  skipPush?: boolean;
 }
 
 const jobs = new Map<string, BuildJob>();
@@ -297,7 +298,7 @@ async function runBuild(
       commitSha: undefined as string | undefined,
     };
 
-    if (options.githubToken && updatedProject.repo) {
+    if (!options.skipPush && options.githubToken && updatedProject.repo) {
       await pushBuildToRepository({
         project: updatedProject,
         buildId,

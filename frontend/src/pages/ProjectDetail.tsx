@@ -36,6 +36,7 @@ import {
   fetchInitStatus,
   clearInitMarker,
   type BuildJob,
+  type BuildOptions,
   type PluginConfigDefinitionView,
   type ProjectConfigSummary,
   type ProjectPluginConfigMapping,
@@ -380,6 +381,8 @@ function ProjectDetail() {
   const [activeTab, setActiveTab] = useState<string>('overview')
   const [showRunOptions, setShowRunOptions] = useState(false)
   const [runOptions, setRunOptions] = useState({ resetWorld: false, resetPlugins: false, useSnapshot: false })
+  const [showBuildOptions, setShowBuildOptions] = useState(false)
+  const [buildOptions, setBuildOptions] = useState<BuildOptions>({ skipPush: false })
   const [allProjects, setAllProjects] = useState<ProjectSummary[]>([])
   const [copyFromOpen, setCopyFromOpen] = useState(false)
   const [copyFromSourceId, setCopyFromSourceId] = useState('')
@@ -483,11 +486,11 @@ function ProjectDetail() {
     run: queueBuild,
     busy: queueBuildBusy,
   } = useAsyncAction(
-    async () => {
+    async (options?: BuildOptions) => {
       if (!id) {
         throw new Error('Project identifier missing.')
       }
-      return triggerBuild(id)
+      return triggerBuild(id, undefined, options)
     },
     {
       label: 'Triggering build',
@@ -1876,7 +1879,7 @@ useEffect(() => {
               <Button
                 variant="primary"
                 icon={<PackageIcon size={18} weight="fill" aria-hidden="true" />}
-                onClick={() => void queueBuild()}
+                onClick={() => setShowBuildOptions(true)}
                 disabled={busy}
               >
                 Trigger build
@@ -3502,6 +3505,55 @@ useEffect(() => {
               disabled={runLocallyBusy}
             >
               {runLocallyBusy ? 'Starting...' : 'Start Run'}
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      <Modal
+        opened={showBuildOptions}
+        onClose={() => {
+          setShowBuildOptions(false)
+          setBuildOptions({ skipPush: false })
+        }}
+        title="Build Options"
+        size="sm"
+        centered
+      >
+        <Stack gap="md">
+          <Text size="sm" c="dimmed">
+            Choose how to run the build:
+          </Text>
+          {project?.repo && (
+            <Checkbox
+              label="Build only (don't sync to repository)"
+              checked={buildOptions.skipPush ?? false}
+              onChange={(event) =>
+                setBuildOptions((prev) => ({ ...prev, skipPush: event.target.checked }))
+              }
+              description="Build artifact and manifest locally without pushing to GitHub. Use when GitHub is rate limiting or offline."
+            />
+          )}
+          <Group justify="flex-end" gap="sm">
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setShowBuildOptions(false)
+                setBuildOptions({ skipPush: false })
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() => {
+                setShowBuildOptions(false)
+                setBuildOptions({ skipPush: false })
+                void queueBuild(buildOptions)
+              }}
+              disabled={queueBuildBusy}
+            >
+              {queueBuildBusy ? 'Starting...' : 'Start build'}
             </Button>
           </Group>
         </Stack>

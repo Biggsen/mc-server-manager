@@ -1421,6 +1421,7 @@ router.post("/:id/build", async (req: Request, res: Response) => {
 
     const job = await enqueueBuild(project, overrides, {
       githubToken: req.user?.accessToken,
+      skipPush: req.body?.skipPush === true,
     });
     res.status(202).json({ build: job });
   } catch (error) {

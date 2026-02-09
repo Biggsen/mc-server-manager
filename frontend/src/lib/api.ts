@@ -404,10 +404,25 @@ export async function triggerManifest(
   return data
 }
 
-export async function triggerBuild(projectId: string, overrides?: ManifestOverrides) {
+export interface BuildOptions {
+  skipPush?: boolean
+}
+
+export async function triggerBuild(
+  projectId: string,
+  overrides?: ManifestOverrides,
+  buildOptions?: BuildOptions,
+) {
+  const body =
+    overrides || buildOptions
+      ? JSON.stringify({
+          ...(overrides ?? {}),
+          ...(buildOptions && { skipPush: buildOptions.skipPush }),
+        })
+      : undefined
   const data = await request<{ build: BuildJob }>(`/projects/${projectId}/build`, {
     method: 'POST',
-    body: overrides ? JSON.stringify(overrides) : undefined,
+    body,
   })
   emitProjectsUpdated()
   return data.build
