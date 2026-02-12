@@ -110,8 +110,8 @@ direnv allow
 
 | Case | Behavior |
 |------|----------|
-| `cd` into project | direnv loads, sets `HISTFILE`; `chpwd` flushes old, loads `.history`. |
-| `cd` out of project | direnv unloads; `HISTFILE` reverts to default. `chpwd` flushes project history, loads default. |
+| `cd` into project | direnv loads, sets `HISTFILE`; precmd flushes old, loads `.history`. |
+| `cd` out of project | direnv unloads; `HISTFILE` reverts to default. precmd flushes project history, loads default. |
 | New project, no `.history` yet | First commands create it; empty history on first enter is fine. |
 | Multiple terminals in same project | `APPEND_HISTORY` ensures all append; no overwrite. |
 | `.envrc` not allowed | direnv shows prompt; `HISTFILE` not set; no project history (use default). |
