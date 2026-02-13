@@ -1662,6 +1662,16 @@ useEffect(() => {
     )
   }, [configFiles, project?.configs])
 
+  const pluginConfigFilesByPlugin = useMemo(() => {
+    const groups: Record<string, ProjectConfigSummary[]> = {}
+    for (const file of pluginConfigFiles) {
+      const key = file.pluginId ?? 'No plugin'
+      if (!groups[key]) groups[key] = []
+      groups[key].push(file)
+    }
+    return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b))
+  }, [pluginConfigFiles])
+
   const pluginConfigCount = pluginConfigFiles.length
 
   if (loading) {
@@ -2834,7 +2844,7 @@ useEffect(() => {
             </Tabs.Panel>
 
             <Tabs.Panel value="configs">
-              <Stack gap="lg" pt="lg">
+              <Stack gap="lg" pt="lg" style={{ maxWidth: 1100, margin: '0 auto' }}>
                 <Card>
                   <CardContent>
                     <Stack gap="md">
@@ -2877,86 +2887,94 @@ useEffect(() => {
                       )}
                       {!configsLoading && pluginConfigFiles.length > 0 && (
                         <Stack gap="md">
-                          {pluginConfigFiles.map((file) => (
-                            <Card key={file.path}>
+                          {pluginConfigFilesByPlugin.map(([pluginId, files]) => (
+                            <Card key={pluginId}>
                               <CardContent>
-                                <Group justify="space-between" align="flex-start">
-                                  <Stack gap={4}>
-                                    <Badge variant="outline">
-                                      {file.pluginId || 'No plugin'}
-                                    </Badge>
-                                    <Text fw={600}>{file.path}</Text>
-                                    {file.size !== undefined && file.modifiedAt && (
-                                      <Text size="sm" c="dimmed">
-                                        {formatBytes(file.size)} · Updated {new Date(file.modifiedAt).toLocaleString()}
-                                      </Text>
-                                    )}
-                                    {file.definitionId && (
-                                      <Text size="sm" c="dimmed">
-                                        Definition: {file.definitionId}
-                                      </Text>
-                                    )}
+                                <Stack gap="md">
+                                  <Title order={4}>{pluginId}</Title>
+                                  <Stack gap="xs">
+                                    {files.map((file) => (
+                                      <Group key={file.path} justify="space-between" align="flex-start">
+                                        <Stack gap={2}>
+                                          <Text fw={600} size="sm">{file.path}</Text>
+                                          {file.size !== undefined && file.modifiedAt && (
+                                            <Text size="xs" c="dimmed">
+                                              {formatBytes(file.size)} · Updated {new Date(file.modifiedAt).toLocaleString()}
+                                            </Text>
+                                          )}
+                                          {file.definitionId && (
+                                            <Text size="xs" c="dimmed">
+                                              Definition: {file.definitionId}
+                                            </Text>
+                                          )}
+                                        </Stack>
+                                        <Group gap="xs">
+                                          <Anchor
+                                            component="button"
+                                            type="button"
+                                            size="sm"
+                                            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                                            onClick={() => void handleEditConfig(file.path)}
+                                          >
+                                            <PencilSimple size={16} weight="fill" aria-hidden="true" />
+                                            Edit
+                                          </Anchor>
+                                          <Anchor
+                                            component="button"
+                                            type="button"
+                                            size="sm"
+                                            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                                            onClick={() => handleReplaceConfig(file)}
+                                          >
+                                            <ArrowsClockwise size={16} weight="fill" aria-hidden="true" />
+                                            Replace
+                                          </Anchor>
+                                          <Anchor
+                                            component="button"
+                                            type="button"
+                                            size="sm"
+                                            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                                            onClick={async () => {
+                                              if (!id) return
+                                              if (!window.confirm(`Delete config file ${file.path}? This cannot be undone.`)) {
+                                                return
+                                              }
+                                              try {
+                                                const next = await deleteProjectConfigFile(id, file.path)
+                                                setConfigFiles(next)
+                                                if (file.pluginId) {
+                                                  void fetchProjectPluginConfigs(id, file.pluginId)
+                                                    .then((data) => {
+                                                      setPluginDefinitionCache((prev) => ({
+                                                        ...prev,
+                                                        [file.pluginId!]: data.definitions,
+                                                      }))
+                                                    })
+                                                    .catch(() => {})
+                                                }
+                                                toast({
+                                                  title: 'Config deleted',
+                                                  description: `${file.path} removed from project.`,
+                                                  variant: 'warning',
+                                                })
+                                              } catch (err) {
+                                                toast({
+                                                  title: 'Delete failed',
+                                                  description:
+                                                    err instanceof Error ? err.message : 'Failed to delete config file.',
+                                                  variant: 'danger',
+                                                })
+                                              }
+                                            }}
+                                          >
+                                            <Trash size={16} weight="fill" aria-hidden="true" />
+                                            Delete
+                                          </Anchor>
+                                        </Group>
+                                      </Group>
+                                    ))}
                                   </Stack>
-                                  <Group gap="xs">
-                                    <Button
-                                      type="button"
-                                      variant="ghost"
-                                      icon={<PencilSimple size={18} weight="fill" aria-hidden="true" />}
-                                      onClick={() => void handleEditConfig(file.path)}
-                                    >
-                                      Edit
-                                    </Button>
-                                    <Button
-                                      type="button"
-                                      variant="ghost"
-                                      icon={<ArrowsClockwise size={18} weight="fill" aria-hidden="true" />}
-                                      onClick={() => handleReplaceConfig(file)}
-                                    >
-                                      Replace
-                                    </Button>
-                                    <Button
-                                      type="button"
-                                      variant="ghost"
-                                      icon={<Trash size={18} weight="fill" aria-hidden="true" />}
-                                      onClick={async () => {
-                                        if (!id) return
-                                        if (!window.confirm(`Delete config file ${file.path}? This cannot be undone.`)) {
-                                          return
-                                        }
-                                        try {
-                                          const next = await deleteProjectConfigFile(id, file.path)
-                                          setConfigFiles(next)
-                                          if (file.pluginId) {
-                                            void fetchProjectPluginConfigs(id, file.pluginId)
-                                              .then((data) => {
-                                                setPluginDefinitionCache((prev) => ({
-                                                  ...prev,
-                                                  [file.pluginId!]: data.definitions,
-                                                }))
-                                              })
-                                              .catch(() => {
-                                                // Ignore errors, cache will update on next load
-                                              })
-                                          }
-                                          toast({
-                                            title: 'Config deleted',
-                                            description: `${file.path} removed from project.`,
-                                            variant: 'warning',
-                                          })
-                                        } catch (err) {
-                                          toast({
-                                            title: 'Delete failed',
-                                            description:
-                                              err instanceof Error ? err.message : 'Failed to delete config file.',
-                                            variant: 'danger',
-                                          })
-                                        }
-                                      }}
-                                    >
-                                      Delete
-                                    </Button>
-                                  </Group>
-                                </Group>
+                                </Stack>
                               </CardContent>
                             </Card>
                           ))}
