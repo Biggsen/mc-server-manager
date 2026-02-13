@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import {
   ArrowsOutSimple,
   CaretRight,
+  ClipboardText,
   File,
   Folder,
   FolderOpen,
@@ -28,6 +29,7 @@ import {
   Title,
 } from '@mantine/core'
 import CodeMirror from '@uiw/react-codemirror'
+import { EditorView } from '@codemirror/view'
 import { yaml } from '@codemirror/lang-yaml'
 import { oneDark } from '@codemirror/theme-one-dark'
 import { ContentSection } from '../components/layout'
@@ -237,6 +239,26 @@ function LiveEditor() {
     setContentDirty(true)
   }, [])
 
+  const handleCopyContent = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(fileContent)
+      showToast({ title: 'Copied', description: 'File content copied to clipboard', variant: 'success' })
+    } catch (err) {
+      showToast({ title: 'Copy failed', description: err instanceof Error ? err.message : 'Unknown error', variant: 'danger' })
+    }
+  }, [fileContent, showToast])
+
+  const handlePasteContent = useCallback(async () => {
+    try {
+      const text = await navigator.clipboard.readText()
+      setFileContent(text)
+      setContentDirty(true)
+      showToast({ title: 'Pasted', description: 'Clipboard content pasted into file', variant: 'success' })
+    } catch (err) {
+      showToast({ title: 'Paste failed', description: err instanceof Error ? err.message : 'Unknown error', variant: 'danger' })
+    }
+  }, [showToast])
+
   const currentFolderPath = useMemo(
     () => (breadcrumb.length > 0 ? `plugins/${breadcrumb.join('/')}` : 'plugins'),
     [breadcrumb],
@@ -275,7 +297,10 @@ function LiveEditor() {
   )
 
   const codeExtensions = useMemo(
-    () => (selectedFile && isYamlPath(selectedFile) ? [yaml()] : []),
+    () => [
+      EditorView.lineWrapping,
+      ...(selectedFile && isYamlPath(selectedFile) ? [yaml()] : []),
+    ],
     [selectedFile],
   )
 
@@ -525,6 +550,24 @@ function LiveEditor() {
                         Expand
                       </UIButton>
                       <UIButton
+                        variant="ghost"
+                        size="sm"
+                        icon={<ClipboardText size={16} />}
+                        onClick={() => handleCopyContent()}
+                        title="Copy to clipboard"
+                      >
+                        Copy
+                      </UIButton>
+                      <UIButton
+                        variant="ghost"
+                        size="sm"
+                        icon={<ClipboardText size={16} />}
+                        onClick={() => handlePasteContent()}
+                        title="Paste from clipboard"
+                      >
+                        Paste
+                      </UIButton>
+                      <UIButton
                         variant="primary"
                         size="sm"
                         icon={<FloppyDisk size={16} />}
@@ -674,6 +717,24 @@ function LiveEditor() {
                 </UIButton>
                 <Group gap="xs">
                   <UIButton
+                    variant="ghost"
+                    size="sm"
+                    icon={<ClipboardText size={16} />}
+                    onClick={() => handleCopyContent()}
+                    title="Copy to clipboard"
+                  >
+                    Copy
+                  </UIButton>
+                  <UIButton
+                    variant="ghost"
+                    size="sm"
+                    icon={<ClipboardText size={16} />}
+                    onClick={() => handlePasteContent()}
+                    title="Paste from clipboard"
+                  >
+                    Paste
+                  </UIButton>
+                  <UIButton
                     variant="primary"
                     size="sm"
                     icon={<FloppyDisk size={16} />}
@@ -682,31 +743,6 @@ function LiveEditor() {
                   >
                     {saveLoading ? 'Saving…' : 'Save'}
                   </UIButton>
-                  <UIButton
-                    variant="secondary"
-                    size="sm"
-                    icon={<ArrowSquareUp size={16} />}
-                    onClick={() => promoteFile()}
-                    disabled={promoteLoading}
-                  >
-                    {promoteLoading
-                      ? projectConfigPaths.has(selectedFile)
-                        ? 'Promoting…'
-                        : 'Adding…'
-                      : projectConfigPaths.has(selectedFile)
-                        ? 'Promote to project'
-                        : 'Add to project'}
-                  </UIButton>
-                  {!projectConfigPaths.has(selectedFile) && (
-                    <UIButton
-                      variant="danger"
-                      size="sm"
-                      icon={<Trash size={16} />}
-                      onClick={() => handleDeleteFile()}
-                    >
-                      Delete
-                    </UIButton>
-                  )}
                 </Group>
               </Group>
             </>
