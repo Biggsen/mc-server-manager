@@ -654,6 +654,74 @@ export async function clearInitMarker(projectId: string): Promise<void> {
   })
 }
 
+export interface WorkspaceFileEntry {
+  name: string
+  path: string
+  type: 'file' | 'directory'
+  size?: number
+  modifiedAt?: string
+  editable?: boolean
+}
+
+export async function listWorkspacePluginFiles(
+  projectId: string,
+  subPath?: string,
+): Promise<WorkspaceFileEntry[]> {
+  const params = new URLSearchParams()
+  if (subPath) params.set('path', subPath)
+  const query = params.toString()
+  const path = query ? `/projects/${projectId}/workspace/plugins?${query}` : `/projects/${projectId}/workspace/plugins`
+  const data = await request<{ entries: WorkspaceFileEntry[] }>(path)
+  return data.entries
+}
+
+export async function readWorkspacePluginFile(
+  projectId: string,
+  filePath: string,
+): Promise<{ path: string; content: string; isBinary: boolean }> {
+  const params = new URLSearchParams({ path: filePath })
+  const data = await request<{ path: string; content: string; isBinary: boolean }>(
+    `/projects/${projectId}/workspace/plugins/file?${params.toString()}`,
+  )
+  return data
+}
+
+export async function deleteWorkspacePluginFile(
+  projectId: string,
+  filePath: string,
+): Promise<void> {
+  const params = new URLSearchParams({ path: filePath })
+  await request(`/projects/${projectId}/workspace/plugins/file?${params.toString()}`, {
+    method: 'DELETE',
+  })
+}
+
+export async function writeWorkspacePluginFile(
+  projectId: string,
+  filePath: string,
+  content: string,
+  isBinary: boolean,
+): Promise<void> {
+  await request(`/projects/${projectId}/workspace/plugins/file`, {
+    method: 'PUT',
+    body: JSON.stringify({ path: filePath, content, isBinary }),
+  })
+}
+
+export async function promoteWorkspacePluginFiles(
+  projectId: string,
+  paths: string[],
+): Promise<{ promoted: string[]; errors: { path: string; error: string }[] }> {
+  const data = await request<{
+    promoted: string[]
+    errors: { path: string; error: string }[]
+  }>(`/projects/${projectId}/workspace/plugins/promote`, {
+    method: 'POST',
+    body: JSON.stringify({ paths }),
+  })
+  return data
+}
+
 export async function fetchProject(projectId: string): Promise<ProjectSummary> {
   const data = await request<{ project: ProjectSummary }>(`/projects/${projectId}`)
   return data.project

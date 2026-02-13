@@ -53,6 +53,13 @@ import {
   type ConfigFileSummary,
   sanitizeRelativePath,
 } from "../services/configUploads";
+import {
+  listPluginFiles,
+  readPluginFile,
+  writePluginFile,
+  deletePluginFile,
+  promotePluginFiles,
+} from "../services/workspacePluginFiles";
 import { optionalAuth } from "../middleware/auth";
 
 const router = Router();
@@ -2295,6 +2302,120 @@ router.delete("/:id/plugins/:pluginId", async (req: Request, res: Response) => {
   } catch (error) {
     console.error("Failed to delete project plugin", error);
     res.status(500).json({ error: "Failed to delete project plugin" });
+  }
+});
+
+router.get("/:id/workspace/plugins", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const project = await findProject(id);
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    const subPath = typeof req.query.path === "string" ? req.query.path : "";
+    const entries = await listPluginFiles(id, subPath);
+    res.json({ entries });
+  } catch (error) {
+    console.error("Failed to list workspace plugin files", error);
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "Failed to list plugin files",
+    });
+  }
+});
+
+router.get("/:id/workspace/plugins/file", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const project = await findProject(id);
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    const path = typeof req.query.path === "string" ? req.query.path : "";
+    if (!path) {
+      res.status(400).json({ error: "path is required" });
+      return;
+    }
+    const { content, isBinary } = await readPluginFile(id, path);
+    res.json({ path, content, isBinary });
+  } catch (error) {
+    console.error("Failed to read workspace plugin file", error);
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "Failed to read file",
+    });
+  }
+});
+
+router.put("/:id/workspace/plugins/file", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const project = await findProject(id);
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    const path = typeof req.body?.path === "string" ? req.body.path : "";
+    const content = typeof req.body?.content === "string" ? req.body.content : "";
+    const isBinary = Boolean(req.body?.isBinary);
+    if (!path) {
+      res.status(400).json({ error: "path is required" });
+      return;
+    }
+    await writePluginFile(id, path, content, isBinary);
+    res.json({ path, success: true });
+  } catch (error) {
+    console.error("Failed to write workspace plugin file", error);
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "Failed to write file",
+    });
+  }
+});
+
+router.delete("/:id/workspace/plugins/file", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const project = await findProject(id);
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    const path = typeof req.query.path === "string" ? req.query.path : "";
+    if (!path) {
+      res.status(400).json({ error: "path is required" });
+      return;
+    }
+    await deletePluginFile(id, path);
+    res.json({ path, success: true });
+  } catch (error) {
+    console.error("Failed to delete workspace plugin file", error);
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "Failed to delete file",
+    });
+  }
+});
+
+router.post("/:id/workspace/plugins/promote", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const project = await findProject(id);
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    const paths = Array.isArray(req.body?.paths) ? req.body.paths : [];
+    const validPaths = paths.filter((p: unknown): p is string => typeof p === "string");
+    if (validPaths.length === 0) {
+      res.status(400).json({ error: "paths array is required with at least one path" });
+      return;
+    }
+    const result = await promotePluginFiles(id, validPaths);
+    res.json(result);
+  } catch (error) {
+    console.error("Failed to promote workspace plugin files", error);
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "Failed to promote files",
+    });
   }
 });
 

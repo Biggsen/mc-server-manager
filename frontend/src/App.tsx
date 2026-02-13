@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { NavLink as RouterNavLink, Route, Routes, useLocation } from 'react-router-dom'
 import {
   Package,
+  PencilSimpleLine,
   Plug,
   SquaresFour,
   Toolbox,
@@ -33,6 +34,7 @@ import ProjectDetail from './pages/ProjectDetail'
 import Deployments from './pages/Deployments'
 import TestTools from './pages/TestTools'
 import PluginLibrary from './pages/PluginLibrary'
+import LiveEditor from './pages/LiveEditor'
 import AddPlugin from './pages/AddPlugin'
 import GenerateProfile from './pages/GenerateProfile'
 import Styleguide from './pages/Styleguide'
@@ -79,6 +81,11 @@ const NAV_SECTIONS: NavSection[] = [
   {
     label: 'Operations',
     items: [
+      {
+        to: '/live-editor',
+        label: 'Live Editor',
+        icon: <PencilSimpleLine size={18} weight="fill" aria-hidden="true" />,
+      },
       {
         to: '/deployments',
         label: 'Deployments',
@@ -256,6 +263,9 @@ function App() {
     if (location.pathname.startsWith('/plugins')) {
       return 'Plugin Library'
     }
+    if (location.pathname.startsWith('/live-editor')) {
+      return 'Live Editor'
+    }
     if (location.pathname.startsWith('/deployments')) {
       return 'Deployments'
     }
@@ -407,6 +417,7 @@ function App() {
                 <Route path="/projects/:id" element={<ProjectDetail />} />
                 <Route path="/projects/:id/profile" element={<GenerateProfile />} />
                 <Route path="/plugins" element={<PluginLibrary />} />
+                <Route path="/live-editor" element={<LiveEditor />} />
                 <Route path="/plugins/add" element={<AddPlugin />} />
                 {isDev && <Route path="/dev/tools" element={<TestTools />} />}
                 <Route path="/deployments" element={<Deployments />} />
