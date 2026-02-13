@@ -354,6 +354,7 @@ function ProjectDetail() {
   const [configUploadPathDirty, setConfigUploadPathDirty] = useState(false)
   const [configUploadBusy, setConfigUploadBusy] = useState(false)
   const [configUploadModalOpened, setConfigUploadModalOpened] = useState(false)
+  const [expandedConfigPlugins, setExpandedConfigPlugins] = useState<Set<string>>(new Set())
   const [configEditor, setConfigEditor] = useState<{ path: string; content: string } | null>(null)
   const [configEditorBusy, setConfigEditorBusy] = useState(false)
   const [configEditorError, setConfigEditorError] = useState<string | null>(null)
@@ -2887,13 +2888,21 @@ useEffect(() => {
                       )}
                       {!configsLoading && pluginConfigFiles.length > 0 && (
                         <Stack gap="md">
-                          {pluginConfigFilesByPlugin.map(([pluginId, files]) => (
+                          {pluginConfigFilesByPlugin.map(([pluginId, files]) => {
+                            const defaultVisible = 10
+                            const isExpanded = expandedConfigPlugins.has(pluginId)
+                            const displayFiles =
+                              files.length > defaultVisible && !isExpanded
+                                ? files.slice(0, defaultVisible)
+                                : files
+                            const hiddenCount = files.length - defaultVisible
+                            return (
                             <Card key={pluginId}>
                               <CardContent>
                                 <Stack gap="md">
                                   <Title order={4}>{pluginId}</Title>
                                   <Stack gap="xs">
-                                    {files.map((file) => (
+                                    {displayFiles.map((file) => (
                                       <Group key={file.path} justify="space-between" align="flex-start">
                                         <Stack gap={2}>
                                           <Text fw={600} size="sm">{file.path}</Text>
@@ -2973,11 +2982,34 @@ useEffect(() => {
                                         </Group>
                                       </Group>
                                     ))}
+                                    {files.length > defaultVisible && (
+                                      <Group mt="xs">
+                                        <Anchor
+                                          component="button"
+                                          type="button"
+                                          size="sm"
+                                          style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                                          onClick={() => {
+                                            setExpandedConfigPlugins((prev) => {
+                                              const next = new Set(prev)
+                                              if (next.has(pluginId)) next.delete(pluginId)
+                                              else next.add(pluginId)
+                                              return next
+                                            })
+                                          }}
+                                        >
+                                          {isExpanded
+                                            ? 'Show less'
+                                            : `Show all (${hiddenCount} more)`}
+                                        </Anchor>
+                                      </Group>
+                                    )}
                                   </Stack>
                                 </Stack>
                               </CardContent>
                             </Card>
-                          ))}
+                            )
+                          })}
                         </Stack>
                       )}
                     </Stack>
