@@ -7,6 +7,7 @@ import {
   File,
   Folder,
   FolderOpen,
+  FolderPlus,
   FloppyDisk,
   ArrowSquareUp,
   Plus,
@@ -53,6 +54,24 @@ import { useAsyncAction } from '../lib/useAsyncAction'
 function isYamlPath(path: string): boolean {
   const lower = path.toLowerCase()
   return lower.endsWith('.yml') || lower.endsWith('.yaml')
+}
+
+async function collectAllFilePaths(
+  projectId: string,
+  folderPath: string,
+  listFn: (projectId: string, subPath?: string) => Promise<WorkspaceFileEntry[]>,
+): Promise<string[]> {
+  const entries = await listFn(projectId, folderPath)
+  const paths: string[] = []
+  for (const e of entries) {
+    if (e.type === 'file') {
+      paths.push(e.path)
+    } else if (e.type === 'directory') {
+      const subPaths = await collectAllFilePaths(projectId, e.path, listFn)
+      paths.push(...subPaths)
+    }
+  }
+  return paths
 }
 
 function LiveEditor() {
@@ -212,6 +231,42 @@ function LiveEditor() {
       onSuccess: (promoted) => {
         if (projectId && promoted?.length) {
           setProjectConfigPaths((prev) => new Set([...prev, ...promoted]))
+        }
+      },
+    },
+  )
+
+  const { run: promoteFolder, busy: promoteFolderLoading } = useAsyncAction(
+    async () => {
+      if (!projectId || !currentFolderPath || currentFolderPath === 'plugins') return []
+      const allPaths = await collectAllFilePaths(projectId, currentFolderPath, listWorkspacePluginFiles)
+      const toPromote = allPaths.filter((p) => !projectConfigPaths.has(p))
+      if (toPromote.length === 0) return []
+      const { promoted, errors } = await promoteWorkspacePluginFiles(projectId, toPromote)
+      if (errors.length > 0) {
+        throw new Error(errors.map((e) => `${e.path}: ${e.error}`).join('; '))
+      }
+      return promoted
+    },
+    {
+      label: 'Adding folder…',
+      successToast: (promoted) =>
+        (promoted?.length ?? 0) === 0
+          ? { title: 'All files already in project', description: 'Nothing to add.', variant: 'default' }
+          : {
+              title: 'Folder added to project',
+              description: `${promoted?.length ?? 0} file(s) saved to project. Run a build to include in future artifacts.`,
+              variant: 'success',
+            },
+      errorToast: (err) => ({
+        title: 'Add folder failed',
+        description: err instanceof Error ? err.message : 'Unknown error',
+        variant: 'danger',
+      }),
+      onSuccess: (promoted) => {
+        if (projectId && promoted?.length) {
+          setProjectConfigPaths((prev) => new Set([...prev, ...promoted]))
+          loadEntries()
         }
       },
     },
@@ -387,6 +442,19 @@ function LiveEditor() {
           w={220}
           clearable
         />
+
+        {projectId && breadcrumb.length > 0 && (
+          <UIButton
+            variant="secondary"
+            size="sm"
+            icon={<FolderPlus size={16} />}
+            onClick={() => promoteFolder()}
+            disabled={promoteFolderLoading}
+            title="Add all files in this folder to project"
+          >
+            {promoteFolderLoading ? 'Adding…' : 'Add folder to project'}
+          </UIButton>
+        )}
 
         {!projectId ? (
           <Alert variant="light">
