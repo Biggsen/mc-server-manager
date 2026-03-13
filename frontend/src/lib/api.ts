@@ -302,6 +302,7 @@ export interface ProjectSummary {
     minecraftVersionMin?: string
     minecraftVersionMax?: string
     cachePath?: string
+    enabled?: boolean
     source?: {
       provider: 'hangar' | 'modrinth' | 'spiget' | 'github' | 'custom'
       slug: string
@@ -354,6 +355,27 @@ export async function createProject(payload: ProjectPayload): Promise<ProjectSum
     method: 'POST',
     body: JSON.stringify(payload),
   })
+  emitProjectsUpdated()
+  return data.project
+}
+
+export interface DuplicateProjectPayload {
+  name?: string
+  minecraftVersion: string
+  loader?: string
+}
+
+export async function duplicateProject(
+  projectId: string,
+  payload: DuplicateProjectPayload,
+): Promise<ProjectSummary> {
+  const data = await request<{ project: ProjectSummary }>(
+    `/projects/${encodeURIComponent(projectId)}/duplicate`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  )
   emitProjectsUpdated()
   return data.project
 }
@@ -1060,6 +1082,38 @@ export async function deleteProjectPlugin(
     `/projects/${projectId}/plugins/${encodeURIComponent(pluginId)}`,
     {
       method: 'DELETE',
+    },
+  )
+  emitProjectsUpdated()
+  return data.project.plugins
+}
+
+export async function setProjectPluginEnabled(
+  projectId: string,
+  pluginId: string,
+  enabled: boolean,
+): Promise<ProjectSummary['plugins']> {
+  const data = await request<{ project: { plugins: ProjectSummary['plugins'] } }>(
+    `/projects/${projectId}/plugins/${encodeURIComponent(pluginId)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ enabled }),
+    },
+  )
+  emitProjectsUpdated()
+  return data.project.plugins
+}
+
+export async function setProjectPluginVersion(
+  projectId: string,
+  pluginId: string,
+  version: string,
+): Promise<ProjectSummary['plugins']> {
+  const data = await request<{ project: { plugins: ProjectSummary['plugins'] } }>(
+    `/projects/${projectId}/plugins/${encodeURIComponent(pluginId)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ version }),
     },
   )
   emitProjectsUpdated()

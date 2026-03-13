@@ -462,7 +462,15 @@ function LiveEditor() {
             workspace is empty.
           </Alert>
         ) : (
-          <Box ref={containerRef} style={{ display: 'flex', minHeight: 400 }}>
+          <Box
+            ref={containerRef}
+            style={{
+              display: 'flex',
+              minHeight: 400,
+              maxHeight: 'min(720px, calc(100vh - 280px))',
+              overflow: 'hidden',
+            }}
+          >
             <Paper
               component={Stack}
               gap="xs"
@@ -602,10 +610,10 @@ function LiveEditor() {
               />
             </Box>
 
-            <Box style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+            <Box style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
               {selectedFile ? (
                 <>
-                  <Group justify="space-between" mb="xs">
+                  <Group justify="space-between" mb="xs" style={{ flexShrink: 0 }}>
                     <Code>{selectedFile}</Code>
                     <Group gap="xs">
                       <UIButton
@@ -676,23 +684,30 @@ function LiveEditor() {
                   ) : fileLoading ? (
                     <MantineLoader />
                   ) : (
-                    <CodeMirror
-                      value={fileContent}
-                      onChange={handleContentChange}
-                      extensions={codeExtensions}
-                      theme={oneDark}
+                    <div
                       style={{
                         flex: 1,
-                        minHeight: 320,
+                        minHeight: 0,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        overflow: 'auto',
                         border: '1px solid var(--mantine-color-default-border)',
                         borderRadius: 'var(--mantine-radius-md)',
                       }}
-                      basicSetup={{
-                        lineNumbers: true,
-                        foldGutter: true,
-                        highlightActiveLine: true,
-                      }}
-                    />
+                    >
+                      <CodeMirror
+                        value={fileContent}
+                        onChange={handleContentChange}
+                        extensions={codeExtensions}
+                        theme={oneDark}
+                        style={{ flex: 1, minHeight: 320 }}
+                        basicSetup={{
+                          lineNumbers: true,
+                          foldGutter: true,
+                          highlightActiveLine: true,
+                        }}
+                      />
+                    </div>
                   )}
                 </>
               ) : (

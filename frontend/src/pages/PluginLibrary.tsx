@@ -90,6 +90,7 @@ function PluginLibrary() {
     error: string | null
     touched: boolean
   } | null>(null)
+  const [copyFromVersion, setCopyFromVersion] = useState('')
 
   useEffect(() => {
     let cancelled = false
@@ -453,7 +454,14 @@ function PluginLibrary() {
                     Define expected config files for this plugin. Paths are relative to the project root.
                   </Text>
                 </Stack>
-                <Button variant="ghost" onClick={() => setConfigEditor(null)} disabled={configEditor.busy}>
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    setCopyFromVersion('')
+                    setConfigEditor(null)
+                  }}
+                  disabled={configEditor.busy}
+                >
                   Close
                 </Button>
               </Group>
@@ -463,6 +471,53 @@ function PluginLibrary() {
                   {configEditor.error}
                 </Text>
               )}
+
+              {(() => {
+                const otherVersions = plugins.filter(
+                  (p) =>
+                    p.id.toLowerCase() === configEditor.plugin.id.toLowerCase() &&
+                    p.version !== configEditor.plugin.version,
+                )
+                if (otherVersions.length === 0) return null
+                return (
+                  <Group align="flex-end" gap="sm">
+                    <NativeSelect
+                      label="Copy from another version"
+                      description="Replace current drafts with config paths from the selected version. Save to keep."
+                      value={copyFromVersion}
+                      onChange={(e) => {
+                        const version = e.currentTarget.value
+                        setCopyFromVersion('')
+                        if (!version) return
+                        const source = plugins.find(
+                          (p) =>
+                            p.id.toLowerCase() === configEditor.plugin.id.toLowerCase() &&
+                            p.version === version,
+                        )
+                        if (!source) return
+                        const definitions = source.configDefinitions ?? []
+                        setConfigEditor((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                touched: true,
+                                drafts: definitions.map((def, i) => definitionToDraft(def, i)),
+                              }
+                            : prev,
+                        )
+                      }}
+                      data={[
+                        { value: '', label: 'Select version…' },
+                        ...otherVersions
+                          .slice()
+                          .sort((a, b) => b.version.localeCompare(a.version, undefined, { numeric: true }))
+                          .map((p) => ({ value: p.version, label: `v${p.version}` })),
+                      ]}
+                      style={{ maxWidth: 220 }}
+                    />
+                  </Group>
+                )
+              })()}
 
               <Stack gap="md">
                 {configEditor.drafts.length === 0 && (

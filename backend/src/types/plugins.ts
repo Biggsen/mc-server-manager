@@ -48,6 +48,13 @@ export interface ProjectPlugin {
   minecraftVersionMax?: string;
   cachePath?: string;
   configMappings?: ProjectPluginConfigMapping[];
+  /** If false, plugin is excluded from builds and manifest. Default true. */
+  enabled?: boolean;
+}
+
+/** Returns only plugins that are enabled (enabled !== false). */
+export function getEnabledPlugins(plugins: ProjectPlugin[] | undefined): ProjectPlugin[] {
+  return (plugins ?? []).filter((p) => p.enabled !== false);
 }
 
 export interface StoredPluginRecord {

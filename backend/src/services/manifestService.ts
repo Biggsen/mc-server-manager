@@ -3,7 +3,7 @@ import { join } from "path";
 import Handlebars from "handlebars";
 import type { StoredProject } from "../types/storage";
 import { findStoredPlugin } from "../storage/pluginsStore";
-import type { PluginSourceReference } from "../types/plugins";
+import { getEnabledPlugins, type PluginSourceReference } from "../types/plugins";
 import { getTemplatesRoot } from "../config";
 
 Handlebars.registerHelper("json", (value: unknown) => JSON.stringify(value, null, 2));
@@ -122,7 +122,7 @@ export async function renderManifest(
 }
 
 async function buildManifestPlugins(project: StoredProject): Promise<ManifestPluginEntry[]> {
-  const plugins = project.plugins ?? [];
+  const plugins = getEnabledPlugins(project.plugins);
   return Promise.all(
     plugins.map(async (plugin) => {
       const version = plugin.version ?? "latest";

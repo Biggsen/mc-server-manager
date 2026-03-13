@@ -15,7 +15,11 @@ export interface RunLogsAndConsoleProps {
   onSubmit: () => void
   onSendCommand: (command: string) => void
   commandBusy: boolean
+  /** Height of the log area in px. Default 200. Use a larger value (e.g. 400) on the Console page. */
+  logHeight?: number
 }
+
+const DEFAULT_LOG_HEIGHT = 200
 
 export function RunLogsAndConsole({
   run,
@@ -25,6 +29,7 @@ export function RunLogsAndConsole({
   onSubmit,
   onSendCommand,
   commandBusy,
+  logHeight = DEFAULT_LOG_HEIGHT,
 }: RunLogsAndConsoleProps) {
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault()
@@ -33,14 +38,14 @@ export function RunLogsAndConsole({
 
   return (
     <Stack gap="md">
-      <ScrollArea h={200} type="auto">
+      <ScrollArea h={logHeight} type="auto">
         <div
           ref={(element) => registerLogRef(run.id, element)}
           style={{
             display: 'flex',
             flexDirection: 'column',
             justifyContent: 'flex-end',
-            minHeight: '200px',
+            minHeight: `${logHeight}px`,
           }}
         >
           <Code

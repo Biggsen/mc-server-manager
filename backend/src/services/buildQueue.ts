@@ -24,6 +24,7 @@ import { scanProjectAssets } from "./projectScanner";
 import { commitFiles, getOctokitWithToken } from "./githubClient";
 import { fetchPluginArtifact } from "./pluginRegistry";
 import type { ProjectPlugin } from "../types/plugins";
+import { getEnabledPlugins } from "../types/plugins";
 import { collectUploadedConfigMaterials, isBinaryFile } from "./configUploads";
 import { getBuildsRoot } from "../config";
 
@@ -356,7 +357,7 @@ async function persistBuilds(): Promise<void> {
 }
 
 async function ensureProjectAssets(project: StoredProject): Promise<StoredProject> {
-  if (project.plugins?.length && project.configs?.length) {
+  if (getEnabledPlugins(project.plugins).length && project.configs?.length) {
     return project;
   }
 
@@ -379,7 +380,7 @@ async function materializePlugins(
 ): Promise<PluginMaterialization[]> {
   const results: PluginMaterialization[] = [];
 
-  for (const plugin of project.plugins ?? []) {
+  for (const plugin of getEnabledPlugins(project.plugins)) {
     const artifact = await fetchPluginArtifact(project, plugin, {
       githubToken: options.githubToken,
     });

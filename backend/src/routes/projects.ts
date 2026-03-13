@@ -50,6 +50,7 @@ import {
   saveUploadedConfigFile,
   deleteUploadedConfigFile,
   collectUploadedConfigMaterials,
+  isBinaryFile,
   type ConfigFileSummary,
   sanitizeRelativePath,
 } from "../services/configUploads";
@@ -122,6 +123,13 @@ interface PluginConfigDefinitionView {
   notes?: string;
   mapping?: ProjectPluginConfigMapping;
   uploaded?: ConfigFileSummary;
+}
+
+function findProjectPluginById(
+  plugins: ProjectPlugin[] | undefined,
+  pluginId: string,
+): ProjectPlugin | undefined {
+  return plugins?.find((p) => p.id.toLowerCase() === pluginId.toLowerCase());
 }
 
 // Type guard to check if mapping is new format (discriminated union)
@@ -450,6 +458,116 @@ async function reconcilePluginConfigMetadata(
   await setProjectAssets(projectId, { configs: nextConfigs });
 }
 
+async function copyPluginsBetweenProjects(
+  sourceProjectId: string,
+  targetProjectId: string,
+  mode: "replace" | "merge",
+): Promise<{ project: StoredProject; skippedPluginIds: string[] }> {
+  if (sourceProjectId === targetProjectId) {
+    throw new Error("Source and target project cannot be the same");
+  }
+
+  const sourceProject = await findProject(sourceProjectId);
+  const targetProject = await findProject(targetProjectId);
+
+  if (!sourceProject) {
+    throw new Error("Source project not found");
+  }
+  if (!targetProject) {
+    throw new Error("Target project not found");
+  }
+
+  const sourcePlugins = sourceProject.plugins ?? [];
+  const skippedPluginIds: string[] = [];
+
+  if (sourcePlugins.length === 0) {
+    if (mode === "replace") {
+      await setProjectAssets(targetProjectId, { plugins: [] });
+    }
+    const project = (await findProject(targetProjectId)) ?? targetProject;
+    return { project, skippedPluginIds };
+  }
+
+  const targetPluginIds = new Set((targetProject.plugins ?? []).map((p) => p.id));
+  const resolvedPlugins: ProjectPlugin[] = [];
+
+  for (const sourcePlugin of sourcePlugins) {
+    if (mode === "merge" && targetPluginIds.has(sourcePlugin.id)) {
+      skippedPluginIds.push(sourcePlugin.id);
+      continue;
+    }
+
+    let stored = await findStoredPlugin(sourcePlugin.id, sourcePlugin.version);
+    if (!stored) {
+      const sourceRef = sourcePlugin.source;
+      const finalMin =
+        sourcePlugin.minecraftVersionMin ??
+        sourceRef?.minecraftVersionMin ??
+        targetProject.minecraftVersion;
+      const finalMax =
+        sourcePlugin.minecraftVersionMax ??
+        sourceRef?.minecraftVersionMax ??
+        targetProject.minecraftVersion;
+      if (!finalMin || !finalMax) {
+        throw new Error(
+          `Plugin ${sourcePlugin.id}@${sourcePlugin.version}: unable to determine Minecraft version range`,
+        );
+      }
+      stored = await upsertStoredPlugin({
+        id: sourcePlugin.id,
+        version: sourcePlugin.version,
+        provider: sourcePlugin.provider ?? sourceRef?.provider ?? "custom",
+        sha256: sourceRef?.sha256 ?? sourcePlugin.sha256,
+        minecraftVersionMin: finalMin,
+        minecraftVersionMax: finalMax,
+        source: sourceRef,
+        cachePath: sourcePlugin.cachePath ?? sourceRef?.cachePath,
+      });
+    }
+
+    const projectPlugin: ProjectPlugin = {
+      id: sourcePlugin.id,
+      version: sourcePlugin.version,
+      provider: stored.provider ?? sourcePlugin.provider,
+      minecraftVersionMin: stored.minecraftVersionMin ?? sourcePlugin.minecraftVersionMin,
+      minecraftVersionMax: stored.minecraftVersionMax ?? sourcePlugin.minecraftVersionMax,
+      cachePath: sourcePlugin.cachePath ?? stored.cachePath,
+      source: stored.source ?? sourcePlugin.source,
+      configMappings: sourcePlugin.configMappings ?? [],
+    };
+
+    resolvedPlugins.push(projectPlugin);
+    if (mode === "merge") {
+      targetPluginIds.add(sourcePlugin.id);
+    }
+  }
+
+  if (mode === "replace") {
+    await setProjectAssets(targetProjectId, { plugins: resolvedPlugins });
+  } else {
+    const existingPlugins = targetProject.plugins ?? [];
+    const merged = [...existingPlugins, ...resolvedPlugins];
+    await setProjectAssets(targetProjectId, { plugins: merged });
+  }
+
+  let updatedProject = (await findProject(targetProjectId)) ?? targetProject;
+
+  for (const plugin of resolvedPlugins) {
+    const stored = await findStoredPlugin(plugin.id, plugin.version);
+    const libraryDefinitions = stored?.configDefinitions ?? [];
+    await reconcilePluginConfigMetadata(
+      targetProjectId,
+      updatedProject,
+      plugin,
+      libraryDefinitions,
+    );
+    updatedProject = (await findProject(targetProjectId)) ?? updatedProject;
+  }
+
+  const project = (await findProject(targetProjectId)) ?? updatedProject;
+  return { project, skippedPluginIds };
+}
+
 interface RepoParseSuccess {
   success: true;
   repo: RepoMetadata;
@@ -706,6 +824,87 @@ router.get("/:id", async (req: Request, res: Response) => {
   }
 
   res.json({ project: toSummary(project) });
+});
+
+router.post("/:id/duplicate", async (req: Request, res: Response) => {
+  try {
+    const sourceId = req.params.id;
+    const { name, minecraftVersion, loader } = req.body ?? {};
+
+    if (!minecraftVersion || typeof minecraftVersion !== "string" || !minecraftVersion.trim()) {
+      res.status(400).json({ error: "minecraftVersion is required for duplicate" });
+      return;
+    }
+
+    const sourceProject = await findProject(sourceId);
+    if (!sourceProject) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+
+    const proposedName =
+      (typeof name === "string" && name.trim()) || `${sourceProject.name} (${minecraftVersion.trim()})`;
+    const baseId = proposedName
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "project";
+    const snapshot = await listProjects();
+    const existingIds = new Set(snapshot.map((p) => p.id));
+    let newId = baseId;
+    let n = 1;
+    while (existingIds.has(newId)) {
+      newId = `${baseId}-${n}`;
+      n += 1;
+    }
+
+    const newProject = await createProject({
+      id: newId,
+      name: proposedName.trim(),
+      description: sourceProject.description,
+      minecraftVersion: minecraftVersion.trim(),
+      loader:
+        (typeof loader === "string" && loader.trim()) || sourceProject.loader || "paper",
+      profilePath: sourceProject.profilePath ?? "profiles/base.yml",
+    });
+
+    const profilePath = sourceProject.profilePath?.trim()
+      ? sourceProject.profilePath
+      : "profiles/base.yml";
+    const profileYaml = await readProjectFile(sourceProject, profilePath);
+    if (profileYaml) {
+      await writeProjectFile(newProject, profilePath, profileYaml);
+    }
+
+    await copyPluginsBetweenProjects(sourceId, newProject.id, "replace");
+
+    if (sourceProject.configs?.length) {
+      await setProjectAssets(newProject.id, { configs: sourceProject.configs });
+      const targetProject = (await findProject(newProject.id)) ?? newProject;
+      const uploadedMaterials = await collectUploadedConfigMaterials(sourceProject);
+      for (const { path, content } of uploadedMaterials) {
+        const buffer = isBinaryFile(path)
+          ? Buffer.from(content, "base64")
+          : Buffer.from(content, "utf-8");
+        await saveUploadedConfigFile(targetProject, path, buffer);
+      }
+    }
+
+    const refreshed = (await findProject(newProject.id)) ?? newProject;
+    res.status(201).json({ project: toSummary(refreshed) });
+  } catch (error) {
+    console.error("Failed to duplicate project", error);
+    const message = error instanceof Error ? error.message : String(error);
+    if (message === "Source and target project cannot be the same") {
+      res.status(400).json({ error: message });
+      return;
+    }
+    if (message === "Source project not found" || message === "Target project not found") {
+      res.status(404).json({ error: message });
+      return;
+    }
+    res.status(500).json({ error: message || "Failed to duplicate project" });
+  }
 });
 
 router.put("/:id", async (req: Request, res: Response) => {
@@ -1099,7 +1298,7 @@ router.post("/:id/plugins", async (req: Request, res: Response) => {
         configMappings: defaultMappings,
       })) ?? project;
 
-    const updatedPlugin = updatedProject.plugins?.find((entry) => entry.id === pluginId);
+    const updatedPlugin = findProjectPluginById(updatedProject.plugins, pluginId);
     if (updatedPlugin) {
       await reconcilePluginConfigMetadata(id, updatedProject, updatedPlugin, configDefinitions);
     }
@@ -1201,7 +1400,7 @@ router.post(
           configMappings: defaultMappings,
         })) ?? project;
 
-      const updatedPlugin = updatedProject.plugins?.find((entry) => entry.id === pluginId);
+      const updatedPlugin = findProjectPluginById(updatedProject.plugins, pluginId);
       if (updatedPlugin) {
         await reconcilePluginConfigMetadata(id, updatedProject, updatedPlugin, configDefinitions);
       }
@@ -1225,133 +1424,44 @@ router.post("/:id/plugins/copy-from/:sourceProjectId", async (req: Request, res:
   try {
     const targetId = req.params.id;
     const sourceProjectId = req.params.sourceProjectId;
-    const mode = (typeof req.query.mode === "string" && req.query.mode === "merge")
-      ? "merge"
-      : "replace";
+    const mode =
+      typeof req.query.mode === "string" && req.query.mode === "merge" ? "merge" : "replace";
 
     if (!targetId || !sourceProjectId) {
       res.status(400).json({ error: "target and source project ids are required" });
       return;
     }
 
-    if (sourceProjectId === targetId) {
-      res.status(400).json({ error: "Source and target project cannot be the same" });
-      return;
-    }
+    const { project, skippedPluginIds } = await copyPluginsBetweenProjects(
+      sourceProjectId,
+      targetId,
+      mode,
+    );
 
-    const sourceProject = await findProject(sourceProjectId);
-    const targetProject = await findProject(targetId);
-
-    if (!sourceProject) {
-      res.status(404).json({ error: "Source project not found" });
-      return;
-    }
-    if (!targetProject) {
-      res.status(404).json({ error: "Target project not found" });
-      return;
-    }
-
-    const sourcePlugins = sourceProject.plugins ?? [];
-    const skippedPluginIds: string[] = [];
-
-    if (sourcePlugins.length === 0) {
-      if (mode === "replace") {
-        await setProjectAssets(targetId, { plugins: [] });
-      }
-      const refreshed = (await findProject(targetId)) ?? targetProject;
-      const payload: { project: { id: string; plugins: ProjectPlugin[] }; skippedPluginIds?: string[] } = {
-        project: { id: targetId, plugins: refreshed.plugins ?? [] },
-      };
-      if (mode === "merge") {
-        payload.skippedPluginIds = [];
-      }
-      res.status(200).json(payload);
-      return;
-    }
-
-    const targetPluginIds = new Set((targetProject.plugins ?? []).map((p) => p.id));
-    const resolvedPlugins: ProjectPlugin[] = [];
-
-    for (const sourcePlugin of sourcePlugins) {
-      if (mode === "merge" && targetPluginIds.has(sourcePlugin.id)) {
-        skippedPluginIds.push(sourcePlugin.id);
-        continue;
-      }
-
-      let stored = await findStoredPlugin(sourcePlugin.id, sourcePlugin.version);
-      if (!stored) {
-        const sourceRef = sourcePlugin.source;
-        const finalMin = sourcePlugin.minecraftVersionMin ?? sourceRef?.minecraftVersionMin ?? targetProject.minecraftVersion;
-        const finalMax = sourcePlugin.minecraftVersionMax ?? sourceRef?.minecraftVersionMax ?? targetProject.minecraftVersion;
-        if (!finalMin || !finalMax) {
-          res.status(500).json({
-            error: `Plugin ${sourcePlugin.id}@${sourcePlugin.version}: unable to determine Minecraft version range`,
-          });
-          return;
-        }
-        stored = await upsertStoredPlugin({
-          id: sourcePlugin.id,
-          version: sourcePlugin.version,
-          provider: sourcePlugin.provider ?? sourceRef?.provider ?? "custom",
-          sha256: sourceRef?.sha256 ?? sourcePlugin.sha256,
-          minecraftVersionMin: finalMin,
-          minecraftVersionMax: finalMax,
-          source: sourceRef,
-          cachePath: sourcePlugin.cachePath ?? sourceRef?.cachePath,
-        });
-      }
-
-      const projectPlugin: ProjectPlugin = {
-        id: sourcePlugin.id,
-        version: sourcePlugin.version,
-        provider: stored.provider ?? sourcePlugin.provider,
-        minecraftVersionMin: stored.minecraftVersionMin ?? sourcePlugin.minecraftVersionMin,
-        minecraftVersionMax: stored.minecraftVersionMax ?? sourcePlugin.minecraftVersionMax,
-        cachePath: sourcePlugin.cachePath ?? stored.cachePath,
-        source: stored.source ?? sourcePlugin.source,
-        configMappings: sourcePlugin.configMappings ?? [],
-      };
-
-      resolvedPlugins.push(projectPlugin);
-      if (mode === "merge") {
-        targetPluginIds.add(sourcePlugin.id);
-      }
-    }
-
-    if (mode === "replace") {
-      await setProjectAssets(targetId, { plugins: resolvedPlugins });
-    } else {
-      const existingPlugins = targetProject.plugins ?? [];
-      const merged = [...existingPlugins, ...resolvedPlugins];
-      await setProjectAssets(targetId, { plugins: merged });
-    }
-
-    let updatedProject = (await findProject(targetId)) ?? targetProject;
-    const finalPlugins = updatedProject.plugins ?? [];
-
-    for (const plugin of resolvedPlugins) {
-      const stored = await findStoredPlugin(plugin.id, plugin.version);
-      const libraryDefinitions = stored?.configDefinitions ?? [];
-      await reconcilePluginConfigMetadata(targetId, updatedProject, plugin, libraryDefinitions);
-      updatedProject = (await findProject(targetId)) ?? updatedProject;
-    }
-
-    const refreshed = (await findProject(targetId)) ?? updatedProject;
     const payload: {
       project: { id: string; plugins: ProjectPlugin[] };
       skippedPluginIds?: string[];
       copiedCount?: number;
     } = {
-      project: { id: targetId, plugins: refreshed.plugins ?? [] },
+      project: { id: targetId, plugins: project.plugins ?? [] },
     };
     if (mode === "merge") {
       payload.skippedPluginIds = skippedPluginIds;
-      payload.copiedCount = resolvedPlugins.length;
+      const sourceProject = await findProject(sourceProjectId);
+      payload.copiedCount = (sourceProject?.plugins ?? []).length - skippedPluginIds.length;
     }
     res.status(200).json(payload);
   } catch (error) {
     console.error("Failed to copy plugins from project", error);
     const message = error instanceof Error ? error.message : String(error);
+    if (message === "Source and target project cannot be the same") {
+      res.status(400).json({ error: message });
+      return;
+    }
+    if (message === "Source project not found" || message === "Target project not found") {
+      res.status(404).json({ error: message });
+      return;
+    }
     res.status(500).json({ error: message || "Failed to copy plugins from project" });
   }
 });
@@ -1561,7 +1671,7 @@ router.get("/:id/plugins/:pluginId/configs", async (req: Request, res: Response)
       res.status(404).json({ error: "Project not found" });
       return;
     }
-    const plugin = project.plugins?.find((entry) => entry.id === pluginId);
+    const plugin = findProjectPluginById(project.plugins, pluginId);
     if (!plugin) {
       res.status(404).json({ error: "Plugin not found on project" });
       return;
@@ -1573,7 +1683,7 @@ router.get("/:id/plugins/:pluginId/configs", async (req: Request, res: Response)
     // Also include scanned configs from project.configs that match this plugin
     const scannedSummaries: ConfigFileSummary[] = [];
     for (const config of project.configs ?? []) {
-      if (config.pluginId === pluginId || (config.definitionId && libraryDefinitions.some(d => d.id === config.definitionId))) {
+      if (config.pluginId === plugin.id || (config.definitionId && libraryDefinitions.some(d => d.id === config.definitionId))) {
         // Check if it's already in uploadedSummaries
         if (!uploadedSummaries.some(s => s.path === config.path)) {
           // Try to get file stats - check both project directory and dev directory
@@ -1647,6 +1757,66 @@ router.get("/:id/plugins/:pluginId/configs", async (req: Request, res: Response)
   }
 });
 
+router.patch("/:id/plugins/:pluginId", async (req: Request, res: Response) => {
+  try {
+    const { id, pluginId } = req.params;
+    const project = await findProject(id);
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    const plugin = findProjectPluginById(project.plugins, pluginId);
+    if (!plugin) {
+      res.status(404).json({ error: "Plugin not found on project" });
+      return;
+    }
+    const enabled = req.body?.enabled;
+    const version = typeof req.body?.version === "string" ? req.body.version.trim() : undefined;
+    if (enabled === undefined && !version) {
+      res.status(400).json({ error: "body must include enabled and/or version" });
+      return;
+    }
+    if (enabled !== undefined && typeof enabled !== "boolean") {
+      res.status(400).json({ error: "body.enabled must be a boolean" });
+      return;
+    }
+    let updated: ProjectPlugin = { ...plugin };
+    if (typeof enabled === "boolean") {
+      updated.enabled = enabled;
+    }
+    if (version) {
+      const stored = await findStoredPlugin(pluginId, version);
+      if (!stored) {
+        res.status(400).json({
+          error: "Version not found in plugin library. Add this version to the Plugin Library first.",
+        });
+        return;
+      }
+      updated = {
+        ...updated,
+        version: stored.version,
+        provider: stored.provider ?? updated.provider,
+        source: stored.source ?? updated.source,
+        sha256: stored.sha256 ?? updated.sha256,
+        cachePath: stored.cachePath ?? updated.cachePath,
+        minecraftVersionMin: stored.minecraftVersionMin ?? updated.minecraftVersionMin,
+        minecraftVersionMax: stored.minecraftVersionMax ?? updated.minecraftVersionMax,
+      };
+    }
+    const updatedProject = await upsertProjectPlugin(id, updated);
+    const updatedPlugin = updatedProject?.plugins?.find((entry) => entry.id === plugin.id);
+    res.json({
+      project: { id, plugins: updatedProject?.plugins ?? [] },
+      plugin: updatedPlugin
+        ? { id: updatedPlugin.id, version: updatedPlugin.version, enabled: updatedPlugin.enabled }
+        : undefined,
+    });
+  } catch (error) {
+    console.error("Failed to update project plugin", error);
+    res.status(500).json({ error: "Failed to update project plugin" });
+  }
+});
+
 router.put("/:id/plugins/:pluginId/configs", async (req: Request, res: Response) => {
   try {
     const { id, pluginId } = req.params;
@@ -1655,7 +1825,7 @@ router.put("/:id/plugins/:pluginId/configs", async (req: Request, res: Response)
       res.status(404).json({ error: "Project not found" });
       return;
     }
-    const plugin = project.plugins?.find((entry) => entry.id === pluginId);
+    const plugin = findProjectPluginById(project.plugins, pluginId);
     if (!plugin) {
       res.status(404).json({ error: "Plugin not found on project" });
       return;
@@ -1781,7 +1951,7 @@ router.put("/:id/plugins/:pluginId/configs", async (req: Request, res: Response)
         configMappings: normalizedMappings,
       })) ?? project;
 
-    const updatedPlugin = updatedProject.plugins?.find((entry) => entry.id === pluginId);
+    const updatedPlugin = updatedProject.plugins?.find((entry) => entry.id === plugin.id);
     if (!updatedPlugin) {
       res.status(500).json({ error: "Failed to update plugin config mappings" });
       return;
@@ -1789,14 +1959,14 @@ router.put("/:id/plugins/:pluginId/configs", async (req: Request, res: Response)
 
     await reconcilePluginConfigMetadata(id, updatedProject, updatedPlugin, libraryDefinitions);
     const finalProject = (await findProject(id)) ?? updatedProject;
-    const finalPlugin = finalProject.plugins?.find((entry) => entry.id === pluginId);
+    const finalPlugin = finalProject.plugins?.find((entry) => entry.id === plugin.id);
     if (!finalPlugin) {
       res.status(500).json({ error: "Failed to load updated plugin configuration" });
       return;
     }
 
     const summaries = await listUploadedConfigFiles(finalProject);
-    const { definitions, unmatchedUploads } = buildPluginConfigViews(pluginId, finalPlugin, libraryDefinitions, summaries);
+    const { definitions, unmatchedUploads } = buildPluginConfigViews(finalPlugin.id, finalPlugin, libraryDefinitions, summaries);
 
     res.json({
       plugin: {
@@ -2005,7 +2175,7 @@ router.post(
         }
         
         // Validate path matches library definition
-        const plugin = project.plugins?.find((p) => p.id === pluginIdValue);
+        const plugin = findProjectPluginById(project.plugins, pluginIdValue);
         if (plugin?.version) {
           const stored = await findStoredPlugin(plugin.id, plugin.version);
           const definition = stored?.configDefinitions?.find((d) => d.id === definitionIdValue);
@@ -2034,7 +2204,7 @@ router.post(
       
       // Automatically create/update configMappings if plugin and type are provided
       if (pluginIdValue && typeValue) {
-        const plugin = project.plugins?.find((p) => p.id === pluginIdValue);
+        const plugin = findProjectPluginById(project.plugins, pluginIdValue);
         if (plugin) {
           const existingMappings = plugin.configMappings ?? [];
           let needsUpdate = false;
@@ -2106,7 +2276,7 @@ router.post(
               configMappings: updatedMappings,
             });
             if (updatedProject) {
-              const updatedPlugin = updatedProject.plugins?.find((p) => p.id === pluginIdValue);
+              const updatedPlugin = findProjectPluginById(updatedProject.plugins, pluginIdValue);
               if (updatedPlugin && plugin.version) {
                 const stored = await findStoredPlugin(plugin.id, plugin.version);
                 const libraryDefinitions = stored?.configDefinitions ?? [];
@@ -2195,7 +2365,7 @@ router.delete("/:id/configs/file", async (req: Request, res: Response) => {
     
     // If it's a custom config, remove from configMappings as well
     if (configEntry?.pluginId && configEntry?.definitionId && configEntry.definitionId.startsWith('custom/')) {
-      const plugin = project.plugins?.find((p) => p.id === configEntry.pluginId);
+      const plugin = findProjectPluginById(project.plugins, configEntry.pluginId);
       if (plugin) {
         const currentMappings = plugin.configMappings ?? [];
         const updatedMappings = currentMappings.filter((mapping) => {
@@ -2291,8 +2461,13 @@ router.delete("/:id/plugins/:pluginId", async (req: Request, res: Response) => {
       res.status(404).json({ error: "Project not found" });
       return;
     }
-    const updated = await removeProjectPlugin(id, pluginId);
-    await removePluginFromYamlFiles(project, pluginId);
+    const plugin = findProjectPluginById(project.plugins, pluginId);
+    if (!plugin) {
+      res.status(404).json({ error: "Plugin not found on project" });
+      return;
+    }
+    const updated = await removeProjectPlugin(id, plugin.id);
+    await removePluginFromYamlFiles(project, plugin.id);
     res.json({
       project: {
         id,

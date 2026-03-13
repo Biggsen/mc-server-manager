@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, memo, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { Play, FileText, MagnifyingGlass, Package as PackageIcon, Upload, PencilSimple, ArrowsClockwise, Trash, FloppyDisk, Plus, Copy } from '@phosphor-icons/react'
+import { Play, FileText, MagnifyingGlass, Package as PackageIcon, Upload, PencilSimple, ArrowsClockwise, Trash, FloppyDisk, Plus, Copy, ArrowCircleUp } from '@phosphor-icons/react'
 import CodeMirror from '@uiw/react-codemirror'
 import { yaml } from '@codemirror/lang-yaml'
 import { oneDark } from '@codemirror/theme-one-dark'
@@ -10,6 +10,9 @@ import {
   deleteProject,
   deleteProjectConfigFile,
   deleteProjectPlugin,
+  setProjectPluginEnabled,
+  setProjectPluginVersion,
+  duplicateProject,
   fetchBuildManifest,
   fetchBuilds,
   fetchProject,
@@ -47,7 +50,7 @@ import {
   type InitStatusResponse,
 } from '../lib/api'
 import YAML from 'yaml'
-import { Accordion, Alert, Anchor, Checkbox, Code, Group, Loader, NativeSelect, Radio, ScrollArea, SimpleGrid, Stack, Table, Tabs, Text, Textarea, TextInput, Title } from '@mantine/core'
+import { Accordion, Alert, Anchor, Checkbox, Code, Group, Loader, NativeSelect, Radio, ScrollArea, SimpleGrid, Stack, Switch, Table, Tabs, Text, Textarea, TextInput, Title } from '@mantine/core'
 import { Badge, Button, Card, CardContent, CardHeader, Modal, Skeleton } from '../components/ui'
 import { useToast } from '../components/ui/toast'
 import { ContentSection } from '../components/layout'
@@ -103,7 +106,10 @@ function formatBytes(bytes: number): string {
 interface PluginCardProps {
   plugin: NonNullable<ProjectSummary['plugins']>[number]
   pluginDefinitions: PluginConfigDefinitionView[]
+  otherVersions: StoredPluginRecord[]
   onRemove: (pluginId: string) => void
+  onSetEnabled: (pluginId: string, enabled: boolean) => void
+  onUpgrade: (pluginId: string, version: string) => void
   onEditCustomPath: (data: Omit<CustomPathModalState, 'opened'>) => void
   onRemoveCustomPath: (data: { pluginId: string; definitionId: string; path: string }) => void
   onAddCustomPath: (pluginId: string) => void
@@ -175,11 +181,15 @@ const DescriptionModal = memo(function DescriptionModal({
 const PluginCard = memo(function PluginCard({
   plugin,
   pluginDefinitions,
+  otherVersions,
   onRemove,
+  onSetEnabled,
+  onUpgrade,
   onEditCustomPath,
   onRemoveCustomPath,
   onAddCustomPath,
 }: PluginCardProps) {
+  const [upgradeOpen, setUpgradeOpen] = useState(false)
   const supportRange = useMemo(
     () =>
       formatMinecraftRange(
@@ -188,9 +198,10 @@ const PluginCard = memo(function PluginCard({
       ),
     [plugin.minecraftVersionMin, plugin.source?.minecraftVersionMin, plugin.minecraftVersionMax, plugin.source?.minecraftVersionMax],
   )
+  const enabled = plugin.enabled !== false
 
   return (
-    <Card key={`${plugin.id}:${plugin.version}`}>
+    <Card key={`${plugin.id}:${plugin.version}`} style={{ opacity: enabled ? 1 : 0.7 }}>
       <CardContent>
         <Stack gap="sm">
           <Group justify="space-between" align="flex-start">
@@ -199,6 +210,9 @@ const PluginCard = memo(function PluginCard({
                 <Text fw={600}>{plugin.id}</Text>
                 {plugin.provider && plugin.provider !== 'custom' && (
                   <Badge variant="accent">{plugin.provider}</Badge>
+                )}
+                {!enabled && (
+                  <Badge variant="outline">Disabled</Badge>
                 )}
                 <Text size="sm" c="dimmed">v{plugin.version}</Text>
               </Group>
@@ -216,6 +230,25 @@ const PluginCard = memo(function PluginCard({
               )}
             </Stack>
             <Group gap="xs">
+              <Switch
+                size="sm"
+                label="Enabled"
+                labelPosition="left"
+                checked={enabled}
+                onChange={(e) => onSetEnabled(plugin.id, e.currentTarget.checked)}
+                aria-label={`${plugin.id} enabled for builds`}
+              />
+              {otherVersions.length > 0 && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setUpgradeOpen(true)}
+                  icon={<ArrowCircleUp size={18} weight="fill" aria-hidden="true" />}
+                >
+                  Upgrade
+                </Button>
+              )}
               <Button
                 type="button"
                 variant="ghost"
@@ -226,6 +259,39 @@ const PluginCard = memo(function PluginCard({
               </Button>
             </Group>
           </Group>
+
+          <Modal
+            opened={upgradeOpen}
+            onClose={() => setUpgradeOpen(false)}
+            title={`Upgrade ${plugin.id}`}
+            size="sm"
+            centered
+          >
+            <Stack gap="md">
+              <Text size="sm" c="dimmed">
+                Current version: {plugin.version}. Choose a version from the library:
+              </Text>
+              <Stack gap="xs">
+                {[...otherVersions]
+                  .sort((a, b) => b.version.localeCompare(a.version, undefined, { numeric: true }))
+                  .map((lib) => (
+                    <Button
+                      key={`${lib.id}:${lib.version}`}
+                      type="button"
+                      variant="secondary"
+                      style={{ width: '100%' }}
+                      onClick={() => {
+                        onUpgrade(plugin.id, lib.version)
+                        setUpgradeOpen(false)
+                      }}
+                    >
+                      v{lib.version}
+                      {lib.provider && lib.provider !== 'custom' ? ` (${lib.provider})` : ''}
+                    </Button>
+                  ))}
+              </Stack>
+            </Stack>
+          </Modal>
 
           <Stack gap="md" mt="xs">
             <Stack gap="xs">
@@ -342,6 +408,7 @@ function ProjectDetail() {
   const [commandBusy, setCommandBusy] = useState<Record<string, boolean>>({})
   const [runsError, setRunsError] = useState<string | null>(null)
   const [manifestPreview, setManifestPreview] = useState<ManifestPreview | null>(null)
+  const [buildErrorPreview, setBuildErrorPreview] = useState<{ buildId: string; error: string } | null>(null)
   const [configFiles, setConfigFiles] = useState<ProjectConfigSummary[]>([])
   const [configsLoading, setConfigsLoading] = useState(false)
   const [configsError, setConfigsError] = useState<string | null>(null)
@@ -403,6 +470,12 @@ function ProjectDetail() {
   const [initStatusError, setInitStatusError] = useState<string | null>(null)
   const [newCommandValue, setNewCommandValue] = useState('')
   const [editingCommandIndex, setEditingCommandIndex] = useState<number | null>(null)
+  const [duplicateOpen, setDuplicateOpen] = useState(false)
+  const [duplicateName, setDuplicateName] = useState('')
+  const [duplicateVersion, setDuplicateVersion] = useState('')
+  const [duplicateLoader, setDuplicateLoader] = useState('')
+  const [duplicateBusy, setDuplicateBusy] = useState(false)
+  const [duplicateError, setDuplicateError] = useState<string | null>(null)
 
   const existingProjectPlugins = useMemo(() => {
     const pluginSet = new Set<string>()
@@ -469,6 +542,39 @@ function ProjectDetail() {
       setCopyFromBusy(false)
     }
   }, [id, copyFromSourceId, copyFromMode, otherProjects, toast])
+
+  const openDuplicateModal = useCallback(() => {
+    setDuplicateName('')
+    setDuplicateVersion('')
+    setDuplicateLoader(project?.loader ?? 'paper')
+    setDuplicateError(null)
+    setDuplicateOpen(true)
+  }, [project?.loader])
+
+  const handleDuplicate = useCallback(async () => {
+    if (!id || !project) return
+    const version = duplicateVersion.trim()
+    if (!version) {
+      setDuplicateError('Minecraft version is required')
+      return
+    }
+    setDuplicateBusy(true)
+    setDuplicateError(null)
+    try {
+      const created = await duplicateProject(id, {
+        name: duplicateName.trim() || undefined,
+        minecraftVersion: version,
+        loader: duplicateLoader.trim() || undefined,
+      })
+      setDuplicateOpen(false)
+      toast({ variant: 'success', title: `Created "${created.name}". You can update plugin versions for the new MC version.` })
+      navigate(`/projects/${created.id}`)
+    } catch (err) {
+      setDuplicateError(err instanceof Error ? err.message : 'Failed to duplicate project')
+    } finally {
+      setDuplicateBusy(false)
+    }
+  }, [id, project, duplicateName, duplicateVersion, duplicateLoader, toast, navigate])
 
   const handleRefreshLibrary = useCallback(async () => {
     setLibraryLoading(true)
@@ -993,6 +1099,12 @@ function ProjectDetail() {
   ])
 
   useEffect(() => {
+    if (activeTab !== 'plugins' || !project?.plugins?.length) return
+    if (libraryLoading || libraryPlugins.length > 0 || libraryError) return
+    void handleRefreshLibrary()
+  }, [activeTab, project?.plugins?.length, libraryLoading, libraryPlugins.length, libraryError, handleRefreshLibrary])
+
+  useEffect(() => {
     if (!id) return
     let cancelled = false
 
@@ -1273,6 +1385,50 @@ useEffect(() => {
         toast({
           title: 'Failed to remove plugin',
           description: err instanceof Error ? err.message : 'Failed to remove plugin.',
+          variant: 'danger',
+        })
+      }
+    },
+    [id, toast],
+  )
+
+  const handleSetPluginEnabled = useCallback(
+    async (pluginId: string, enabled: boolean) => {
+      if (!id) return
+      try {
+        const plugins = await setProjectPluginEnabled(id, pluginId, enabled)
+        setProject((prev) => (prev ? { ...prev, plugins: plugins ?? [] } : prev))
+        toast({
+          title: enabled ? 'Plugin enabled' : 'Plugin disabled',
+          description: `${pluginId} will ${enabled ? '' : 'not '}be included in builds.`,
+          variant: 'success',
+        })
+      } catch (err) {
+        toast({
+          title: 'Failed to update plugin',
+          description: err instanceof Error ? err.message : 'Failed to update plugin.',
+          variant: 'danger',
+        })
+      }
+    },
+    [id, toast],
+  )
+
+  const handleUpgradePlugin = useCallback(
+    async (pluginId: string, version: string) => {
+      if (!id) return
+      try {
+        const plugins = await setProjectPluginVersion(id, pluginId, version)
+        setProject((prev) => (prev ? { ...prev, plugins: plugins ?? [] } : prev))
+        toast({
+          title: 'Plugin upgraded',
+          description: `${pluginId} updated to v${version}.`,
+          variant: 'success',
+        })
+      } catch (err) {
+        toast({
+          title: 'Failed to upgrade plugin',
+          description: err instanceof Error ? err.message : 'Add this version to the Plugin Library first.',
           variant: 'danger',
         })
       }
@@ -1870,50 +2026,71 @@ useEffect(() => {
               </Stack>
             </SimpleGrid>
 
-            <Group gap="sm" wrap="wrap">
-              <Button
-                variant="ghost"
-                icon={<MagnifyingGlass size={18} weight="bold" aria-hidden="true" />}
-                onClick={() => void scanAssets()}
-                disabled={busy}
-              >
-                Scan assets
-              </Button>
-              <Button
-                variant="ghost"
-                icon={<FileText size={18} weight="fill" aria-hidden="true" />}
-                onClick={() => void generateManifest()}
-                disabled={busy}
-              >
-                Generate manifest
-              </Button>
-              <Button
-                variant="primary"
-                icon={<PackageIcon size={18} weight="fill" aria-hidden="true" />}
-                onClick={() => setShowBuildOptions(true)}
-                disabled={busy}
-              >
-                Trigger build
-              </Button>
-              <Button
-                variant="pill"
-                icon={<Play size={18} weight="fill" aria-hidden="true" />}
-                onClick={() => setShowRunOptions(true)}
-                disabled={busy}
-              >
-                Run locally
-              </Button>
-              {project?.repo && (
+            <Stack gap="xs">
+              <Group gap="sm" wrap="wrap">
                 <Button
-                  variant="secondary"
-                  icon={<ArrowsClockwise size={18} weight="bold" aria-hidden="true" />}
-                  onClick={() => void syncRepository()}
+                  variant="ghost"
+                  icon={<MagnifyingGlass size={18} weight="bold" aria-hidden="true" />}
+                  onClick={() => void scanAssets()}
                   disabled={busy}
                 >
-                  Sync to repository
+                  Scan assets
                 </Button>
-              )}
-            </Group>
+                <Button
+                  variant="ghost"
+                  icon={<FileText size={18} weight="fill" aria-hidden="true" />}
+                  onClick={() => void generateManifest()}
+                  disabled={busy}
+                >
+                  Generate manifest
+                </Button>
+                <Button
+                  variant="primary"
+                  icon={<PackageIcon size={18} weight="fill" aria-hidden="true" />}
+                  onClick={() => setShowBuildOptions(true)}
+                  disabled={busy}
+                >
+                  Trigger build
+                </Button>
+                <Button
+                  variant="pill"
+                  icon={<Play size={18} weight="fill" aria-hidden="true" />}
+                  onClick={() => setShowRunOptions(true)}
+                  disabled={busy}
+                >
+                  Run locally
+                </Button>
+              </Group>
+              <Group gap="sm">
+                <Anchor
+                  component="button"
+                  type="button"
+                  size="sm"
+                  underline="hover"
+                  onClick={busy ? undefined : openDuplicateModal}
+                  style={{ cursor: busy ? 'not-allowed' : 'pointer' }}
+                >
+                  Duplicate for upgrade
+                </Anchor>
+                {project?.repo && (
+                  <>
+                    <Text span size="sm" c="dimmed">
+                      ·
+                    </Text>
+                    <Anchor
+                      component="button"
+                      type="button"
+                      size="sm"
+                      underline="hover"
+                      onClick={busy ? undefined : () => void syncRepository()}
+                      style={{ cursor: busy ? 'not-allowed' : 'pointer' }}
+                    >
+                      Sync to repository
+                    </Anchor>
+                  </>
+                )}
+              </Group>
+            </Stack>
           </Stack>
         </CardContent>
       </Card>
@@ -1980,7 +2157,6 @@ useEffect(() => {
                           {project.plugins
                             .slice()
                             .sort((a, b) => a.id.localeCompare(b.id, undefined, { sensitivity: 'base' }))
-                            .slice(0, 10)
                             .map((plugin) => (
                             <Group key={`${plugin.id}:${plugin.version}`} gap="xs" wrap="nowrap">
                               <Text size="sm" fw={500} style={{ flex: 1 }}>
@@ -1996,11 +2172,6 @@ useEffect(() => {
                               )}
                             </Group>
                           ))}
-                          {project.plugins.length > 10 && (
-                            <Text size="sm" c="dimmed">
-                              +{project.plugins.length - 10} more
-                            </Text>
-                          )}
                         </Stack>
                       ) : (
                         <Text size="sm" c="dimmed">
@@ -2145,6 +2316,21 @@ useEffect(() => {
                                   <Table.Td>{build.finishedAt ? new Date(build.finishedAt).toLocaleString() : '—'}</Table.Td>
                                   <Table.Td>
                                     <Group gap="xs">
+                                      {build.status === 'failed' && build.error && (
+                                        <Button
+                                          type="button"
+                                          variant="ghost"
+                                          color="red"
+                                          onClick={() =>
+                                            setBuildErrorPreview({
+                                              buildId: build.manifestBuildId ?? build.id,
+                                              error: build.error!,
+                                            })
+                                          }
+                                        >
+                                          View error
+                                        </Button>
+                                      )}
                                       <Button
                                         type="button"
                                         variant="ghost"
@@ -2188,6 +2374,27 @@ useEffect(() => {
                     </Stack>
                   </CardContent>
                 </Card>
+
+                <Modal
+                  opened={!!buildErrorPreview}
+                  onClose={() => setBuildErrorPreview(null)}
+                  title={`Build error: ${buildErrorPreview?.buildId ?? ''}`}
+                  size="md"
+                >
+                  <Stack gap="md">
+                    <Text size="sm" c="dimmed">
+                      This build failed with the following error:
+                    </Text>
+                    <Code block style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                      {buildErrorPreview?.error ?? ''}
+                    </Code>
+                    <Group justify="flex-end">
+                      <Button variant="default" onClick={() => setBuildErrorPreview(null)}>
+                        Close
+                      </Button>
+                    </Group>
+                  </Stack>
+                </Modal>
 
                 {manifestPreview && (
                   <Card>
@@ -2653,7 +2860,14 @@ useEffect(() => {
                                 key={`${plugin.id}:${plugin.version}`}
                                 plugin={plugin}
                                 pluginDefinitions={pluginDefinitionCache[plugin.id] ?? []}
+                                otherVersions={libraryPlugins.filter(
+                                  (p) =>
+                                    p.id.toLowerCase() === plugin.id.toLowerCase() &&
+                                    p.version !== plugin.version,
+                                )}
                                 onRemove={handleRemovePlugin}
+                                onSetEnabled={handleSetPluginEnabled}
+                                onUpgrade={handleUpgradePlugin}
                                 onEditCustomPath={handleEditCustomPath}
                                 onRemoveCustomPath={handleRemoveCustomPath}
                                 onAddCustomPath={handleAddCustomPath}
@@ -3187,6 +3401,70 @@ useEffect(() => {
           }}
           loading={descriptionBusy}
         />
+
+        <Modal
+          opened={duplicateOpen}
+          onClose={() => {
+            if (!duplicateBusy) {
+              setDuplicateOpen(false)
+              setDuplicateError(null)
+            }
+          }}
+          title="Duplicate for upgrade"
+          size="md"
+          centered
+        >
+          <Stack gap="md">
+            <Text size="sm" c="dimmed">
+              Create a copy of this project with a new Minecraft version. Profile and plugin list are copied; you can then adjust plugin versions for the new version.
+            </Text>
+            {duplicateError && (
+              <Alert color="red" title="Error">
+                {duplicateError}
+              </Alert>
+            )}
+            <TextInput
+              label="New project name"
+              placeholder={project ? `${project.name} (${duplicateVersion || '1.x'})` : ''}
+              value={duplicateName}
+              onChange={(e) => setDuplicateName(e.currentTarget.value)}
+              description="Leave empty to auto-generate from version"
+            />
+            <TextInput
+              label="Minecraft version"
+              placeholder="e.g. 1.21.1"
+              value={duplicateVersion}
+              onChange={(e) => setDuplicateVersion(e.currentTarget.value)}
+              required
+              description="Target version for the new project"
+            />
+            <TextInput
+              label="Loader"
+              placeholder="paper"
+              value={duplicateLoader}
+              onChange={(e) => setDuplicateLoader(e.currentTarget.value)}
+              description="Optional; defaults to current project loader"
+            />
+            <Group justify="flex-end">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setDuplicateOpen(false)}
+                disabled={duplicateBusy}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                onClick={() => void handleDuplicate()}
+                disabled={!duplicateVersion.trim() || duplicateBusy}
+              >
+                {duplicateBusy ? 'Creating…' : 'Duplicate project'}
+              </Button>
+            </Group>
+          </Stack>
+        </Modal>
       </ContentSection>
 
       <Modal

@@ -6,6 +6,7 @@ import {
   PencilSimpleLine,
   Plug,
   SquaresFour,
+  Terminal,
   Toolbox,
   RocketLaunch,
   Buildings,
@@ -35,6 +36,7 @@ import Deployments from './pages/Deployments'
 import TestTools from './pages/TestTools'
 import PluginLibrary from './pages/PluginLibrary'
 import LiveEditor from './pages/LiveEditor'
+import Console from './pages/Console'
 import AddPlugin from './pages/AddPlugin'
 import GenerateProfile from './pages/GenerateProfile'
 import Styleguide from './pages/Styleguide'
@@ -85,6 +87,11 @@ const NAV_SECTIONS: NavSection[] = [
         to: '/live-editor',
         label: 'Live Editor',
         icon: <PencilSimpleLine size={18} weight="fill" aria-hidden="true" />,
+      },
+      {
+        to: '/console',
+        label: 'Console',
+        icon: <Terminal size={18} weight="fill" aria-hidden="true" />,
       },
       {
         to: '/deployments',
@@ -266,6 +273,9 @@ function App() {
     if (location.pathname.startsWith('/live-editor')) {
       return 'Live Editor'
     }
+    if (location.pathname.startsWith('/console')) {
+      return 'Console'
+    }
     if (location.pathname.startsWith('/deployments')) {
       return 'Deployments'
     }
@@ -418,6 +428,7 @@ function App() {
                 <Route path="/projects/:id/profile" element={<GenerateProfile />} />
                 <Route path="/plugins" element={<PluginLibrary />} />
                 <Route path="/live-editor" element={<LiveEditor />} />
+                <Route path="/console" element={<Console />} />
                 <Route path="/plugins/add" element={<AddPlugin />} />
                 {isDev && <Route path="/dev/tools" element={<TestTools />} />}
                 <Route path="/deployments" element={<Deployments />} />

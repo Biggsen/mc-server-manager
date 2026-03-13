@@ -116,12 +116,14 @@ interface CreateProjectInput {
   loader: string;
   profilePath?: string;
   repo?: RepoMetadata;
+  /** When duplicating, pass a pre-computed unique id to avoid slug collisions. */
+  id?: string;
 }
 
 export async function createProject(input: CreateProjectInput): Promise<StoredProject> {
   const snapshot = await loadSnapshot();
   const now = new Date().toISOString();
-  const id = slugify(input.name);
+  const id = input.id ?? slugify(input.name);
 
   const project: StoredProject = {
     id,
@@ -357,6 +359,7 @@ export async function setProjectAssets(id: string, payload: AssetsPayload): Prom
           minecraftVersionMin: plugin.minecraftVersionMin ?? previous?.minecraftVersionMin,
           minecraftVersionMax: plugin.minecraftVersionMax ?? previous?.minecraftVersionMax,
           configMappings: mergedMappings,
+          enabled: previous?.enabled ?? plugin.enabled ?? true,
         };
         existingMap.set(plugin.id, merged);
       }
