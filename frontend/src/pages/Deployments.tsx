@@ -1,60 +1,56 @@
-import { useEffect, useMemo, useState } from 'react'
-import type { FormEvent } from 'react'
+import { useEffect, useState } from 'react'
 import {
-  fetchDeploymentTargets,
-  createDeploymentTarget,
-  type DeploymentTarget,
-  type DeploymentType,
+  fetchDeploymentRecords,
+  createDeployment,
+  deleteDeployment,
+  getDeploymentArtifactUrl,
+  fetchProjects,
+  fetchBuilds,
+  type DeploymentRecord,
+  type ProjectSummary,
+  type BuildJob,
 } from '../lib/api'
-import { Alert, Grid, Group, Loader, NativeSelect, Stack, Text, Textarea, TextInput, Title } from '@mantine/core'
+import { Alert, Checkbox, Grid, Group, Loader, NativeSelect, Stack, Table, Text, Textarea, TextInput, Title } from '@mantine/core'
 import { Button, Card, CardContent } from '../components/ui'
 
-type FormState = {
-  name: string
-  type: DeploymentType
-  notes: string
-  path: string
-  host: string
-  port: string
-  username: string
-  remotePath: string
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-const INITIAL_FORM: FormState = {
-  name: '',
-  type: 'folder',
-  notes: '',
-  path: '',
-  host: '',
-  port: '22',
-  username: '',
-  remotePath: '',
+function shortDeploymentId(fullId: string): string {
+  return fullId.includes(':') ? fullId.split(':')[1] ?? fullId : fullId
 }
 
 function Deployments() {
-  const [targets, setTargets] = useState<DeploymentTarget[]>([])
-  const [loading, setLoading] = useState(true)
+  const [records, setRecords] = useState<DeploymentRecord[]>([])
+  const [projects, setProjects] = useState<ProjectSummary[]>([])
+  const [builds, setBuilds] = useState<BuildJob[]>([])
+  const [recordsLoading, setRecordsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [saving, setSaving] = useState(false)
-  const [form, setForm] = useState<FormState>(INITIAL_FORM)
+  const [creating, setCreating] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
+  const [createProjectId, setCreateProjectId] = useState<string>('')
+  const [createBuildId, setCreateBuildId] = useState<string>('')
+  const [createDescription, setCreateDescription] = useState('')
+  const [includeServerJar, setIncludeServerJar] = useState(false)
+  const [includeWorlds, setIncludeWorlds] = useState(false)
+  const [serverJarPath, setServerJarPath] = useState('')
+  const [historyProjectFilter, setHistoryProjectFilter] = useState<string>('')
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
     const load = async () => {
       try {
-        setLoading(true)
-        const items = await fetchDeploymentTargets()
+        const projectList = await fetchProjects()
         if (cancelled) return
-        setTargets(items)
+        setProjects(projectList)
         setError(null)
       } catch (err) {
         if (cancelled) return
         setError(err instanceof Error ? err.message : String(err))
-      } finally {
-        if (!cancelled) {
-          setLoading(false)
-        }
       }
     }
     load()
@@ -63,218 +59,167 @@ function Deployments() {
     }
   }, [])
 
-  const folderTargets = useMemo(
-    () => targets.filter((target) => target.type === 'folder'),
-    [targets],
-  )
-  const sftpTargets = useMemo(
-    () => targets.filter((target) => target.type === 'sftp'),
-    [targets],
-  )
-
-  const resetForm = () => {
-    setForm(INITIAL_FORM)
-  }
-
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    setMessage(null)
-
-    try {
-      setSaving(true)
-      if (!form.name.trim()) {
-        setMessage('Name is required.')
-        return
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      try {
+        setRecordsLoading(true)
+        const list = await fetchDeploymentRecords(historyProjectFilter || undefined)
+        if (cancelled) return
+        setRecords(list)
+      } catch (err) {
+        if (cancelled) return
+        setRecords([])
+      } finally {
+        if (!cancelled) {
+          setRecordsLoading(false)
+        }
       }
-      if (form.type === 'folder' && !form.path.trim()) {
-        setMessage('Folder path is required.')
-        return
-      }
-      if (form.type === 'sftp' && (!form.host.trim() || !form.username.trim() || !form.remotePath.trim())) {
-        setMessage('SFTP host, username, and remote path are required.')
-        return
-      }
-
-      const target = await createDeploymentTarget({
-        name: form.name.trim(),
-        type: form.type,
-        notes: form.notes ? form.notes.trim() : undefined,
-        folder:
-          form.type === 'folder'
-            ? {
-                path: form.path.trim(),
-              }
-            : undefined,
-        sftp:
-          form.type === 'sftp'
-            ? {
-                host: form.host.trim(),
-                port: Number(form.port) || 22,
-                username: form.username.trim(),
-                remotePath: form.remotePath.trim(),
-              }
-            : undefined,
-      })
-
-      setTargets((prev) => [target, ...prev.filter((item) => item.id !== target.id)])
-      setMessage('Deployment target saved.')
-      resetForm()
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : 'Failed to save deployment target.')
-    } finally {
-      setSaving(false)
     }
-  }
+    load()
+    return () => {
+      cancelled = true
+    }
+  }, [historyProjectFilter])
+
+  useEffect(() => {
+    if (!createProjectId) {
+      setBuilds([])
+      setCreateBuildId('')
+      return
+    }
+    let cancelled = false
+    fetchBuilds(createProjectId).then((list) => {
+      if (cancelled) return
+      const succeeded = list.filter((b) => b.status === 'succeeded')
+      setBuilds(succeeded)
+      const latest = succeeded.sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      )[0]
+      setCreateBuildId(latest?.id ?? '')
+    }).catch(() => {
+      if (!cancelled) setBuilds([])
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [createProjectId])
 
   return (
     <Stack gap="lg" p="lg">
+      {error && (
+        <Alert color="red" title="Error">
+          {error}
+        </Alert>
+      )}
+
       <Card>
         <CardContent>
           <Stack gap="md">
             <Stack gap={4}>
-              <Title order={2}>Deployment Targets</Title>
+              <Title order={3}>Create deployment</Title>
               <Text size="sm" c="dimmed">
-                Configure destinations for build artifacts. Publish support is stubbed for now.
+                Create a server deployment zip from a succeeded build. Optional short description.
               </Text>
             </Stack>
-
-            {loading && (
-              <Group>
-                <Loader size="sm" />
-                <Text size="sm" c="dimmed">Loading deployment targets…</Text>
-              </Group>
-            )}
-            {error && (
-              <Alert color="red" title="Error">
-                {error}
-              </Alert>
-            )}
-
-            <form onSubmit={handleSubmit}>
-              <Stack gap="md">
-                <Grid>
-                  <Grid.Col span={{ base: 12, sm: 6 }}>
-                    <TextInput
-                      label="Name"
-                      id="deployment-name"
-                      value={form.name}
-                      onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
-                      placeholder="Production server"
+            <Stack gap="md">
+              <Grid>
+                <Grid.Col span={{ base: 12, sm: 6 }}>
+                  <NativeSelect
+                    label="Project"
+                    value={createProjectId}
+                    onChange={(e) => setCreateProjectId(e.target.value)}
+                    data={[
+                      { value: '', label: 'Select project' },
+                      ...projects.map((p) => ({ value: p.id, label: p.name || p.id })),
+                    ]}
+                  />
+                </Grid.Col>
+                <Grid.Col span={{ base: 12, sm: 6 }}>
+                  <NativeSelect
+                    label="Build"
+                    value={createBuildId}
+                    onChange={(e) => setCreateBuildId(e.target.value)}
+                    data={[
+                      { value: '', label: builds.length ? 'Select build' : (createProjectId ? 'No succeeded builds' : 'Select project first') },
+                      ...builds.map((b) => ({
+                        value: b.id,
+                        label: `${b.id.slice(0, 8)} (${new Date(b.createdAt).toLocaleString()})`,
+                      })),
+                    ]}
+                    disabled={!createProjectId || builds.length === 0}
+                  />
+                </Grid.Col>
+                <Grid.Col span={12}>
+                  <Textarea
+                    label="Description (optional)"
+                    placeholder="e.g. Production deploy before event"
+                    value={createDescription}
+                    onChange={(e) => setCreateDescription(e.target.value)}
+                    rows={2}
+                  />
+                </Grid.Col>
+                <Grid.Col span={12}>
+                  <Stack gap="xs">
+                    <Checkbox
+                      label="Include server jar"
+                      checked={includeServerJar}
+                      onChange={(e) => setIncludeServerJar(e.currentTarget.checked)}
                     />
-                  </Grid.Col>
-
-                  <Grid.Col span={{ base: 12, sm: 6 }}>
-                    <NativeSelect
-                      label="Type"
-                      id="deployment-type"
-                      value={form.type}
-                      onChange={(event) =>
-                        setForm((prev) => ({ ...prev, type: event.target.value as DeploymentType }))
-                      }
-                      data={[
-                        { value: 'folder', label: 'Local folder' },
-                        { value: 'sftp', label: 'SFTP server' },
-                      ]}
-                    />
-                  </Grid.Col>
-
-                  <Grid.Col span={12}>
-                    <Textarea
-                      label="Notes"
-                      id="deployment-notes"
-                      rows={2}
-                      value={form.notes}
-                      onChange={(event) => setForm((prev) => ({ ...prev, notes: event.target.value }))}
-                      placeholder="Optional description or credentials hint"
-                    />
-                  </Grid.Col>
-
-                  {form.type === 'folder' && (
-                    <Grid.Col span={12}>
+                    {includeServerJar && (
                       <TextInput
-                        label="Folder path"
-                        id="deployment-path"
-                        value={form.path}
-                        onChange={(event) => setForm((prev) => ({ ...prev, path: event.target.value }))}
-                        placeholder="D:/minecraft/releases"
+                        label="Server JAR path"
+                        placeholder="e.g. C:\server\paper-1.21.1.jar"
+                        value={serverJarPath}
+                        onChange={(e) => setServerJarPath(e.currentTarget.value)}
+                        description="Absolute path to the server JAR file"
                       />
-                    </Grid.Col>
-                  )}
-
-                  {form.type === 'sftp' && (
-                    <>
-                      <Grid.Col span={{ base: 12, sm: 6 }}>
-                        <TextInput
-                          label="Host"
-                          id="deployment-host"
-                          value={form.host}
-                          onChange={(event) => setForm((prev) => ({ ...prev, host: event.target.value }))}
-                          placeholder="sftp.example.com"
-                        />
-                      </Grid.Col>
-                      <Grid.Col span={{ base: 12, sm: 6 }}>
-                        <TextInput
-                          label="Port"
-                          id="deployment-port"
-                          value={form.port}
-                          onChange={(event) => setForm((prev) => ({ ...prev, port: event.target.value }))}
-                          placeholder="22"
-                        />
-                      </Grid.Col>
-                      <Grid.Col span={{ base: 12, sm: 6 }}>
-                        <TextInput
-                          label="Username"
-                          id="deployment-username"
-                          value={form.username}
-                          onChange={(event) =>
-                            setForm((prev) => ({ ...prev, username: event.target.value }))
-                          }
-                          placeholder="deploy"
-                        />
-                      </Grid.Col>
-                      <Grid.Col span={{ base: 12, sm: 6 }}>
-                        <TextInput
-                          label="Remote path"
-                          id="deployment-remote"
-                          value={form.remotePath}
-                          onChange={(event) =>
-                            setForm((prev) => ({ ...prev, remotePath: event.target.value }))
-                          }
-                          placeholder="/srv/minecraft/releases"
-                        />
-                      </Grid.Col>
-                    </>
-                  )}
-                </Grid>
-
-                <Group>
-                  <Button
-                    type="submit"
-                    variant="primary"
-                    disabled={saving}
-                  >
-                    {saving ? 'Saving…' : 'Save Target'}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    onClick={resetForm}
-                    disabled={saving}
-                  >
-                    Reset
-                  </Button>
-                </Group>
-
-                {message && (
-                  <Alert
-                    color={message.startsWith('Error') || message.includes('required') || message.includes('Failed') ? 'red' : 'green'}
-                    title={message.startsWith('Error') || message.includes('required') || message.includes('Failed') ? 'Error' : 'Success'}
-                  >
-                    {message}
-                  </Alert>
-                )}
-              </Stack>
-            </form>
+                    )}
+                    <Checkbox
+                      label="Include worlds"
+                      checked={includeWorlds}
+                      onChange={(e) => setIncludeWorlds(e.currentTarget.checked)}
+                      description="Include world/, world_nether/, world_the_end/ from the build if present"
+                    />
+                  </Stack>
+                </Grid.Col>
+              </Grid>
+              <Button
+                variant="primary"
+                disabled={creating || !createProjectId || !createBuildId}
+                onClick={async () => {
+                  setMessage(null)
+                  try {
+                    setCreating(true)
+                    const deployment = await createDeployment({
+                      projectId: createProjectId,
+                      buildId: createBuildId,
+                      description: createDescription.trim() || undefined,
+                      includeServerJar: includeServerJar || undefined,
+                      includeWorlds: includeWorlds || undefined,
+                      serverJarPath: includeServerJar && serverJarPath.trim() ? serverJarPath.trim() : undefined,
+                    })
+                    setRecords((prev) => [deployment, ...prev])
+                    setMessage('Deployment created.')
+                    setCreateDescription('')
+                  } catch (err) {
+                    setMessage(err instanceof Error ? err.message : 'Failed to create deployment.')
+                  } finally {
+                    setCreating(false)
+                  }
+                }}
+              >
+                {creating ? 'Creating…' : 'Create deployment'}
+              </Button>
+              {message && (
+                <Alert
+                  color={message.includes('Failed') || message.includes('required') ? 'red' : 'green'}
+                  title={message.includes('Failed') || message.includes('required') ? 'Error' : 'Success'}
+                >
+                  {message}
+                </Alert>
+              )}
+            </Stack>
           </Stack>
         </CardContent>
       </Card>
@@ -282,66 +227,100 @@ function Deployments() {
       <Card>
         <CardContent>
           <Stack gap="md">
-            <Title order={3}>Configured Targets</Title>
-            {targets.length === 0 && (
-              <Text size="sm" c="dimmed">No deployment targets configured yet.</Text>
+            <Stack gap={4}>
+              <Title order={3}>Deployment history</Title>
+              <Text size="sm" c="dimmed">
+                List deployments (server zips). Download or publish to a target when supported.
+              </Text>
+            </Stack>
+            <NativeSelect
+              label="Filter by project"
+              value={historyProjectFilter}
+              onChange={(e) => setHistoryProjectFilter(e.target.value)}
+              data={[
+                { value: '', label: 'All projects' },
+                ...projects.map((p) => ({ value: p.id, label: p.name || p.id })),
+              ]}
+              style={{ maxWidth: 320 }}
+            />
+            {recordsLoading && (
+              <Group>
+                <Loader size="sm" />
+                <Text size="sm" c="dimmed">Loading deployment history…</Text>
+              </Group>
             )}
-            {targets.length > 0 && (
-              <Grid>
-                <Grid.Col span={{ base: 12, md: 6 }}>
-                  <Stack gap="md">
-                    <Title order={4}>Local Folders</Title>
-                    {folderTargets.length === 0 && (
-                      <Text size="sm" c="dimmed">None configured.</Text>
-                    )}
-                    {folderTargets.length > 0 && (
-                      <Stack gap="md">
-                        {folderTargets.map((target) => (
-                          <Card key={target.id}>
-                            <CardContent>
-                              <Stack gap={4}>
-                                <Text fw={600}>{target.name}</Text>
-                                <Text size="sm" c="dimmed">{target.path}</Text>
-                                {target.notes && (
-                                  <Text size="sm" c="dimmed">{target.notes}</Text>
-                                )}
-                              </Stack>
-                            </CardContent>
-                          </Card>
-                        ))}
-                      </Stack>
-                    )}
-                  </Stack>
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, md: 6 }}>
-                  <Stack gap="md">
-                    <Title order={4}>SFTP Servers</Title>
-                    {sftpTargets.length === 0 && (
-                      <Text size="sm" c="dimmed">None configured.</Text>
-                    )}
-                    {sftpTargets.length > 0 && (
-                      <Stack gap="md">
-                        {sftpTargets.map((target) => (
-                          <Card key={target.id}>
-                            <CardContent>
-                              <Stack gap={4}>
-                                <Text fw={600}>{target.name}</Text>
-                                <Text size="sm" c="dimmed">
-                                  {target.username}@{target.host}:{target.port ?? 22}
-                                </Text>
-                                <Text size="sm" c="dimmed">{target.remotePath}</Text>
-                                {target.notes && (
-                                  <Text size="sm" c="dimmed">{target.notes}</Text>
-                                )}
-                              </Stack>
-                            </CardContent>
-                          </Card>
-                        ))}
-                      </Stack>
-                    )}
-                  </Stack>
-                </Grid.Col>
-              </Grid>
+            {!recordsLoading && records.length === 0 && (
+              <Text size="sm" c="dimmed">No deployments yet. Create one from a succeeded build above.</Text>
+            )}
+            {!recordsLoading && records.length > 0 && (
+              <Table striped>
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>Project</Table.Th>
+                    <Table.Th>Version</Table.Th>
+                    <Table.Th>Description</Table.Th>
+                    <Table.Th>Build</Table.Th>
+                    <Table.Th>Created</Table.Th>
+                    <Table.Th>Size</Table.Th>
+                    <Table.Th>Actions</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {records.map((r) => {
+                    const shortId = shortDeploymentId(r.id)
+                    const projectName = projects.find((p) => p.id === r.projectId)?.name
+                    return (
+                    <Table.Tr key={r.id}>
+                      <Table.Td>
+                        <Text size="sm" ff="monospace" title={projectName ?? undefined}>{r.projectId}</Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size="sm" ff="monospace" fw={600}>{shortId}</Text>
+                      </Table.Td>
+                      <Table.Td>{r.description || '—'}</Table.Td>
+                      <Table.Td>
+                        <Text size="sm" ff="monospace">{r.buildId.slice(0, 8)}</Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size="sm">{new Date(r.createdAt).toLocaleString()}</Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size="sm">{r.artifactSize != null ? formatBytes(r.artifactSize) : '—'}</Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Group gap="xs">
+                          <a
+                            href={getDeploymentArtifactUrl(r.id)}
+                            download={`${r.projectId}-${shortId}.zip`}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            Download
+                          </a>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            color="red"
+                            disabled={deletingId !== null}
+                            onClick={async () => {
+                              if (!confirm(`Delete deployment ${shortId}? The zip file will be removed.`)) return
+                              try {
+                                setDeletingId(r.id)
+                                await deleteDeployment(r.id)
+                                setRecords((prev) => prev.filter((rec) => rec.id !== r.id))
+                              } finally {
+                                setDeletingId(null)
+                              }
+                            }}
+                          >
+                            {deletingId === r.id ? 'Deleting…' : 'Delete'}
+                          </Button>
+                        </Group>
+                      </Table.Td>
+                    </Table.Tr>
+                  )})}
+                </Table.Tbody>
+              </Table>
             )}
           </Stack>
         </CardContent>

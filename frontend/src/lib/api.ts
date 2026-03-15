@@ -1189,6 +1189,56 @@ export async function publishDeployment(
   })
 }
 
+export interface DeploymentRecord {
+  id: string
+  projectId: string
+  buildId: string
+  createdAt: string
+  description?: string
+  artifactPath: string
+  artifactSize?: number
+  artifactSha256?: string
+}
+
+export async function fetchDeploymentRecords(projectId?: string): Promise<DeploymentRecord[]> {
+  const path = projectId
+    ? `/deployments/records?projectId=${encodeURIComponent(projectId)}`
+    : '/deployments/records'
+  const data = await request<{ deployments: DeploymentRecord[] }>(path)
+  return data.deployments
+}
+
+export async function createDeployment(payload: {
+  projectId: string
+  buildId: string
+  description?: string
+  includeServerJar?: boolean
+  includeWorlds?: boolean
+  serverJarPath?: string
+}): Promise<DeploymentRecord> {
+  const data = await request<{ deployment: DeploymentRecord }>('/deployments/records', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+  return data.deployment
+}
+
+export async function fetchDeploymentRecord(id: string): Promise<DeploymentRecord> {
+  const data = await request<{ deployment: DeploymentRecord }>(`/deployments/records/${id}`)
+  return data.deployment
+}
+
+export function getDeploymentArtifactUrl(id: string): string {
+  return `${getApiBase()}/deployments/records/${encodeURIComponent(id)}/artifact`
+}
+
+export async function deleteDeployment(id: string): Promise<void> {
+  await request(`/deployments/records/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    parseJson: false,
+  })
+}
+
 export interface GitHubRepo {
   id: number
   name: string
