@@ -28,4 +28,15 @@ export interface DeploymentSnapshot {
   targets: DeploymentTarget[];
 }
 
+export interface DeploymentRecord {
+  id: string;
+  projectId: string;
+  buildId: string;
+  createdAt: string;
+  description?: string;
+  artifactPath: string;
+  artifactSize?: number;
+  artifactSha256?: string;
+}
+
 

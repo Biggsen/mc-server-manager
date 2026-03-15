@@ -67,6 +67,13 @@ export function getRunsRoot(): string {
 }
 
 /**
+ * Get the deployments root directory (deployment zip artifacts).
+ */
+export function getDeploymentsRoot(): string {
+  return join(getDataRoot(), "data", "deployments");
+}
+
+/**
  * Get the cache root directory.
  */
 export function getCacheRoot(): string {

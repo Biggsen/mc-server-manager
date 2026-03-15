@@ -25,7 +25,7 @@ Deployment zips are derived from a **build**: filter the build artifact to inclu
 
 The deployment zip should produce a **clean bundle** that matches a standard Minecraft/Paper server layout. Two packaging options:
 
-- **Option A (single top-level folder):** Zip entries live under one root folder (e.g. `<projectId>-<label>/` or `<projectName>-live/`). Unzip gives one folder to drop or use as server root.
+- **Option A (single top-level folder):** Zip entries live under one root folder (e.g. `<projectId>-<deploymentId>/`). Unzip gives one folder to drop or use as server root.
 - **Option B (flat):** Zip entries at root; user extracts into an empty server directory.
 
 Recommendation: **Option A** so the bundle is self-describing and safe to extract anywhere.
@@ -33,13 +33,16 @@ Recommendation: **Option A** so the bundle is self-describing and safe to extrac
 **Target structure** (what the zip should contain, under the optional top-level folder):
 
 ```
-<top-level-folder>/     e.g. teledosi-live/ or myproject-v1.2/
+<top-level-folder>/     e.g. <projectId>-<deploymentId>/
   config/
     paper-global.yml
     paper-world-defaults.yml
     ...                  (any project configs that live under config/)
   plugins/
     <plugin>.jar
+    <PluginName>/
+      config.yml
+      ...
     ...
   world/                 (optional: empty placeholder or omit)
   world_nether/
@@ -58,7 +61,7 @@ Recommendation: **Option A** so the bundle is self-describing and safe to extrac
 
 - **Root-level config files** – Build configs whose output path is at server root, **excluding** server auto-generated files (see below): e.g. `server.properties`, `bukkit.yml`, `spigot.yml`, `commands.yml`, `help.yml`, `permissions.yml`, `wepif.yml`, and any other project-defined root configs. Same paths as in the build artifact.
 - **`config/*`** – All build config files under `config/` (e.g. `config/paper-global.yml`, `config/paper-world-defaults.yml`). Binary or text as in build.
-- **`plugins/*.jar`** – Plugin JARs only at `plugins/<fileName>`.
+- **`plugins/`** – Full tree: all files and subfolders under `plugins/` (JARs, plugin configs, etc.). Only `plugins/registry.yml` is excluded (project-only).
 
 **Excluded – server auto-generated (do not zip):**
 
@@ -75,7 +78,7 @@ If the build artifact contains any of these (e.g. from a template), filter them 
 **Optional:**
 
 - **Empty world dirs** – `world/`, `world_nether/`, `world_the_end/` as empty placeholder directories so the extracted tree matches a typical server layout. Implementation may omit them and let the server create them on first run.
-- **Top-level folder** – One directory wrapping all entries (e.g. `<projectId>-<label>.zip` → contents under `<projectId>-<label>/`).
+- **Top-level folder** – One directory wrapping all entries (e.g. `<projectId>-<deploymentId>.zip` → contents under `<projectId>-<deploymentId>/`).
 
 **Not produced by MC Server Manager (operator-supplied or out of scope):**
 
@@ -95,7 +98,7 @@ If the build artifact contains any of these (e.g. from a template), filter them 
 
 - **Source:** A deployment zip is created **from a specific build** (by build id).
 - **Requirements:** The build must exist, be **succeeded**, and have an **artifact** (build artifact path present).
-- **Process:** Read the build artifact zip, filter entries to server-runtime paths only: (1) root-level config files (e.g. `server.properties`, `bukkit.yml`) **excluding** server auto-generated files (`eula.txt`, `usercache.json`, `ops.json`, `whitelist.json`, `banned-ips.json`, `banned-players.json`), (2) paths under `config/`, (3) paths under `plugins/` (plugin binaries only, e.g. `.jar`). Optionally wrap all entries under a single top-level folder and/or add empty `world/`, `world_nether/`, `world_the_end/` dirs. Write the new zip as the deployment artifact. No re-run of build steps; pure filter (and optional reshape) of the existing build zip.
+- **Process:** Read the build artifact zip, filter entries to server-runtime paths only: (1) root-level config files (e.g. `server.properties`, `bukkit.yml`) **excluding** server auto-generated files (`eula.txt`, `usercache.json`, `ops.json`, `whitelist.json`, `banned-ips.json`, `banned-players.json`), (2) paths under `config/`, (3) all files and subfolders under `plugins/` (excluding only `plugins/registry.yml`). Optionally wrap all entries under a single top-level folder and/or add empty `world/`, `world_nether/`, `world_the_end/` dirs. Write the new zip as the deployment artifact. No re-run of build steps; pure filter (and optional reshape) of the existing build zip.
 
 This keeps a single source of truth (the build) and avoids divergence between “what was built” and “what was deployed.”
 
@@ -107,11 +110,11 @@ Each created deployment is stored as a **deployment record** with at least:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | string | Unique deployment id (e.g. UUID or timestamp-based). |
+| `id` | string | Unique deployment id (e.g. UUID or version-like). |
 | `projectId` | string | Project this deployment belongs to. |
 | `buildId` | string | Build id that was used to produce this deployment. |
 | `createdAt` | string | ISO 8601 timestamp. |
-| `label` | string (optional) | User-defined label or version (e.g. `"v1.2"`, `"prod-2025-03"`). |
+| `description` | string (optional) | Short user-defined description (e.g. "Production deploy before event"). |
 | `artifactPath` | string | Absolute path to the deployment zip on disk. |
 | `artifactSize` | number (optional) | Size in bytes. |
 | `artifactSha256` | string (optional) | SHA-256 of the deployment zip. |
@@ -130,7 +133,7 @@ History is **append-only**: create new deployment records; no edit or delete of 
 ## 6. API (backend)
 
 - **Create deployment**
-  - **Input:** `projectId`, `buildId`, optional `label`.
+  - **Input:** `projectId`, `buildId`, optional `description`.
   - **Behavior:** Load build by id; verify status succeeded and artifact exists. Build artifact zip path may be from existing build queue/store. Filter zip to server layout; write deployment zip to storage; append deployment record to history; return deployment record.
   - **Errors:** 404 if build not found or no artifact; 400 if build not succeeded.
 
@@ -144,16 +147,16 @@ History is **append-only**: create new deployment records; no edit or delete of 
 
 - **Download deployment artifact**
   - **Input:** `deploymentId`.
-  - **Behavior:** Resolve artifact path from record; stream zip file (e.g. `Content-Disposition: attachment` with a filename like `deployment-<projectId>-<deploymentId>.zip` or `server-<label>-<timestamp>.zip`).
+  - **Behavior:** Resolve artifact path from record; stream zip file with `Content-Disposition: attachment` and filename `<projectId>-<deploymentId>.zip`.
 
 ---
 
 ## 7. Deployments page (frontend)
 
 - **Primary actions**
-  - **Create deployment:** Choose project (and optionally a specific succeeded build; default to latest succeeded build). Optional label. Trigger create API; on success, show in history and optionally offer download.
+  - **Create deployment:** Choose project (and optionally a specific succeeded build; default to latest succeeded build). Optional short description. Trigger create API; on success, show in history and optionally offer download.
 - **History**
-  - List deployments (for selected project or all). Show: label, build id, created at, size; actions: download.
+  - List deployments (for selected project or all). Show: description, build id, created at, size; actions: download.
 - **Deployment targets (existing)**
   - Keep existing UI for defining folder/SFTP targets. No “publish” action required for this phase; the page can note that “Publish to target” will use deployment zips when implemented.
 
@@ -173,10 +176,10 @@ Subtitle or description can be updated from “Publish support is stubbed for no
 
 ## 9. Implementation notes
 
-- **Filtering the build zip:** Use the same zip library as build (e.g. AdmZip). Iterate entries; include if (1) path is a root-level server config **and** not in the server auto-generated exclude list (`eula.txt`, `usercache.json`, `ops.json`, `whitelist.json`, `banned-ips.json`, `banned-players.json`), (2) path is under `config/`, or (3) path is under `plugins/` and is a plugin binary (e.g. `.jar`). Exclude anything under `profiles/`, `overlays/`, or `plugins/registry.yml`. Reuse path conventions from the build so the deployment zip matches the minimal deploy structure.
-- **Top-level folder:** If Option A is used, prefix every included entry with `<projectId>-<label>/` (or similar); when the user unzips they get one folder containing the full server layout.
+- **Filtering the build zip:** Use the same zip library as build (e.g. AdmZip). Iterate entries; include if (1) path is a root-level server config **and** not in the server auto-generated exclude list (`eula.txt`, `usercache.json`, `ops.json`, `whitelist.json`, `banned-ips.json`, `banned-players.json`), (2) path is under `config/`, or (3) path is under `plugins/` (all files and subfolders; exclude only `plugins/registry.yml`). Exclude anything under `profiles/` or `overlays/`. Reuse path conventions from the build so the deployment zip matches the minimal deploy structure.
+- **Top-level folder:** If Option A is used, prefix every included entry with `<projectId>-<deploymentId>/`; when the user unzips they get one folder containing the full server layout.
 - **Placeholder world dirs:** If including empty `world/`, `world_nether/`, `world_the_end/`, add zero-byte placeholder entries or empty dir entries so extractors create the directories.
-- **Naming:** Deployment zip filename can be `server-<projectId>-<deploymentId>.zip` or include label, e.g. `<projectId>-<label>.zip` or `server-<projectId>-<label>-<shortTimestamp>.zip` for readability.
+- **Naming:** Deployment zip filename is `<projectId>-<deploymentId>.zip`.
 - **Build artifact path:** Builds currently store `artifactPath` (e.g. on `BuildJob`). Deployment creation reads that path to open the build zip; no change to build output format required.
 
 ---
@@ -185,11 +188,11 @@ Subtitle or description can be updated from “Publish support is stubbed for no
 
 | Item | Decision |
 |------|----------|
-| Deployment zip contents | Minimal deploy structure: root-level server configs (excluding auto-generated eula.txt, usercache.json, ops.json, whitelist.json, banned-*.json) + `config/` + `plugins/*`; optional top-level folder; optional empty world dirs. No `server.jar` (operator-supplied). |
+| Deployment zip contents | Minimal deploy structure: root-level server configs (excluding auto-generated eula.txt, usercache.json, ops.json, whitelist.json, banned-*.json) + `config/` + `plugins/` (full tree, exclude only registry.yml); optional top-level folder; optional empty world dirs. No `server.jar` (operator-supplied). |
 | Source | Filter from an existing succeeded build artifact. |
-| History | Append-only deployment records (id, projectId, buildId, createdAt, label, artifactPath, optional size/sha). |
+| History | Append-only deployment records (id, projectId, buildId, createdAt, optional description, artifactPath, optional size/sha). |
 | Storage | Dedicated deployment dir + history index (e.g. JSON store). |
-| API | Create (projectId, buildId, label), List (projectId?), Get (id), Download (id). |
+| API | Create (projectId, buildId, optional description), List (projectId?), Get (id), Download (id). |
 | UI | Create deployment from project/build; list history; download. Publish to targets later. |
 
 This gives a clear path to “proper server deployment zips with a history of each build” on the Deployments page, independent of the build pipeline, and leaves publishing to folder/SFTP for a follow-up.
