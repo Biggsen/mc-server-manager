@@ -871,7 +871,6 @@ async function syncWorkspaceWithArtifact(
   const baseline = { ...(state?.baselineHashes ?? {}) };
   const dirty = new Set(state?.dirtyPaths ?? []);
   const seenPaths = new Set<string>();
-  const firstRun = !state;
 
   for (const entry of entries) {
     const relativePath = normalizeEntryPath(entry.entryName);
@@ -892,46 +891,9 @@ async function syncWorkspaceWithArtifact(
     const data = entry.getData();
     const artifactHash = hashBuffer(data);
 
-    const currentHash = await hashFileIfExists(targetPath);
-    const previousBaseline = baseline[relativePath];
-    const matchesArtifact = currentHash === artifactHash;
-    const artifactChanged = previousBaseline && previousBaseline !== artifactHash;
-    let wroteFile = false;
-
-    if (firstRun) {
-      await writeFile(targetPath, data);
-      wroteFile = true;
-    } else if (!currentHash) {
-      await writeFile(targetPath, data);
-      wroteFile = true;
-    } else if (!previousBaseline) {
-      if (!matchesArtifact) {
-        dirty.add(relativePath);
-        appendLog(job, "system", `Workspace file ${relativePath} differs from artifact; leaving existing copy untouched.`);
-      } else {
-        baseline[relativePath] = artifactHash;
-        dirty.delete(relativePath);
-      }
-    } else if (artifactChanged) {
-      // Artifact has changed - update file even if workspace was modified
-      await writeFile(targetPath, data);
-      wroteFile = true;
-      appendLog(job, "system", `Updating ${relativePath} from changed artifact (previous baseline: ${previousBaseline.substring(0, 16)}..., new: ${artifactHash.substring(0, 16)}...).`);
-    } else if (currentHash === previousBaseline) {
-      await writeFile(targetPath, data);
-      wroteFile = true;
-    } else if (matchesArtifact) {
-      baseline[relativePath] = artifactHash;
-      dirty.delete(relativePath);
-    } else {
-      dirty.add(relativePath);
-      appendLog(job, "system", `Preserving local changes to ${relativePath}; artifact update skipped.`);
-    }
-
-    if (wroteFile) {
-      baseline[relativePath] = artifactHash;
-      dirty.delete(relativePath);
-    }
+    await writeFile(targetPath, data);
+    baseline[relativePath] = artifactHash;
+    dirty.delete(relativePath);
   }
 
   for (const key of Object.keys(baseline)) {
@@ -989,22 +951,4 @@ function normalizeEntryPath(entryName: string): string | undefined {
 function hashBuffer(buffer: Buffer): string {
   return createHash("sha256").update(buffer).digest("hex");
 }
-
-async function hashFileIfExists(path: string): Promise<string | undefined> {
-  try {
-    const fileStats = await stat(path);
-    if (!fileStats.isFile()) {
-      return undefined;
-    }
-    const data = await readFile(path);
-    return hashBuffer(data);
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === "ENOENT") {
-      return undefined;
-    }
-    throw error;
-  }
-}
-
 

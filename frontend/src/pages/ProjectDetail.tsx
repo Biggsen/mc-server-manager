@@ -2389,7 +2389,7 @@ useEffect(() => {
                       {buildErrorPreview?.error ?? ''}
                     </Code>
                     <Group justify="flex-end">
-                      <Button variant="default" onClick={() => setBuildErrorPreview(null)}>
+                      <Button variant="secondary" onClick={() => setBuildErrorPreview(null)}>
                         Close
                       </Button>
                     </Group>
