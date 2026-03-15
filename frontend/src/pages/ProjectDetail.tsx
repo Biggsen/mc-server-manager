@@ -7,14 +7,14 @@ import { oneDark } from '@codemirror/theme-one-dark'
 import {
   addProjectPlugin,
   copyProjectPluginsFrom,
+  createGitHubRepo,
   deleteProject,
   deleteProjectConfigFile,
   deleteProjectPlugin,
-  setProjectPluginEnabled,
-  setProjectPluginVersion,
   duplicateProject,
   fetchBuildManifest,
   fetchBuilds,
+  fetchGitHubRepos,
   fetchProject,
   fetchProjects,
   fetchProjectConfigFile,
@@ -23,16 +23,20 @@ import {
   fetchProjectProfile,
   fetchProjectRuns,
   fetchPluginLibrary,
+  linkProjectRepo,
   resetProjectWorkspace,
   runProjectLocally,
   saveProjectProfile,
   scanProjectAssets,
   sendRunCommand,
+  setProjectPluginEnabled,
+  setProjectPluginVersion,
   stopRunJob,
   syncProjectRepository,
   triggerBuild,
   triggerManifest,
   updateProject,
+  updateProjectSftp,
   updateProjectConfigFile,
   updateProjectPluginConfigs,
   uploadProjectConfig,
@@ -40,6 +44,7 @@ import {
   clearInitMarker,
   type BuildJob,
   type BuildOptions,
+  type GitHubRepo,
   type PluginConfigDefinitionView,
   type ProjectConfigSummary,
   type ProjectPluginConfigMapping,
@@ -434,6 +439,11 @@ function ProjectDetail() {
   const [deleteRepo, setDeleteRepo] = useState(false)
   const [deleteBusy, setDeleteBusy] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [sftpHost, setSftpHost] = useState('')
+  const [sftpPort, setSftpPort] = useState('')
+  const [sftpUsername, setSftpUsername] = useState('')
+  const [sftpRemotePath, setSftpRemotePath] = useState('')
+  const [sftpSaveBusy, setSftpSaveBusy] = useState(false)
   const [addPluginOpen, setAddPluginOpen] = useState(false)
   const [addPluginBusy, setAddPluginBusy] = useState(false)
   const [addPluginError, setAddPluginError] = useState<string | null>(null)
@@ -476,6 +486,24 @@ function ProjectDetail() {
   const [duplicateLoader, setDuplicateLoader] = useState('')
   const [duplicateBusy, setDuplicateBusy] = useState(false)
   const [duplicateError, setDuplicateError] = useState<string | null>(null)
+  const [duplicateRepos, setDuplicateRepos] = useState<GitHubRepo[]>([])
+  const [duplicateRepoLoading, setDuplicateRepoLoading] = useState(false)
+  const [duplicateSelectedRepoId, setDuplicateSelectedRepoId] = useState<number | ''>('')
+  const [duplicateRepoError, setDuplicateRepoError] = useState<string | null>(null)
+  const [duplicateOwners, setDuplicateOwners] = useState<Array<{ key: string; label: string }>>([])
+  const [duplicateSelectedOwner, setDuplicateSelectedOwner] = useState('self')
+  const [duplicateNewRepoName, setDuplicateNewRepoName] = useState('')
+  const [duplicateCreatingRepo, setDuplicateCreatingRepo] = useState(false)
+  const [linkRepoOpen, setLinkRepoOpen] = useState(false)
+  const [linkRepoBusy, setLinkRepoBusy] = useState(false)
+  const [linkRepoError, setLinkRepoError] = useState<string | null>(null)
+  const [linkRepos, setLinkRepos] = useState<GitHubRepo[]>([])
+  const [linkRepoLoading, setLinkRepoLoading] = useState(false)
+  const [linkRepoSelectedId, setLinkRepoSelectedId] = useState<number | ''>('')
+  const [linkRepoOwners, setLinkRepoOwners] = useState<Array<{ key: string; label: string }>>([])
+  const [linkRepoSelectedOwner, setLinkRepoSelectedOwner] = useState('self')
+  const [linkRepoNewName, setLinkRepoNewName] = useState('')
+  const [linkRepoCreatingRepo, setLinkRepoCreatingRepo] = useState(false)
 
   const existingProjectPlugins = useMemo(() => {
     const pluginSet = new Set<string>()
@@ -548,8 +576,117 @@ function ProjectDetail() {
     setDuplicateVersion('')
     setDuplicateLoader(project?.loader ?? 'paper')
     setDuplicateError(null)
+    setDuplicateRepoError(null)
+    setDuplicateSelectedRepoId('')
     setDuplicateOpen(true)
   }, [project?.loader])
+
+  useEffect(() => {
+    if (!duplicateOpen) return
+    let cancelled = false
+    setDuplicateRepoLoading(true)
+    fetchGitHubRepos()
+      .then((data) => {
+        if (cancelled) return
+        const personalLabel = data.owner?.login ? `${data.owner.login} (personal)` : 'Personal account'
+        setDuplicateOwners([
+          { key: 'self', label: personalLabel },
+          ...data.orgs.map((org) => ({ key: org.login, label: org.login })),
+        ])
+        setDuplicateRepos(data.repos)
+        setDuplicateSelectedOwner((prev) => {
+          const options = [{ key: 'self', label: personalLabel }, ...data.orgs.map((o) => ({ key: o.login, label: o.login }))]
+          return options.some((o) => o.key === prev) ? prev : options[0]?.key ?? 'self'
+        })
+        setDuplicateRepoError(null)
+      })
+      .catch((err: Error) => {
+        if (cancelled) return
+        setDuplicateRepoError(err.message.includes('GitHub authentication required') ? 'Sign in with GitHub to link a repository.' : err.message)
+        setDuplicateRepos([])
+      })
+      .finally(() => {
+        if (!cancelled) setDuplicateRepoLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [duplicateOpen])
+
+  useEffect(() => {
+    if (!linkRepoOpen) return
+    let cancelled = false
+    setLinkRepoLoading(true)
+    fetchGitHubRepos()
+      .then((data) => {
+        if (cancelled) return
+        const personalLabel = data.owner?.login ? `${data.owner.login} (personal)` : 'Personal account'
+        setLinkRepoOwners([
+          { key: 'self', label: personalLabel },
+          ...data.orgs.map((org) => ({ key: org.login, label: org.login })),
+        ])
+        setLinkRepos(data.repos)
+        setLinkRepoSelectedId(data.repos[0]?.id ?? '')
+        setLinkRepoSelectedOwner((prev) => {
+          const options = [{ key: 'self', label: personalLabel }, ...data.orgs.map((o) => ({ key: o.login, label: o.login }))]
+          return options.some((o) => o.key === prev) ? prev : options[0]?.key ?? 'self'
+        })
+        setLinkRepoError(null)
+      })
+      .catch((err: Error) => {
+        if (cancelled) return
+        setLinkRepoError(err.message.includes('GitHub authentication required') ? 'Sign in with GitHub to link a repository.' : err.message)
+        setLinkRepos([])
+      })
+      .finally(() => {
+        if (!cancelled) setLinkRepoLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [linkRepoOpen])
+
+  const duplicateSortedRepos = useMemo(
+    () => [...duplicateRepos].sort((a, b) => a.fullName.localeCompare(b.fullName)),
+    [duplicateRepos],
+  )
+  const duplicateSelectedRepo = typeof duplicateSelectedRepoId === 'number'
+    ? duplicateSortedRepos.find((r) => r.id === duplicateSelectedRepoId)
+    : undefined
+
+  const linkSortedRepos = useMemo(
+    () => [...linkRepos].sort((a, b) => a.fullName.localeCompare(b.fullName)),
+    [linkRepos],
+  )
+  const linkSelectedRepo = typeof linkRepoSelectedId === 'number'
+    ? linkSortedRepos.find((r) => r.id === linkRepoSelectedId)
+    : undefined
+
+  const buildRepoPayload = useCallback((r: GitHubRepo) => ({
+    owner: r.fullName.split('/')[0] ?? r.name,
+    name: r.name,
+    fullName: r.fullName,
+    htmlUrl: r.htmlUrl,
+    defaultBranch: r.defaultBranch ?? 'main',
+  }), [])
+
+  const handleDuplicateCreateRepo = useCallback(async () => {
+    if (!duplicateNewRepoName.trim()) {
+      setDuplicateRepoError('Repository name is required.')
+      return
+    }
+    setDuplicateCreatingRepo(true)
+    setDuplicateRepoError(null)
+    try {
+      const repo = await createGitHubRepo(duplicateSelectedOwner, {
+        name: duplicateNewRepoName.trim(),
+        private: true,
+      })
+      setDuplicateRepos((prev) => [...prev, repo].sort((a, b) => a.fullName.localeCompare(b.fullName)))
+      setDuplicateSelectedRepoId(repo.id)
+      setDuplicateNewRepoName('')
+    } catch (err) {
+      setDuplicateRepoError(err instanceof Error ? err.message : 'Failed to create repository.')
+    } finally {
+      setDuplicateCreatingRepo(false)
+    }
+  }, [duplicateSelectedOwner, duplicateNewRepoName])
 
   const handleDuplicate = useCallback(async () => {
     if (!id || !project) return
@@ -561,10 +698,12 @@ function ProjectDetail() {
     setDuplicateBusy(true)
     setDuplicateError(null)
     try {
+      const repoPayload = duplicateSelectedRepo ? buildRepoPayload(duplicateSelectedRepo) : undefined
       const created = await duplicateProject(id, {
         name: duplicateName.trim() || undefined,
         minecraftVersion: version,
         loader: duplicateLoader.trim() || undefined,
+        repo: repoPayload,
       })
       setDuplicateOpen(false)
       toast({ variant: 'success', title: `Created "${created.name}". You can update plugin versions for the new MC version.` })
@@ -574,7 +713,45 @@ function ProjectDetail() {
     } finally {
       setDuplicateBusy(false)
     }
-  }, [id, project, duplicateName, duplicateVersion, duplicateLoader, toast, navigate])
+  }, [id, project, duplicateName, duplicateVersion, duplicateLoader, duplicateSelectedRepo, buildRepoPayload, toast, navigate])
+
+  const handleLinkRepoCreateRepo = useCallback(async () => {
+    if (!linkRepoNewName.trim()) {
+      setLinkRepoError('Repository name is required.')
+      return
+    }
+    setLinkRepoCreatingRepo(true)
+    setLinkRepoError(null)
+    try {
+      const repo = await createGitHubRepo(linkRepoSelectedOwner, {
+        name: linkRepoNewName.trim(),
+        private: true,
+      })
+      setLinkRepos((prev) => [...prev, repo].sort((a, b) => a.fullName.localeCompare(b.fullName)))
+      setLinkRepoSelectedId(repo.id)
+      setLinkRepoNewName('')
+    } catch (err) {
+      setLinkRepoError(err instanceof Error ? err.message : 'Failed to create repository.')
+    } finally {
+      setLinkRepoCreatingRepo(false)
+    }
+  }, [linkRepoSelectedOwner, linkRepoNewName])
+
+  const handleLinkRepo = useCallback(async () => {
+    if (!id || !linkSelectedRepo) return
+    setLinkRepoBusy(true)
+    setLinkRepoError(null)
+    try {
+      const updated = await linkProjectRepo(id, buildRepoPayload(linkSelectedRepo))
+      setProject(updated)
+      setLinkRepoOpen(false)
+      toast({ variant: 'success', description: 'Repository linked and initial commit pushed.' })
+    } catch (err) {
+      setLinkRepoError(err instanceof Error ? err.message : 'Failed to link repository.')
+    } finally {
+      setLinkRepoBusy(false)
+    }
+  }, [id, linkSelectedRepo, buildRepoPayload, toast])
 
   const handleRefreshLibrary = useCallback(async () => {
     setLibraryLoading(true)
@@ -1164,6 +1341,36 @@ function ProjectDetail() {
       cancelled = true
     }
   }, [])
+
+  useEffect(() => {
+    if (activeTab !== 'settings' || !id) return
+    let cancelled = false
+    const load = async () => {
+      try {
+        const proj = await fetchProject(id)
+        if (!cancelled) setProject(proj)
+      } catch (err) {
+        if (!cancelled) console.error('Failed to refetch project for Settings', err)
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [activeTab, id])
+
+  useEffect(() => {
+    if (activeTab !== 'settings') return
+    if (project?.sftp) {
+      setSftpHost(project.sftp.host)
+      setSftpPort(project.sftp.port != null ? String(project.sftp.port) : '')
+      setSftpUsername(project.sftp.username)
+      setSftpRemotePath(project.sftp.remotePath)
+    } else {
+      setSftpHost('')
+      setSftpPort('')
+      setSftpUsername('')
+      setSftpRemotePath('')
+    }
+  }, [activeTab, project?.sftp, project?.id])
 
   useEffect(() => {
     if (!id) return
@@ -2205,9 +2412,20 @@ useEffect(() => {
                         </Text>
                       </Stack>
                     ) : (
-                      <Text size="sm" c="dimmed">
-                        No GitHub repository linked.
-                      </Text>
+                      <Stack gap="xs">
+                        <Text size="sm" c="dimmed">
+                          No GitHub repository linked.
+                        </Text>
+                        <Button
+                          type="button"
+                          variant="primary"
+                          size="sm"
+                          onClick={() => setLinkRepoOpen(true)}
+                          disabled={busy}
+                        >
+                          Link repository
+                        </Button>
+                      </Stack>
                     )}
 
                     {project.manifest && (
@@ -3344,6 +3562,102 @@ useEffect(() => {
                 <Card>
                   <CardContent>
                     <Stack gap="md">
+                      <Title order={3}>SFTP Details</Title>
+                      <Text size="sm" c="dimmed">
+                        Server connection for the Upload feature. Password is entered when you connect.
+                      </Text>
+                      <TextInput
+                        label="Host"
+                        placeholder="e.g. sftp.example.com"
+                        value={sftpHost}
+                        onChange={(e) => setSftpHost(e.currentTarget.value)}
+                        description="SFTP hostname (no sftp:// prefix)"
+                      />
+                      <TextInput
+                        label="Port"
+                        placeholder="22"
+                        type="number"
+                        min={1}
+                        max={65535}
+                        value={sftpPort}
+                        onChange={(e) => setSftpPort(e.currentTarget.value)}
+                        description="Optional; default 22"
+                      />
+                      <TextInput
+                        label="Username"
+                        placeholder="SFTP username"
+                        value={sftpUsername}
+                        onChange={(e) => setSftpUsername(e.currentTarget.value)}
+                      />
+                      <TextInput
+                        label="Remote path"
+                        placeholder="e.g. /home/username/server"
+                        value={sftpRemotePath}
+                        onChange={(e) => setSftpRemotePath(e.currentTarget.value)}
+                        description="Path on the server (server root)"
+                      />
+                      <Group>
+                        <Button
+                          type="button"
+                          variant="primary"
+                          loading={sftpSaveBusy}
+                          disabled={!sftpHost.trim() || !sftpUsername.trim() || !sftpRemotePath.trim()}
+                          onClick={async () => {
+                            if (!id) return
+                            try {
+                              setSftpSaveBusy(true)
+                              const portNum = sftpPort.trim() ? parseInt(sftpPort, 10) : undefined
+                              const sftpPayload = {
+                                host: sftpHost.trim(),
+                                port: Number.isInteger(portNum) && portNum! > 0 && portNum! <= 65535 ? portNum : undefined,
+                                username: sftpUsername.trim(),
+                                remotePath: sftpRemotePath.trim(),
+                              }
+                              const updated = await updateProjectSftp(id, sftpPayload)
+                              setProject(updated)
+                              toast({ variant: 'success', description: 'SFTP details saved' })
+                            } catch (err) {
+                              toast({
+                                variant: 'danger',
+                                description: err instanceof Error ? err.message : 'Failed to save SFTP details',
+                              })
+                            } finally {
+                              setSftpSaveBusy(false)
+                            }
+                          }}
+                        >
+                          Save
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          disabled={sftpSaveBusy}
+                          onClick={async () => {
+                            if (!id) return
+                            try {
+                              setSftpSaveBusy(true)
+                              const updated = await updateProjectSftp(id, null)
+                              setProject(updated)
+                              toast({ variant: 'success', description: 'SFTP details cleared' })
+                            } catch (err) {
+                              toast({
+                                variant: 'danger',
+                                description: err instanceof Error ? err.message : 'Failed to clear SFTP details',
+                              })
+                            } finally {
+                              setSftpSaveBusy(false)
+                            }
+                          }}
+                        >
+                          Clear
+                        </Button>
+                      </Group>
+                    </Stack>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent>
+                    <Stack gap="md">
                       <Title order={3}>Danger Zone</Title>
                       {deleteError && (
                         <Alert color="red" title="Error">
@@ -3445,6 +3759,64 @@ useEffect(() => {
               onChange={(e) => setDuplicateLoader(e.currentTarget.value)}
               description="Optional; defaults to current project loader"
             />
+            <Stack gap="xs">
+              <Text size="sm" fw={500}>Link to GitHub repo (optional)</Text>
+              <Text size="xs" c="dimmed">
+                Select or create a repository to link the new project to. Leave unselected to link later.
+              </Text>
+              {duplicateRepoLoading && (
+                <Group gap="xs">
+                  <Loader size="sm" />
+                  <Text size="sm" c="dimmed">Loading repositories…</Text>
+                </Group>
+              )}
+              {!duplicateRepoLoading && (
+                <>
+                  <NativeSelect
+                    label="Repository"
+                    value={duplicateSelectedRepoId === '' ? '' : String(duplicateSelectedRepoId)}
+                    onChange={(e) => {
+                      const v = e.currentTarget.value
+                      setDuplicateSelectedRepoId(v ? Number(v) : '')
+                      setDuplicateRepoError(null)
+                    }}
+                    data={[
+                      { value: '', label: 'No repository' },
+                      ...duplicateSortedRepos.map((r) => ({ value: String(r.id), label: r.fullName })),
+                    ]}
+                    disabled={duplicateRepos.length === 0}
+                  />
+                  <Stack gap="xs">
+                    <Group gap="xs" align="flex-end">
+                      <NativeSelect
+                        data={duplicateOwners.map((o) => ({ value: o.key, label: o.label }))}
+                        value={duplicateSelectedOwner}
+                        onChange={(e) => setDuplicateSelectedOwner(e.currentTarget.value)}
+                        style={{ minWidth: 140 }}
+                      />
+                      <TextInput
+                        placeholder="New repo name"
+                        value={duplicateNewRepoName}
+                        onChange={(e) => setDuplicateNewRepoName(e.currentTarget.value)}
+                        style={{ flex: 1, minWidth: 200 }}
+                      />
+                    </Group>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={() => void handleDuplicateCreateRepo()}
+                      disabled={duplicateCreatingRepo || !duplicateNewRepoName.trim()}
+                      style={{ alignSelf: 'flex-start' }}
+                    >
+                      {duplicateCreatingRepo ? 'Creating…' : 'Create & select'}
+                    </Button>
+                  </Stack>
+                  {duplicateRepoError && (
+                    <Text size="sm" c="red">{duplicateRepoError}</Text>
+                  )}
+                </>
+              )}
+            </Stack>
             <Group justify="flex-end">
               <Button
                 type="button"
@@ -3461,6 +3833,100 @@ useEffect(() => {
                 disabled={!duplicateVersion.trim() || duplicateBusy}
               >
                 {duplicateBusy ? 'Creating…' : 'Duplicate project'}
+              </Button>
+            </Group>
+          </Stack>
+        </Modal>
+
+        <Modal
+          opened={linkRepoOpen}
+          onClose={() => {
+            if (!linkRepoBusy) {
+              setLinkRepoOpen(false)
+              setLinkRepoError(null)
+            }
+          }}
+          title="Link repository"
+          size="md"
+          centered
+        >
+          <Stack gap="md">
+            <Text size="sm" c="dimmed">
+              Select or create a GitHub repository to link to this project. An initial commit with project files will be pushed.
+            </Text>
+            {linkRepoError && (
+              <Alert color="red" title="Error">
+                {linkRepoError}
+              </Alert>
+            )}
+            {linkRepoLoading && (
+              <Group gap="xs">
+                <Loader size="sm" />
+                <Text size="sm" c="dimmed">Loading repositories…</Text>
+              </Group>
+            )}
+            {!linkRepoLoading && (
+              <>
+                <NativeSelect
+                  label="Repository"
+                  value={linkRepoSelectedId === '' ? '' : String(linkRepoSelectedId)}
+                  onChange={(e) => {
+                    const v = e.currentTarget.value
+                    setLinkRepoSelectedId(v ? Number(v) : '')
+                    setLinkRepoError(null)
+                  }}
+                  data={[
+                    { value: '', label: 'Select a repository' },
+                    ...linkSortedRepos.map((r) => ({ value: String(r.id), label: r.fullName })),
+                  ]}
+                  disabled={linkRepos.length === 0}
+                />
+                <Stack gap={4}>
+                  <Text size="sm" fw={500}>Or create a new repository</Text>
+                  <Stack gap="xs">
+                    <Group gap="xs" align="flex-end">
+                      <NativeSelect
+                        data={linkRepoOwners.map((o) => ({ value: o.key, label: o.label }))}
+                        value={linkRepoSelectedOwner}
+                        onChange={(e) => setLinkRepoSelectedOwner(e.currentTarget.value)}
+                        style={{ minWidth: 140 }}
+                      />
+                      <TextInput
+                        placeholder="New repo name"
+                        value={linkRepoNewName}
+                        onChange={(e) => setLinkRepoNewName(e.currentTarget.value)}
+                        style={{ flex: 1, minWidth: 200 }}
+                      />
+                    </Group>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={() => void handleLinkRepoCreateRepo()}
+                      disabled={linkRepoCreatingRepo || !linkRepoNewName.trim()}
+                      style={{ alignSelf: 'flex-start' }}
+                    >
+                      {linkRepoCreatingRepo ? 'Creating…' : 'Create & select'}
+                    </Button>
+                  </Stack>
+                </Stack>
+              </>
+            )}
+            <Group justify="flex-end">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setLinkRepoOpen(false)}
+                disabled={linkRepoBusy}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                onClick={() => void handleLinkRepo()}
+                disabled={!linkSelectedRepo || linkRepoBusy || linkRepoLoading}
+              >
+                {linkRepoBusy ? 'Linking…' : 'Link repository'}
               </Button>
             </Group>
           </Stack>

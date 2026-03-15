@@ -16,6 +16,13 @@ export interface RepoMetadata {
   defaultBranch: string;
 }
 
+export interface ProjectSftpConfig {
+  host: string;
+  port?: number;
+  username: string;
+  remotePath: string;
+}
+
 export interface StoredProject {
   id: string;
   name: string;
@@ -31,6 +38,7 @@ export interface StoredProject {
   configs?: StoredProjectConfigEntry[];
   manifest?: ManifestMetadata;
   snapshotSourceProjectId?: string;
+  sftp?: ProjectSftpConfig;
   createdAt: string;
   updatedAt: string;
 }

@@ -14,6 +14,7 @@ import {
   recordManifestMetadata,
   setProjectAssets,
   updateProject,
+  updateProjectSftp,
   upsertProjectPlugin,
   deleteProjectRecord,
   removeProjectPlugin,
@@ -616,6 +617,7 @@ function toSummary(project: StoredProject): ProjectSummary {
     configs: project.configs,
     repo: project.repo,
     snapshotSourceProjectId: project.snapshotSourceProjectId,
+    sftp: project.sftp,
   };
 }
 
@@ -829,11 +831,21 @@ router.get("/:id", async (req: Request, res: Response) => {
 router.post("/:id/duplicate", async (req: Request, res: Response) => {
   try {
     const sourceId = req.params.id;
-    const { name, minecraftVersion, loader } = req.body ?? {};
+    const { name, minecraftVersion, loader, repo } = req.body ?? {};
 
     if (!minecraftVersion || typeof minecraftVersion !== "string" || !minecraftVersion.trim()) {
       res.status(400).json({ error: "minecraftVersion is required for duplicate" });
       return;
+    }
+
+    let repoMetadata: RepoMetadata | undefined;
+    if (repo !== undefined) {
+      const parsed = parseRepoPayload(repo);
+      if (!parsed.success) {
+        res.status(400).json({ error: parsed.error });
+        return;
+      }
+      repoMetadata = parsed.repo;
     }
 
     const sourceProject = await findProject(sourceId);
@@ -866,6 +878,7 @@ router.post("/:id/duplicate", async (req: Request, res: Response) => {
       loader:
         (typeof loader === "string" && loader.trim()) || sourceProject.loader || "paper",
       profilePath: sourceProject.profilePath ?? "profiles/base.yml",
+      repo: repoMetadata,
     });
 
     const profilePath = sourceProject.profilePath?.trim()
@@ -890,7 +903,25 @@ router.post("/:id/duplicate", async (req: Request, res: Response) => {
       }
     }
 
-    const refreshed = (await findProject(newProject.id)) ?? newProject;
+    let refreshed = (await findProject(newProject.id)) ?? newProject;
+    if (repoMetadata) {
+      try {
+        const bootstrapped = await bootstrapProjectRepository(req, refreshed);
+        refreshed = bootstrapped.project;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const errorDetails = error instanceof Error
+          ? { message: error.message, stack: error.stack, name: error.name }
+          : String(error);
+        console.error("Failed to bootstrap duplicated project repository", errorDetails);
+        const status = message.includes("GitHub session not available") ? 401 : 500;
+        res
+          .status(status)
+          .json({ error: status === 401 ? "GitHub authentication required" : "Failed to initialize project repository" });
+        return;
+      }
+    }
+
     res.status(201).json({ project: toSummary(refreshed) });
   } catch (error) {
     console.error("Failed to duplicate project", error);
@@ -907,10 +938,72 @@ router.post("/:id/duplicate", async (req: Request, res: Response) => {
   }
 });
 
+router.post("/:id/link-repo", async (req: Request, res: Response) => {
+  try {
+    const projectId = req.params.id;
+    const { repo } = req.body ?? {};
+
+    const parsed = parseRepoPayload(repo);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error });
+      return;
+    }
+
+    const project = await findProject(projectId);
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+
+    const updated = await updateProject(projectId, (p) => {
+      p.repo = parsed.repo;
+      p.repoUrl = parsed.repo.htmlUrl;
+      p.defaultBranch = parsed.repo.defaultBranch;
+    });
+    if (!updated) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+
+    try {
+      const bootstrapped = await bootstrapProjectRepository(req, updated);
+      const refreshed = (await findProject(projectId)) ?? bootstrapped.project;
+      res.json({ project: toSummary(refreshed) });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const errorDetails = error instanceof Error
+        ? { message: error.message, stack: error.stack, name: error.name }
+        : String(error);
+      console.error("Failed to bootstrap project repository", errorDetails);
+      const status = message.includes("GitHub session not available") ? 401 : 500;
+      res
+        .status(status)
+        .json({ error: status === 401 ? "GitHub authentication required" : "Failed to initialize project repository" });
+    }
+  } catch (error) {
+    console.error("Failed to link repository", error);
+    res.status(500).json({ error: "Failed to link repository" });
+  }
+});
+
+function parseSftpBody(body: unknown): { host: string; port?: number; username: string; remotePath: string } | null {
+  if (body === null || typeof body !== "object") return null;
+  const o = body as Record<string, unknown>;
+  const host = typeof o.host === "string" ? o.host.trim() : "";
+  const username = typeof o.username === "string" ? o.username.trim() : "";
+  const remotePath = typeof o.remotePath === "string" ? o.remotePath.trim() : "";
+  if (!host || !username || !remotePath) return null;
+  const port =
+    typeof o.port === "number" && Number.isInteger(o.port) && o.port > 0 && o.port <= 65535
+      ? o.port
+      : undefined;
+  return { host, port, username, remotePath };
+}
+
 router.put("/:id", async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { name, minecraftVersion, loader, description, snapshotSourceProjectId } = req.body ?? {};
+    const { name, minecraftVersion, loader, description, snapshotSourceProjectId, sftp: sftpBody } = req.body ?? {};
 
     const project = await findProject(id);
     if (!project) {
@@ -950,6 +1043,14 @@ router.put("/:id", async (req: Request, res: Response) => {
         const trimmed = typeof snapshotSourceProjectId === "string" ? snapshotSourceProjectId.trim() : "";
         p.snapshotSourceProjectId = trimmed || undefined;
       }
+      if (sftpBody !== undefined) {
+        if (sftpBody === null || sftpBody === "") {
+          p.sftp = undefined;
+        } else {
+          const parsed = parseSftpBody(sftpBody);
+          p.sftp = parsed ?? undefined;
+        }
+      }
       return p;
     });
 
@@ -962,6 +1063,41 @@ router.put("/:id", async (req: Request, res: Response) => {
   } catch (error) {
     console.error("Failed to update project", error);
     res.status(500).json({ error: "Failed to update project" });
+  }
+});
+
+router.patch("/:id/sftp", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const project = await findProject(id);
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    const body = req.body ?? {};
+    if (body === null || body === "") {
+      const updated = await updateProjectSftp(id, null);
+      if (!updated) {
+        res.status(404).json({ error: "Project not found" });
+        return;
+      }
+      res.json({ project: toSummary(updated) });
+      return;
+    }
+    const parsed = parseSftpBody(body);
+    if (!parsed) {
+      res.status(400).json({ error: "Invalid SFTP config: host, username, and remotePath are required" });
+      return;
+    }
+    const updated = await updateProjectSftp(id, parsed);
+    if (!updated) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    res.json({ project: toSummary(updated) });
+  } catch (error) {
+    console.error("Failed to update project SFTP", error);
+    res.status(500).json({ error: "Failed to update project SFTP" });
   }
 });
 

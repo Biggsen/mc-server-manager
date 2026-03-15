@@ -4,6 +4,7 @@ import type { ProjectSummary } from "../types/projects";
 import type {
   ManifestMetadata,
   ProjectsSnapshot,
+  ProjectSftpConfig,
   RepoMetadata,
   StoredProject,
 } from "../types/storage";
@@ -74,6 +75,7 @@ function toSummary(project: StoredProject): ProjectSummary {
     configs,
     repo,
     snapshotSourceProjectId,
+    sftp,
   } = project;
   return {
     id,
@@ -88,6 +90,7 @@ function toSummary(project: StoredProject): ProjectSummary {
     configs,
     repo,
     snapshotSourceProjectId,
+    sftp,
   };
 }
 
@@ -310,6 +313,25 @@ export async function updateProject(
   snapshot.projects.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
   await persistSnapshot(snapshot);
   return updated;
+}
+
+/**
+ * Update only the project's SFTP config and persist. Avoids going through
+ * updateProject's plugin/config normalization so sftp is never dropped.
+ */
+export async function updateProjectSftp(
+  id: string,
+  sftp: ProjectSftpConfig | null,
+): Promise<StoredProject | undefined> {
+  const snapshot = await loadSnapshot();
+  const index = snapshot.projects.findIndex((p) => p.id === id);
+  if (index === -1) return undefined;
+  const project = snapshot.projects[index];
+  project.sftp = sftp ?? undefined;
+  project.updatedAt = new Date().toISOString();
+  snapshot.projects.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
+  await persistSnapshot(snapshot);
+  return project;
 }
 
 export function getManifestFilePath(projectId: string, buildId: string): string {

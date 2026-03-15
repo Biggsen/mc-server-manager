@@ -1,6 +1,8 @@
 import type { ManifestMetadata, RepoMetadata, StoredProject } from "./storage";
 import type { ProjectPlugin } from "./plugins";
 
+export type ProjectSftpSummary = StoredProject["sftp"];
+
 export interface ProjectSummary {
   id: string;
   name: string;
@@ -14,5 +16,6 @@ export interface ProjectSummary {
   configs?: StoredProject["configs"];
   repo?: RepoMetadata;
   snapshotSourceProjectId?: string;
+  sftp?: ProjectSftpSummary;
 }
 

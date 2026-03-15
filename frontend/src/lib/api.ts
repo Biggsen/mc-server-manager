@@ -327,6 +327,12 @@ export interface ProjectSummary {
   }>
   repo?: RepoMetadata
   snapshotSourceProjectId?: string
+  sftp?: {
+    host: string
+    port?: number
+    username: string
+    remotePath: string
+  }
 }
 
 export type BuildStatus = 'pending' | 'running' | 'succeeded' | 'failed'
@@ -359,10 +365,20 @@ export async function createProject(payload: ProjectPayload): Promise<ProjectSum
   return data.project
 }
 
+export interface RepoPayload {
+  id?: number
+  owner: string
+  name: string
+  fullName: string
+  htmlUrl: string
+  defaultBranch: string
+}
+
 export interface DuplicateProjectPayload {
   name?: string
   minecraftVersion: string
   loader?: string
+  repo?: RepoPayload
 }
 
 export async function duplicateProject(
@@ -374,6 +390,21 @@ export async function duplicateProject(
     {
       method: 'POST',
       body: JSON.stringify(payload),
+    },
+  )
+  emitProjectsUpdated()
+  return data.project
+}
+
+export async function linkProjectRepo(
+  projectId: string,
+  repo: RepoPayload,
+): Promise<ProjectSummary> {
+  const data = await request<{ project: ProjectSummary }>(
+    `/projects/${encodeURIComponent(projectId)}/link-repo`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ repo }),
     },
   )
   emitProjectsUpdated()
@@ -757,12 +788,28 @@ export async function updateProject(
     loader?: string
     description?: string
     snapshotSourceProjectId?: string
+    sftp?: ProjectSummary['sftp'] | null
   },
 ): Promise<ProjectSummary> {
   const data = await request<{ project: ProjectSummary }>(`/projects/${projectId}`, {
     method: 'PUT',
     body: JSON.stringify(payload),
   })
+  emitProjectsUpdated()
+  return data.project
+}
+
+export async function updateProjectSftp(
+  projectId: string,
+  sftp: ProjectSummary['sftp'] | null,
+): Promise<ProjectSummary> {
+  const data = await request<{ project: ProjectSummary }>(
+    `/projects/${encodeURIComponent(projectId)}/sftp`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(sftp === null ? null : sftp),
+    },
+  )
   emitProjectsUpdated()
   return data.project
 }
