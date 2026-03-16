@@ -45,19 +45,16 @@ async function startBackendServer(): Promise<void> {
     process.env.PORT = '4000';
 
     // Import backend server dynamically
-    // In packaged app, app.getAppPath() returns the path to app.asar or app directory
-    // Always use app.getAppPath() in production for consistent path resolution
+    // In packaged app, app.getAppPath() returns the path to app.asar (a file)
     const appPath = app.getAppPath();
-    
-    // Set NODE_PATH to include root node_modules for module resolution
-    // This allows the backend to find dependencies from the root node_modules (workspace hoisting)
-    const nodeModulesPath = join(appPath, 'node_modules');
+    // When packaged, use app.asar.unpacked so NODE_PATH points at real filesystem (required for native deps and module resolution)
+    const appBase = appPath.endsWith('.asar') ? `${appPath}.unpacked` : appPath;
+    const nodeModulesPath = join(appBase, 'node_modules');
     if (!process.env.NODE_PATH) {
       process.env.NODE_PATH = nodeModulesPath;
     } else {
       process.env.NODE_PATH = `${nodeModulesPath}${require('path').delimiter}${process.env.NODE_PATH}`;
     }
-    
     const backendPath = join(appPath, 'backend/dist/index.js');
     
     console.log('[Backend] App path:', appPath);

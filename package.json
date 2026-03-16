@@ -14,10 +14,10 @@
     "build:electron": "tsc -p electron/tsconfig.json",
     "electron:dev": "npm run build:electron && concurrently \"npm run dev:be\" \"npm run dev:fe\" \"wait-on http://localhost:5173 && electron .\"",
     "postinstall": "electron-rebuild",
-    "electron:build": "npm run build && electron-rebuild && electron-packager . mc-server-manager --platform=win32 --arch=x64 --out=release --overwrite --asar --asarUnpack=**/node_modules/keytar/** --icon=assets/icon.ico --prune=true --ignore=\\.git --ignore=frontend/node_modules --ignore=electron/node_modules --ignore=tasks --ignore=docs",
-    "electron:build:win": "npm run build && electron-rebuild && electron-packager . mc-server-manager --platform=win32 --arch=x64 --out=release --overwrite --asar --asarUnpack=**/node_modules/keytar/** --icon=assets/icon.ico --prune=true --ignore=\\.git --ignore=frontend/node_modules --ignore=electron/node_modules --ignore=tasks --ignore=docs",
-    "electron:build:mac": "npm run build && electron-rebuild && electron-packager . mc-server-manager --platform=darwin --arch=x64,arm64 --out=release --overwrite --asar --asarUnpack=**/node_modules/keytar/** --icon=assets/icon.icns --prune=true --ignore=\\.git --ignore=frontend/node_modules --ignore=electron/node_modules --ignore=tasks --ignore=docs",
-    "electron:build:linux": "npm run build && electron-rebuild && electron-packager . mc-server-manager --platform=linux --arch=x64 --out=release --overwrite --asar --asarUnpack=**/node_modules/keytar/** --icon=assets/icon.png --prune=true --ignore=\\.git --ignore=frontend/node_modules --ignore=electron/node_modules --ignore=tasks --ignore=docs"
+    "electron:build": "npm run build && electron-rebuild && electron-packager . mc-server-manager --platform=win32 --arch=x64 --out=release --overwrite --asar --asarUnpack=**/node_modules/keytar/** --asarUnpack=**/node_modules/ssh2/** --icon=assets/icon.ico --prune=true --ignore=\\.git --ignore=frontend/node_modules --ignore=electron/node_modules --ignore=tasks --ignore=docs",
+    "electron:build:win": "npm run build && electron-rebuild && electron-packager . mc-server-manager --platform=win32 --arch=x64 --out=release --overwrite --asar --asarUnpack=**/node_modules/keytar/** --asarUnpack=**/node_modules/ssh2/** --icon=assets/icon.ico --prune=true --ignore=\\.git --ignore=frontend/node_modules --ignore=electron/node_modules --ignore=tasks --ignore=docs",
+    "electron:build:mac": "npm run build && electron-rebuild && electron-packager . mc-server-manager --platform=darwin --arch=x64,arm64 --out=release --overwrite --asar --asarUnpack=**/node_modules/keytar/** --asarUnpack=**/node_modules/ssh2/** --icon=assets/icon.icns --prune=true --ignore=\\.git --ignore=frontend/node_modules --ignore=electron/node_modules --ignore=tasks --ignore=docs",
+    "electron:build:linux": "npm run build && electron-rebuild && electron-packager . mc-server-manager --platform=linux --arch=x64 --out=release --overwrite --asar --asarUnpack=**/node_modules/keytar/** --asarUnpack=**/node_modules/ssh2/** --icon=assets/icon.png --prune=true --ignore=\\.git --ignore=frontend/node_modules --ignore=electron/node_modules --ignore=tasks --ignore=docs"
   },
   "dependencies": {
     "@octokit/plugin-throttling": "^11.0.3",
@@ -30,6 +30,7 @@
     "jsonwebtoken": "^9.0.3",
     "keytar": "^7.9.0",
     "multer": "^1.4.5-lts.1",
+    "ssh2": "^1.17.0",
     "uuid": "^9.0.1",
     "yaml": "^2.8.1",
     "yazl": "^2.5.1"

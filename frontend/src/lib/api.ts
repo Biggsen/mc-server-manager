@@ -172,7 +172,12 @@ async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
       });
       
       if (!response.ok) {
-        const message = response.text || response.error || `Request failed with status ${response.status}`;
+        const data = response.data as { error?: string } | null;
+        const message =
+          (typeof data?.error === 'string' && data.error.trim() ? data.error : null) ||
+          response.text ||
+          response.error ||
+          `Request failed with status ${response.status}`;
         logger.error('api-error-electron-net', {
           method: rest.method || 'GET',
           path,
@@ -225,14 +230,21 @@ async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
     });
 
     if (!response.ok) {
-      const message = await response.text()
+      const text = await response.text();
+      let message = text || `Request failed with status ${response.status}`;
+      try {
+        const data = JSON.parse(text) as { error?: string };
+        if (typeof data?.error === 'string' && data.error.trim()) message = data.error;
+      } catch {
+        /* use raw text */
+      }
       logger.error('api-error', {
         method: rest.method || 'GET',
         path,
         status: response.status,
-        message: message.substring(0, 200), // Limit message length
-      }, message || `Request failed with status ${response.status}`);
-      throw new Error(message || `Request failed with status ${response.status}`)
+        message: message.substring(0, 200),
+      }, message);
+      throw new Error(message);
     }
 
     if (!parseJson) {
@@ -1401,5 +1413,80 @@ export async function logout(): Promise<void> {
   logger.info('logout-start', {});
   await request('/auth/logout', { method: 'POST', parseJson: false });
   logger.info('logout-complete', {});
+}
+
+export interface UploadListEntry {
+  name: string
+  path: string
+  type: 'file' | 'directory'
+  size?: number
+  mtime?: string
+}
+
+export async function listUploadRemote(
+  projectId: string,
+  password: string,
+  path?: string,
+): Promise<UploadListEntry[]> {
+  const data = await request<{ entries: UploadListEntry[] }>('/upload/list-remote', {
+    method: 'POST',
+    body: JSON.stringify({ projectId, password, path: path ?? undefined }),
+  })
+  return data.entries
+}
+
+export async function listUploadLocal(
+  projectId: string,
+  path?: string,
+): Promise<UploadListEntry[]> {
+  const q = new URLSearchParams({ projectId })
+  if (path) q.set('path', path)
+  const data = await request<{ entries: UploadListEntry[] }>(`/upload/list-local?${q}`)
+  return data.entries
+}
+
+export async function uploadFileToRemote(
+  projectId: string,
+  password: string,
+  localPath: string,
+  remotePath: string,
+): Promise<void> {
+  await request<{ ok: boolean }>('/upload/upload', {
+    method: 'POST',
+    body: JSON.stringify({ projectId, password, localPath, remotePath }),
+  })
+}
+
+export async function downloadUploadRemoteFile(
+  projectId: string,
+  password: string,
+  remotePath: string,
+  localPath: string,
+): Promise<void> {
+  await request<{ ok: boolean }>('/upload/download', {
+    method: 'POST',
+    body: JSON.stringify({ projectId, password, remotePath, localPath }),
+  })
+}
+
+export async function deleteUploadRemoteFile(
+  projectId: string,
+  password: string,
+  path: string,
+): Promise<void> {
+  await request<{ ok: boolean }>('/upload/delete-remote', {
+    method: 'POST',
+    body: JSON.stringify({ projectId, password, path }),
+  })
+}
+
+export async function deleteUploadLocalFile(
+  projectId: string,
+  path: string,
+): Promise<void> {
+  await request<{ ok: boolean }>('/upload/delete-local', {
+    method: 'POST',
+    body: JSON.stringify({ projectId, path }),
+  })
 }
 

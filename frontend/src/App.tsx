@@ -9,6 +9,7 @@ import {
   Terminal,
   Toolbox,
   RocketLaunch,
+  UploadSimple,
   Buildings,
   GithubLogo,
   PaintBrush,
@@ -33,6 +34,7 @@ import NotFound from './pages/NotFound'
 import Projects from './pages/Projects'
 import ProjectDetail from './pages/ProjectDetail'
 import Deployments from './pages/Deployments'
+import Upload from './pages/Upload'
 import TestTools from './pages/TestTools'
 import PluginLibrary from './pages/PluginLibrary'
 import LiveEditor from './pages/LiveEditor'
@@ -97,6 +99,11 @@ const NAV_SECTIONS: NavSection[] = [
         to: '/deployments',
         label: 'Deployments',
         icon: <RocketLaunch size={18} weight="fill" aria-hidden="true" />,
+      },
+      {
+        to: '/upload',
+        label: 'Upload',
+        icon: <UploadSimple size={18} weight="fill" aria-hidden="true" />,
       },
       {
         to: '/dev/tools',
@@ -279,6 +286,9 @@ function App() {
     if (location.pathname.startsWith('/deployments')) {
       return 'Deployments'
     }
+    if (location.pathname.startsWith('/upload')) {
+      return 'Upload'
+    }
     if (location.pathname.startsWith('/dev/tools')) {
       return 'Developer Tools'
     }
@@ -432,6 +442,7 @@ function App() {
                 <Route path="/plugins/add" element={<AddPlugin />} />
                 {isDev && <Route path="/dev/tools" element={<TestTools />} />}
                 <Route path="/deployments" element={<Deployments />} />
+                <Route path="/upload" element={<Upload />} />
                 {isDev && <Route path="/styleguide" element={<Styleguide />} />}
                 <Route path="*" element={<NotFound />} />
               </Routes>
