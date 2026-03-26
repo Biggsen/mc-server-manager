@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Building, Plug, SquaresFour, Play, Package as PackageIcon } from '@phosphor-icons/react'
+import { Building, Plug, SquaresFour, Play, Package as PackageIcon, PencilSimple } from '@phosphor-icons/react'
 import {
+  ActionIcon,
   Anchor,
   Badge,
   Card,
@@ -53,6 +54,7 @@ function getPluginSourceKind(plugin: StoredPluginRecord): 'download' | 'upload' 
 }
 import { subscribeProjectsUpdated } from '../lib/events'
 import { ContentSection } from '../components/layout'
+import { RenameProjectModal } from '../components/RenameProjectModal'
 import { RunLogsAndConsole } from '../components/RunLogsAndConsole'
 import { useAsyncAction } from '../lib/useAsyncAction'
 
@@ -72,6 +74,7 @@ function Dashboard() {
   const [showBuildOptions, setShowBuildOptions] = useState(false)
   const [selectedProjectForBuild, setSelectedProjectForBuild] = useState<ProjectSummary | null>(null)
   const [buildOptions, setBuildOptions] = useState<BuildOptions>({ skipPush: false })
+  const [renameTarget, setRenameTarget] = useState<ProjectSummary | null>(null)
 
   const {
     activeRuns,
@@ -382,11 +385,21 @@ function Dashboard() {
                   <Paper key={project.id} withBorder radius="md" p="lg">
                     <Group justify="space-between" align="flex-start">
                       <Stack gap={4}>
-                        <Title order={4}>
-                          <Anchor component={Link} to={`/projects/${project.id}`}>
-                            {project.name}
-                          </Anchor>
-                        </Title>
+                        <Group gap="xs" align="center" wrap="nowrap">
+                          <Title order={4}>
+                            <Anchor component={Link} to={`/projects/${project.id}`}>
+                              {project.name}
+                            </Anchor>
+                          </Title>
+                          <ActionIcon
+                            variant="subtle"
+                            color="gray"
+                            aria-label={`Rename ${project.name}`}
+                            onClick={() => setRenameTarget(project)}
+                          >
+                            <PencilSimple size={18} weight="bold" aria-hidden="true" />
+                          </ActionIcon>
+                        </Group>
                         <Text c="dimmed" size="sm">
                           {[
                             project.minecraftVersion,
@@ -613,6 +626,12 @@ function Dashboard() {
           </Stack>
         </ContentSection>
       </Stack>
+
+      <RenameProjectModal
+        project={renameTarget}
+        opened={renameTarget !== null}
+        onClose={() => setRenameTarget(null)}
+      />
 
       <Modal
         opened={showRunOptions}

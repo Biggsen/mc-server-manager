@@ -451,6 +451,9 @@ function ProjectDetail() {
   const [libraryError, setLibraryError] = useState<string | null>(null)
   const [libraryPlugins, setLibraryPlugins] = useState<StoredPluginRecord[]>([])
   const [selectedLibraryPlugin, setSelectedLibraryPlugin] = useState('')
+  const [editingName, setEditingName] = useState(false)
+  const [nameValue, setNameValue] = useState('')
+  const [nameBusy, setNameBusy] = useState(false)
   const [editingVersion, setEditingVersion] = useState(false)
   const [versionValue, setVersionValue] = useState('')
   const [versionBusy, setVersionBusy] = useState(false)
@@ -2128,7 +2131,70 @@ useEffect(() => {
           <Stack gap="xl">
             <Group justify="space-between" align="flex-start">
               <Stack gap={4}>
-                <Title order={2}>{project.name}</Title>
+                {editingName ? (
+                  <Group gap="xs" align="flex-end" wrap="wrap">
+                    <TextInput
+                      value={nameValue}
+                      onChange={(e) => setNameValue(e.currentTarget.value)}
+                      placeholder="Project name"
+                      size="md"
+                      style={{ flex: '1 1 240px', minWidth: 0 }}
+                      aria-label="Project name"
+                    />
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      loading={nameBusy}
+                      onClick={async () => {
+                        const trimmed = nameValue.trim()
+                        if (!trimmed) {
+                          toast({ variant: 'danger', description: 'Name cannot be empty' })
+                          return
+                        }
+                        try {
+                          setNameBusy(true)
+                          const updated = await updateProject(id!, { name: trimmed })
+                          setProject(updated)
+                          setEditingName(false)
+                          toast({ variant: 'success', description: 'Name updated' })
+                        } catch (err) {
+                          toast({
+                            variant: 'danger',
+                            description: err instanceof Error ? err.message : 'Failed to update name',
+                          })
+                        } finally {
+                          setNameBusy(false)
+                        }
+                      }}
+                    >
+                      Save
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        setEditingName(false)
+                        setNameValue(project.name)
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                  </Group>
+                ) : (
+                  <Group gap="xs" align="center" wrap="wrap">
+                    <Title order={2}>{project.name}</Title>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        setNameValue(project.name)
+                        setEditingName(true)
+                      }}
+                    >
+                      Edit
+                    </Button>
+                  </Group>
+                )}
                 <Text size="sm" c="dimmed">
                   {[project.minecraftVersion, project.loader.toUpperCase(), project.source === 'imported' ? 'Imported' : null]
                     .filter(Boolean)

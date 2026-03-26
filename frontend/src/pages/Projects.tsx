@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Buildings, Stop, Plus } from '@phosphor-icons/react'
+import { Buildings, Stop, Plus, PencilSimple } from '@phosphor-icons/react'
 import {
   fetchProjects,
   fetchBuilds,
@@ -12,8 +12,9 @@ import {
 } from '../lib/api'
 import { subscribeProjectsUpdated } from '../lib/events'
 import { ContentSection } from '../components/layout'
-import { Anchor, Group, Loader, Stack, Text, Title } from '@mantine/core'
+import { ActionIcon, Anchor, Group, Loader, Stack, Text, Title } from '@mantine/core'
 import { Button, Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui'
+import { RenameProjectModal } from '../components/RenameProjectModal'
 
 import { getApiBase } from '../lib/api'
 const API_BASE = getApiBase()
@@ -65,6 +66,7 @@ function Projects() {
   const [builds, setBuilds] = useState<Record<string, BuildJob | undefined>>({})
   const [runs, setRuns] = useState<Record<string, RunJob | undefined>>({})
   const [stopping, setStopping] = useState<Record<string, boolean>>({})
+  const [renameTarget, setRenameTarget] = useState<ProjectSummary | null>(null)
 
   useEffect(() => {
     let active = true
@@ -212,6 +214,7 @@ function Projects() {
   }, [])
 
   return (
+    <>
     <ContentSection as="section" padding="xl">
       <Stack gap="lg">
         <Group justify="space-between" align="flex-start">
@@ -285,9 +288,19 @@ function Projects() {
                 <Card key={project.id}>
                   <CardHeader>
                     <CardTitle>
-                      <Anchor component={Link} to={`/projects/${project.id}`}>
-                        {project.name}
-                      </Anchor>
+                      <Group gap="xs" align="center" wrap="nowrap">
+                        <Anchor component={Link} to={`/projects/${project.id}`}>
+                          {project.name}
+                        </Anchor>
+                        <ActionIcon
+                          variant="subtle"
+                          color="gray"
+                          aria-label={`Rename ${project.name}`}
+                          onClick={() => setRenameTarget(project)}
+                        >
+                          <PencilSimple size={18} weight="bold" aria-hidden="true" />
+                        </ActionIcon>
+                      </Group>
                     </CardTitle>
                     <CardDescription>
                       {[
@@ -353,6 +366,13 @@ function Projects() {
         )}
       </Stack>
     </ContentSection>
+
+    <RenameProjectModal
+      project={renameTarget}
+      opened={renameTarget !== null}
+      onClose={() => setRenameTarget(null)}
+    />
+    </>
   )
 }
 
