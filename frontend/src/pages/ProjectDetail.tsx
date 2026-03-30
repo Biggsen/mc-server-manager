@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, memo, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { Play, FileText, MagnifyingGlass, Package as PackageIcon, Upload, PencilSimple, ArrowsClockwise, Trash, FloppyDisk, Plus, Copy, ArrowCircleUp } from '@phosphor-icons/react'
+import { Play, FileText, MagnifyingGlass, Package as PackageIcon, Upload, PencilSimple, ArrowsClockwise, Trash, FloppyDisk, Plus, Copy, ArrowCircleUp, ListPlus } from '@phosphor-icons/react'
 import CodeMirror from '@uiw/react-codemirror'
 import { yaml } from '@codemirror/lang-yaml'
 import { oneDark } from '@codemirror/theme-one-dark'
@@ -39,6 +39,7 @@ import {
   updateProjectSftp,
   updateProjectConfigFile,
   updateProjectPluginConfigs,
+  updateLibraryPluginConfigs,
   uploadProjectConfig,
   fetchInitStatus,
   clearInitMarker,
@@ -51,6 +52,7 @@ import {
   type ProjectSummary,
   type RunJob,
   type RunLogEntry,
+  type PluginConfigDefinition,
   type StoredPluginRecord,
   type InitStatusResponse,
 } from '../lib/api'
@@ -60,6 +62,10 @@ import { Badge, Button, Card, CardContent, CardHeader, Modal, Skeleton } from '.
 import { useToast } from '../components/ui/toast'
 import { ContentSection } from '../components/layout'
 import { useAsyncAction } from '../lib/useAsyncAction'
+import {
+  AddConfigPathChoiceModal,
+  type AddConfigPathChoicePayload,
+} from '../components/AddConfigPathChoiceModal'
 import { CustomPathModal, type CustomPathModalState } from '../components/CustomPathModal'
 import { RunLogsAndConsole } from '../components/RunLogsAndConsole'
 
@@ -106,6 +112,12 @@ function formatBytes(bytes: number): string {
     unitIndex += 1
   }
   return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[unitIndex]}`
+}
+
+function defaultLabelFromConfigPath(path: string): string {
+  const base = path.split('/').pop() ?? path
+  const dot = base.lastIndexOf('.')
+  return dot > 0 ? base.slice(0, dot) : base
 }
 
 /** Default backend limit (see MCSM_MAX_CONFIG_PAYLOAD_MB); used for editor warnings only. */
@@ -443,6 +455,8 @@ function ProjectDetail() {
     definitionId: string
     path: string
   } | null>(null)
+  const [addConfigPathChoice, setAddConfigPathChoice] = useState<AddConfigPathChoicePayload | null>(null)
+  const [libraryTemplateBusy, setLibraryTemplateBusy] = useState(false)
   const [deleteRepo, setDeleteRepo] = useState(false)
   const [deleteBusy, setDeleteBusy] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
@@ -1951,6 +1965,126 @@ useEffect(() => {
     })
   }, [])
 
+  const isPathAlreadyRegistered = useCallback(
+    (pluginId: string, path: string) => {
+      const defs = pluginDefinitionCache[pluginId]
+      if (!defs) return false
+      return defs.some((d) => d.resolvedPath === path)
+    },
+    [pluginDefinitionCache],
+  )
+
+  const handleChooseLibraryTemplateFromPath = useCallback(
+    async (payload: AddConfigPathChoicePayload) => {
+      if (!id || !project) return
+      setLibraryTemplateBusy(true)
+      try {
+        const projPlugin = project.plugins?.find((p) => p.id === payload.pluginId)
+        if (!projPlugin?.version) {
+          toast({
+            title: 'Cannot add library template',
+            description: 'This plugin has no version on the project.',
+            variant: 'danger',
+          })
+          return
+        }
+        const library = await fetchPluginLibrary()
+        const stored = library.find((p) => p.id === payload.pluginId && p.version === projPlugin.version)
+        if (!stored) {
+          toast({
+            title: 'Plugin not in library',
+            description: `No library entry for ${payload.pluginId} ${projPlugin.version}. Add the plugin to the library first.`,
+            variant: 'danger',
+          })
+          return
+        }
+        const existingDefs = stored.configDefinitions ?? []
+        let definitionId = existingDefs.find((d) => d.path === payload.path)?.id
+        if (!definitionId) {
+          const nextDefs: PluginConfigDefinition[] = [
+            ...existingDefs,
+            {
+              id: '',
+              path: payload.path,
+              label: defaultLabelFromConfigPath(payload.path),
+            },
+          ]
+          const updatedStored = await updateLibraryPluginConfigs(
+            payload.pluginId,
+            projPlugin.version,
+            { configDefinitions: nextDefs },
+          )
+          const def = (updatedStored.configDefinitions ?? []).find((d) => d.path === payload.path)
+          if (!def?.id) {
+            toast({
+              title: 'Library update failed',
+              description: 'Could not resolve the new config definition.',
+              variant: 'danger',
+            })
+            return
+          }
+          definitionId = def.id
+        }
+
+        const currentMappings = projPlugin.configMappings ?? []
+        if (currentMappings.some((m) => m.type === 'library' && m.definitionId === definitionId)) {
+          toast({
+            title: 'Already linked',
+            description: 'This library template is already a config path for this plugin.',
+            variant: 'success',
+          })
+          setAddConfigPathChoice(null)
+          return
+        }
+        if (currentMappings.some((m) => m.type === 'custom' && m.path === payload.path)) {
+          toast({
+            title: 'Path already registered',
+            description: 'Remove the custom config path for this file first, then add the library template.',
+            variant: 'danger',
+          })
+          return
+        }
+
+        const updatedMappings: ProjectPluginConfigMapping[] = [
+          ...currentMappings,
+          { type: 'library', definitionId },
+        ]
+        const response = await updateProjectPluginConfigs(id, payload.pluginId, {
+          mappings: updatedMappings,
+        })
+        setPluginDefinitionCache((prev) => ({
+          ...prev,
+          [payload.pluginId]: response.definitions,
+        }))
+        setProject((prev) =>
+          prev
+            ? {
+                ...prev,
+                plugins: prev.plugins?.map((p) =>
+                  p.id === payload.pluginId ? { ...p, configMappings: response.mappings } : p,
+                ),
+              }
+            : prev,
+        )
+        toast({
+          title: 'Library config path added',
+          description: `${payload.path} is linked via the library template.`,
+          variant: 'success',
+        })
+        setAddConfigPathChoice(null)
+      } catch (err) {
+        toast({
+          title: 'Could not add library path',
+          description: err instanceof Error ? err.message : 'Unknown error',
+          variant: 'danger',
+        })
+      } finally {
+        setLibraryTemplateBusy(false)
+      }
+    },
+    [id, project, toast],
+  )
+
   const handleDeleteProject = useCallback(async () => {
     if (!id || !project) {
       return
@@ -3426,13 +3560,17 @@ useEffect(() => {
                                 ? files.slice(0, defaultVisible)
                                 : files
                             const hiddenCount = files.length - defaultVisible
+                            const canAddConfigPath = pluginId !== 'No plugin'
                             return (
                             <Card key={pluginId}>
                               <CardContent>
                                 <Stack gap="md">
                                   <Title order={4}>{pluginId}</Title>
                                   <Stack gap="xs">
-                                    {displayFiles.map((file) => (
+                                    {displayFiles.map((file) => {
+                                      const pathRegistered =
+                                        canAddConfigPath && isPathAlreadyRegistered(pluginId, file.path)
+                                      return (
                                       <Group key={file.path} justify="space-between" align="flex-start">
                                         <Stack gap={2}>
                                           <Text fw={600} size="sm">{file.path}</Text>
@@ -3471,6 +3609,33 @@ useEffect(() => {
                                             <ArrowsClockwise size={16} weight="fill" aria-hidden="true" />
                                             Replace
                                           </Anchor>
+                                          {canAddConfigPath &&
+                                            (pathRegistered ? (
+                                              <Text
+                                                size="sm"
+                                                c="dimmed"
+                                                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                                              >
+                                                In config paths
+                                              </Text>
+                                            ) : (
+                                              <Anchor
+                                                component="button"
+                                                type="button"
+                                                size="sm"
+                                                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                                                onClick={() =>
+                                                  setAddConfigPathChoice({
+                                                    pluginId,
+                                                    path: file.path,
+                                                    labelSuggestion: defaultLabelFromConfigPath(file.path),
+                                                  })
+                                                }
+                                              >
+                                                <ListPlus size={16} weight="fill" aria-hidden="true" />
+                                                Add as config path
+                                              </Anchor>
+                                            ))}
                                           <Anchor
                                             component="button"
                                             type="button"
@@ -3514,7 +3679,8 @@ useEffect(() => {
                                           </Anchor>
                                         </Group>
                                       </Group>
-                                    ))}
+                                    )
+                                  })}
                                     {files.length > defaultVisible && (
                                       <Group mt="xs">
                                         <Anchor
@@ -4378,6 +4544,25 @@ useEffect(() => {
         modal={customPathModal}
         onClose={() => setCustomPathModal(null)}
         onSubmit={handleCustomPathSubmit}
+      />
+
+      <AddConfigPathChoiceModal
+        payload={addConfigPathChoice}
+        onClose={() => {
+          if (!libraryTemplateBusy) setAddConfigPathChoice(null)
+        }}
+        onChooseCustom={(p) => {
+          setAddConfigPathChoice(null)
+          setCustomPathModal({
+            opened: true,
+            pluginId: p.pluginId,
+            path: p.path,
+            label: p.labelSuggestion,
+            notes: '',
+          })
+        }}
+        onChooseLibrary={(p) => void handleChooseLibraryTemplateFromPath(p)}
+        libraryBusy={libraryTemplateBusy}
       />
 
       <Modal

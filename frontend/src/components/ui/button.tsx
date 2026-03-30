@@ -1,5 +1,13 @@
-import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from 'react'
+import { forwardRef, type ButtonHTMLAttributes, type CSSProperties, type ReactNode } from 'react'
 import { Button as MantineButton } from '@mantine/core'
+
+/** Matches Mantine Button `styles` API (partial keys). */
+export type MantineButtonStyles = Partial<{
+  root: CSSProperties
+  inner: CSSProperties
+  label: CSSProperties
+  section: CSSProperties
+}>
 
 type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'pill' | 'link' | 'danger'
 type ButtonSize = 'sm' | 'md' | 'lg'
@@ -10,6 +18,7 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   icon?: ReactNode
   iconPosition?: 'left' | 'right'
   loading?: boolean
+  styles?: MantineButtonStyles
 }
 
 const sizeMap: Record<ButtonSize, 'xs' | 'sm' | 'md'> = {
@@ -42,6 +51,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       disabled,
       children,
       style: inlineStyle,
+      styles,
       ...props
     },
     ref,
@@ -66,6 +76,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         loading={loading}
         disabled={loading || disabled}
         style={combinedStyle}
+        styles={styles}
         {...props}
       >
         {children}
