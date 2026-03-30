@@ -64,8 +64,12 @@ import {
   writePluginFile,
   deletePluginFile,
   promotePluginFiles,
-  inferPluginIdFromWorkspacePath,
 } from "../services/workspacePluginFiles";
+import {
+  findPluginMappingForPath,
+  findLibraryDefinitionForPath,
+  resolvePluginIdForConfigSummary,
+} from "../services/configPluginResolution";
 import { optionalAuth } from "../middleware/auth";
 
 const router = Router();
@@ -339,57 +343,6 @@ function buildPluginConfigViews(
   const unmatchedUploads = pluginSummaries.filter((summary) => !matchedSummaries.has(summary));
 
   return { definitions: views, unmatchedUploads };
-}
-
-function findPluginMappingForPath(
-  project: StoredProject,
-  path: string,
-): { pluginId: string; definitionId?: string } | undefined {
-  for (const plugin of project.plugins ?? []) {
-    for (const mapping of plugin.configMappings ?? []) {
-      // Handle new format (discriminated union)
-      if ('type' in mapping) {
-        if (mapping.type === 'custom' && mapping.path === path) {
-          return { pluginId: plugin.id, definitionId: mapping.customId };
-        } else if (mapping.type === 'library') {
-          // Library configs use definition path, check against stored plugin definition
-          // This is handled elsewhere, skip here
-          continue;
-        }
-      } else {
-        // Old format: check path
-        const oldMapping = mapping as any;
-        if (oldMapping.path === path) {
-          return { pluginId: plugin.id, definitionId: oldMapping.definitionId };
-        }
-      }
-    }
-  }
-  return undefined;
-}
-
-// Helper function to find library definition for a given path
-async function findLibraryDefinitionForPath(
-  project: StoredProject,
-  path: string,
-): Promise<{ pluginId: string; definitionId: string; label?: string } | undefined> {
-  for (const plugin of project.plugins ?? []) {
-    if (!plugin.version) continue;
-    
-    const stored = await findStoredPlugin(plugin.id, plugin.version);
-    if (!stored?.configDefinitions) continue;
-    
-    for (const definition of stored.configDefinitions) {
-      if (definition.path === path) {
-        return {
-          pluginId: plugin.id,
-          definitionId: definition.id,
-          label: definition.label,
-        };
-      }
-    }
-  }
-  return undefined;
 }
 
 async function reconcilePluginConfigMetadata(
@@ -2225,48 +2178,13 @@ async function listAllProjectConfigs(project: StoredProject): Promise<ConfigFile
   
   const allSummaries = [...uploadedSummaries, ...scannedSummaries];
   allSummaries.sort((a, b) => a.path.localeCompare(b.path));
-  return allSummaries;
-}
-
-/**
- * Which plugin "owns" this config on the source project (for cross-project promote eligibility).
- * Handles e.g. plugins/GriefPreventionData/... when the project lists plugin id GriefPrevention.
- */
-async function resolveRequiredPluginIdForPromote(
-  sourceProject: StoredProject,
-  summary: ConfigFileSummary,
-): Promise<string | undefined> {
-  if (summary.pluginId) {
-    return summary.pluginId;
-  }
-  const mapped = findPluginMappingForPath(sourceProject, summary.path);
-  if (mapped?.pluginId) {
-    return mapped.pluginId;
-  }
-  const fromFolder = inferPluginIdFromWorkspacePath(sourceProject, summary.path);
-  if (fromFolder) {
-    return fromFolder;
-  }
-  const lib = await findLibraryDefinitionForPath(sourceProject, summary.path);
-  if (lib?.pluginId) {
-    return lib.pluginId;
-  }
-  const m = summary.path.match(/^plugins\/([^/]+)/);
-  if (!m) {
-    return undefined;
-  }
-  const folder = m[1];
-  const dataSuffix = /^(.+)data$/i.exec(folder);
-  if (dataSuffix?.[1]) {
-    const base = dataSuffix[1];
-    const plugin = sourceProject.plugins?.find(
-      (p) => p.id && p.id.toLowerCase() === base.toLowerCase(),
-    );
-    if (plugin) {
-      return plugin.id;
-    }
-  }
-  return undefined;
+  const enriched = await Promise.all(
+    allSummaries.map(async (s) => {
+      const pluginId = await resolvePluginIdForConfigSummary(project, s);
+      return pluginId !== s.pluginId ? { ...s, pluginId } : s;
+    }),
+  );
+  return enriched;
 }
 
 async function wouldCreatePromoteCycle(currentId: string, proposedTarget: string): Promise<boolean> {
@@ -2312,7 +2230,7 @@ async function buildPromotePreviewRows(
       continue;
     }
     if (source.path.startsWith("plugins/")) {
-      const requiredPluginId = await resolveRequiredPluginIdForPromote(sourceProject, source);
+      const requiredPluginId = await resolvePluginIdForConfigSummary(sourceProject, source);
       if (
         requiredPluginId &&
         !findProjectPluginById(targetProject.plugins, requiredPluginId)
