@@ -108,6 +108,9 @@ function formatBytes(bytes: number): string {
   return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[unitIndex]}`
 }
 
+/** Default backend limit (see MCSM_MAX_CONFIG_PAYLOAD_MB); used for editor warnings only. */
+const CONFIG_EDITOR_JSON_SAVE_LIMIT_BYTES = 32 * 1024 * 1024
+
 interface PluginCardProps {
   plugin: NonNullable<ProjectSummary['plugins']>[number]
   pluginDefinitions: PluginConfigDefinitionView[]
@@ -427,7 +430,11 @@ function ProjectDetail() {
   const [configUploadBusy, setConfigUploadBusy] = useState(false)
   const [configUploadModalOpened, setConfigUploadModalOpened] = useState(false)
   const [expandedConfigPlugins, setExpandedConfigPlugins] = useState<Set<string>>(new Set())
-  const [configEditor, setConfigEditor] = useState<{ path: string; content: string } | null>(null)
+  const [configEditor, setConfigEditor] = useState<{
+    path: string
+    content: string
+    listedSizeBytes?: number
+  } | null>(null)
   const [configEditorBusy, setConfigEditorBusy] = useState(false)
   const [configEditorError, setConfigEditorError] = useState<string | null>(null)
   const [customPathModal, setCustomPathModal] = useState<CustomPathModalState | null>(null)
@@ -1819,11 +1826,15 @@ useEffect(() => {
   )
 
   const handleEditConfig = useCallback(
-    async (path: string) => {
+    async (file: ProjectConfigSummary) => {
       if (!id) return
       try {
-        const file = await fetchProjectConfigFile(id, path)
-        setConfigEditor({ path: file.path, content: file.content })
+        const loaded = await fetchProjectConfigFile(id, file.path)
+        setConfigEditor({
+          path: loaded.path,
+          content: loaded.content,
+          listedSizeBytes: file.size,
+        })
         setConfigEditorError(null)
       } catch (err) {
         setConfigsError(err instanceof Error ? err.message : 'Failed to load config file.')
@@ -3421,7 +3432,7 @@ useEffect(() => {
                                             type="button"
                                             size="sm"
                                             style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-                                            onClick={() => void handleEditConfig(file.path)}
+                                            onClick={() => void handleEditConfig(file)}
                                           >
                                             <PencilSimple size={16} weight="fill" aria-hidden="true" />
                                             Edit
@@ -4175,6 +4186,19 @@ useEffect(() => {
               {configEditorError}
             </Alert>
           )}
+          {configEditor &&
+            configEditor.listedSizeBytes != null &&
+            configEditor.listedSizeBytes > 8 * 1024 * 1024 && (
+              <Alert
+                color={configEditor.listedSizeBytes >= CONFIG_EDITOR_JSON_SAVE_LIMIT_BYTES ? 'orange' : 'yellow'}
+                title="Large config file"
+                style={{ flexShrink: 0 }}
+              >
+                On disk this file is about {formatBytes(configEditor.listedSizeBytes)}. Save sends the full text in one
+                JSON request (default backend limit {formatBytes(CONFIG_EDITOR_JSON_SAVE_LIMIT_BYTES)}). If save fails,
+                use Replace or edit the file outside the app. YAML validity does not change that limit.
+              </Alert>
+            )}
           {configEditor && (
             <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
               <CodeMirror

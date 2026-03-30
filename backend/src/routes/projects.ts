@@ -31,7 +31,7 @@ import type {
 import { renderManifest, type ManifestOverrides } from "../services/manifestService";
 import { enqueueBuild } from "../services/buildQueue";
 import { scanProjectAssets } from "../services/projectScanner";
-import { getProjectsRoot, getDevDataPaths } from "../config";
+import { getProjectsRoot, getDevDataPaths, maxConfigPayloadBytes, describeMaxConfigPayload } from "../config";
 import { commitFiles, getOctokitForRequest } from "../services/githubClient";
 import {
   collectProjectDefinitionFiles,
@@ -76,7 +76,7 @@ const pluginUpload = multer({
 const configUpload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 16 * 1024 * 1024,
+    fileSize: maxConfigPayloadBytes,
   },
 });
 
@@ -2444,9 +2444,17 @@ router.put("/:id/configs/file", async (req: Request, res: Response) => {
     if (!project) {
       res.status(404).json({ error: "Project not found" });
       return;
-  }
+    }
     if (typeof path !== "string" || typeof content !== "string") {
       res.status(400).json({ error: "path and content are required" });
+      return;
+    }
+    const contentBytes = Buffer.byteLength(content, "utf8");
+    if (contentBytes > maxConfigPayloadBytes) {
+      const max = describeMaxConfigPayload();
+      res.status(413).json({
+        error: `Config content is about ${Math.ceil(contentBytes / (1024 * 1024))} MB; maximum for in-app save is ${max} (UTF-8 size). Use Replace to upload from disk, split or shrink the file, or raise MCSM_MAX_CONFIG_PAYLOAD_MB on the backend.`,
+      });
       return;
     }
     const pluginIdOverride =

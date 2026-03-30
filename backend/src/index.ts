@@ -3,7 +3,9 @@ import { join } from "path";
 import type { Server } from "http";
 import type { Request, Response, NextFunction } from "express";
 import express from "express";
+import multer from "multer";
 import "./config";
+import { describeMaxConfigPayload, maxConfigPayloadBytes } from "./config";
 import { registerRoutes } from "./routes";
 
 // Set up file logging in Electron mode (after imports but before any console.log usage)
@@ -79,7 +81,7 @@ export function createApp(): express.Application {
     next();
   });
 
-  app.use(express.json());
+  app.use(express.json({ limit: maxConfigPayloadBytes }));
 
   // Log all incoming requests
   app.use((req: Request, _res: Response, next: NextFunction) => {
@@ -93,8 +95,32 @@ export function createApp(): express.Application {
     res.status(404).json({ error: "Route not found" });
   });
 
-  app.use((error: Error, _req: Request, res: Response, _next: NextFunction) => {
+  app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
     console.error("Unhandled error", error);
+
+    if (error instanceof multer.MulterError && error.code === "LIMIT_FILE_SIZE") {
+      const max = describeMaxConfigPayload();
+      res.status(413).json({
+        error: `Config upload is too large (maximum ${max} per file). Use a smaller file or split the config.`,
+      });
+      return;
+    }
+
+    if (error && typeof error === "object") {
+      const e = error as { type?: string; status?: number; message?: string };
+      if (e.type === "entity.too.large") {
+        const max = describeMaxConfigPayload();
+        res.status(413).json({
+          error: `Request body is too large (maximum ${max} for JSON). The config editor sends the whole file in one request, so very large configs cannot be saved this way. Use Replace to upload from disk, or edit the file outside the app. Set MCSM_MAX_CONFIG_PAYLOAD_MB in the backend environment to raise the limit (high values use a lot of memory).`,
+        });
+        return;
+      }
+      if (e.type === "entity.parse.failed") {
+        res.status(400).json({ error: "Invalid JSON in the request body." });
+        return;
+      }
+    }
+
     res.status(500).json({ error: "Internal server error" });
   });
 
