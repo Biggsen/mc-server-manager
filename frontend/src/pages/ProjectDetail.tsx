@@ -470,7 +470,7 @@ function ProjectDetail() {
   const [showRunOptions, setShowRunOptions] = useState(false)
   const [runOptions, setRunOptions] = useState({ resetWorld: false, resetPlugins: false, useSnapshot: false })
   const [showBuildOptions, setShowBuildOptions] = useState(false)
-  const [buildOptions, setBuildOptions] = useState<BuildOptions>({ skipPush: false })
+  const [buildOptions, setBuildOptions] = useState<BuildOptions>({ skipPush: true })
   const [allProjects, setAllProjects] = useState<ProjectSummary[]>([])
   const [copyFromOpen, setCopyFromOpen] = useState(false)
   const [copyFromSourceId, setCopyFromSourceId] = useState('')
@@ -4529,7 +4529,7 @@ useEffect(() => {
         opened={showBuildOptions}
         onClose={() => {
           setShowBuildOptions(false)
-          setBuildOptions({ skipPush: false })
+          setBuildOptions({ skipPush: true })
         }}
         title="Build Options"
         size="sm"
@@ -4541,12 +4541,12 @@ useEffect(() => {
           </Text>
           {project?.repo && (
             <Checkbox
-              label="Build only (don't sync to repository)"
-              checked={buildOptions.skipPush ?? false}
+              label="Sync to repository"
+              checked={buildOptions.skipPush === false}
               onChange={(event) =>
-                setBuildOptions((prev) => ({ ...prev, skipPush: event.target.checked }))
+                setBuildOptions((prev) => ({ ...prev, skipPush: !event.target.checked }))
               }
-              description="Build artifact and manifest locally without pushing to GitHub. Use when GitHub is rate limiting or offline."
+              description="Push build artifact and manifest to GitHub after a successful build. Leave unchecked for local-only builds (e.g. rate limits or offline)."
             />
           )}
           <Group justify="flex-end" gap="sm">
@@ -4554,7 +4554,7 @@ useEffect(() => {
               variant="ghost"
               onClick={() => {
                 setShowBuildOptions(false)
-                setBuildOptions({ skipPush: false })
+                setBuildOptions({ skipPush: true })
               }}
             >
               Cancel
@@ -4563,7 +4563,7 @@ useEffect(() => {
               variant="primary"
               onClick={() => {
                 setShowBuildOptions(false)
-                setBuildOptions({ skipPush: false })
+                setBuildOptions({ skipPush: true })
                 void queueBuild(buildOptions)
               }}
               disabled={queueBuildBusy}
