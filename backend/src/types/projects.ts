@@ -16,6 +16,7 @@ export interface ProjectSummary {
   configs?: StoredProject["configs"];
   repo?: RepoMetadata;
   snapshotSourceProjectId?: string;
+  promoteTargetProjectId?: string;
   sftp?: ProjectSftpSummary;
 }
 

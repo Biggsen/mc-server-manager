@@ -480,6 +480,9 @@ function ProjectDetail() {
   const [snapshotSourceBusy, setSnapshotSourceBusy] = useState(false)
   const [snapshotSourceEditMode, setSnapshotSourceEditMode] = useState(false)
   const [snapshotSourceDraft, setSnapshotSourceDraft] = useState<string>('')
+  const [promoteTargetEditMode, setPromoteTargetEditMode] = useState(false)
+  const [promoteTargetDraft, setPromoteTargetDraft] = useState('')
+  const [promoteTargetBusy, setPromoteTargetBusy] = useState(false)
   const [initCommands, setInitCommands] = useState<string[]>([])
   const [savedInitCommands, setSavedInitCommands] = useState<string[]>([])
   const [initCommandsLoading, setInitCommandsLoading] = useState(false)
@@ -2356,6 +2359,24 @@ useEffect(() => {
                 >
                   Duplicate for upgrade
                 </Anchor>
+                <Text span size="sm" c="dimmed">
+                  ·
+                </Text>
+                {project?.promoteTargetProjectId ? (
+                  <Anchor
+                    component={Link}
+                    to={`/projects/${id}/promote`}
+                    size="sm"
+                    underline="hover"
+                    style={{ pointerEvents: busy ? 'none' : undefined, opacity: busy ? 0.5 : 1 }}
+                  >
+                    Promote
+                  </Anchor>
+                ) : (
+                  <Text size="sm" c="dimmed" title="Set a promote target in Settings">
+                    Promote
+                  </Text>
+                )}
                 {project?.repo && (
                   <>
                     <Text span size="sm" c="dimmed">
@@ -3415,14 +3436,17 @@ useEffect(() => {
                                       <Group key={file.path} justify="space-between" align="flex-start">
                                         <Stack gap={2}>
                                           <Text fw={600} size="sm">{file.path}</Text>
+                                          {file.generatorVersion && (
+                                            <Text size="xs" c="dimmed">
+                                              Generator version:{' '}
+                                              <Text component="span" size="xs" c="white" inherit>
+                                                {file.generatorVersion}
+                                              </Text>
+                                            </Text>
+                                          )}
                                           {file.size !== undefined && file.modifiedAt && (
                                             <Text size="xs" c="dimmed">
                                               {formatBytes(file.size)} · Updated {new Date(file.modifiedAt).toLocaleString()}
-                                            </Text>
-                                          )}
-                                          {file.definitionId && (
-                                            <Text size="xs" c="dimmed">
-                                              Definition: {file.definitionId}
                                             </Text>
                                           )}
                                         </Stack>
@@ -3636,6 +3660,113 @@ useEffect(() => {
 
             <Tabs.Panel value="settings">
               <Stack gap="lg" pt="lg">
+                <Card>
+                  <CardContent>
+                    <Stack gap="md">
+                      <Title order={3}>Promote downstream</Title>
+                      <Text size="sm" c="dimmed">
+                        Choose the project that receives staged configs when you use Promote (e.g. live server receives
+                        configs from this &quot;next&quot; project).
+                      </Text>
+                      {project?.promoteTargetProjectId && !promoteTargetEditMode && promoteTargetDraft === '' ? (
+                        <Stack gap="sm">
+                          <Group gap="sm" align="center">
+                            <Text size="sm" fw={500}>
+                              Promote to:
+                            </Text>
+                            <Text size="sm">
+                              {allProjects.find((p) => p.id === project.promoteTargetProjectId)?.name ||
+                                project.promoteTargetProjectId}
+                            </Text>
+                            <Anchor
+                              size="sm"
+                              component="button"
+                              type="button"
+                              onClick={() => {
+                                setPromoteTargetEditMode(true)
+                                setPromoteTargetDraft(project.promoteTargetProjectId || '')
+                              }}
+                            >
+                              Change
+                            </Anchor>
+                          </Group>
+                        </Stack>
+                      ) : (
+                        <Stack gap="sm">
+                          <NativeSelect
+                            label="Promote to project"
+                            value={
+                              promoteTargetDraft !== ''
+                                ? promoteTargetDraft
+                                : project?.promoteTargetProjectId || ''
+                            }
+                            onChange={(event) => setPromoteTargetDraft(event.currentTarget.value)}
+                            disabled={promoteTargetBusy}
+                            data={[
+                              { value: '', label: 'None' },
+                              ...allProjects
+                                .filter((p) => p.id !== id)
+                                .map((p) => ({ value: p.id, label: p.name })),
+                            ]}
+                          />
+                          <Group>
+                            <Button
+                              variant="primary"
+                              onClick={async () => {
+                                if (!id) return
+                                const currentDraft =
+                                  promoteTargetDraft !== ''
+                                    ? promoteTargetDraft
+                                    : project?.promoteTargetProjectId || ''
+                                const newValue = currentDraft || undefined
+                                setPromoteTargetBusy(true)
+                                try {
+                                  const updated = await updateProject(id, {
+                                    promoteTargetProjectId: newValue,
+                                  })
+                                  setProject(updated)
+                                  setPromoteTargetEditMode(false)
+                                  setPromoteTargetDraft('')
+                                  toast({
+                                    title: 'Promote target updated',
+                                    description: newValue
+                                      ? `Configs can be promoted to ${allProjects.find((p) => p.id === newValue)?.name || 'selected project'}`
+                                      : 'Promote target cleared',
+                                    variant: 'success',
+                                  })
+                                } catch (err) {
+                                  toast({
+                                    title: 'Update failed',
+                                    description:
+                                      err instanceof Error ? err.message : 'Failed to update promote target',
+                                    variant: 'danger',
+                                  })
+                                } finally {
+                                  setPromoteTargetBusy(false)
+                                }
+                              }}
+                              disabled={promoteTargetBusy}
+                            >
+                              Save
+                            </Button>
+                            {promoteTargetEditMode && (
+                              <Button
+                                variant="ghost"
+                                onClick={() => {
+                                  setPromoteTargetEditMode(false)
+                                  setPromoteTargetDraft('')
+                                }}
+                                disabled={promoteTargetBusy}
+                              >
+                                Cancel
+                              </Button>
+                            )}
+                          </Group>
+                        </Stack>
+                      )}
+                    </Stack>
+                  </CardContent>
+                </Card>
                 <Card>
                   <CardContent>
                     <Stack gap="md">

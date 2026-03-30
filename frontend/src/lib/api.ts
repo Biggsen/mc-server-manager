@@ -339,6 +339,7 @@ export interface ProjectSummary {
   }>
   repo?: RepoMetadata
   snapshotSourceProjectId?: string
+  promoteTargetProjectId?: string
   sftp?: {
     host: string
     port?: number
@@ -800,6 +801,7 @@ export async function updateProject(
     loader?: string
     description?: string
     snapshotSourceProjectId?: string
+    promoteTargetProjectId?: string
     sftp?: ProjectSummary['sftp'] | null
   },
 ): Promise<ProjectSummary> {
@@ -833,6 +835,8 @@ export interface ProjectConfigSummary {
   sha256?: string
   pluginId?: string
   definitionId?: string
+  /** From first-line mc-plugin-manager comment when present */
+  generatorVersion?: string
 }
 
 export interface PluginConfigDefinitionView {
@@ -860,6 +864,38 @@ export interface ProjectPluginConfigsResponse {
 export async function fetchProjectConfigs(projectId: string): Promise<ProjectConfigSummary[]> {
   const data = await request<{ configs: ProjectConfigSummary[] }>(`/projects/${projectId}/configs`)
   return data.configs
+}
+
+export interface PromotePreviewRow {
+  path: string
+  source: { generatorVersion?: string; sha256?: string }
+  target: { generatorVersion?: string; sha256?: string } | null
+}
+
+export async function fetchPromotePreview(projectId: string): Promise<{
+  sourceProjectId: string
+  sourceProjectName: string
+  targetProjectId: string
+  targetProjectName: string
+  rows: PromotePreviewRow[]
+}> {
+  return request(`/projects/${encodeURIComponent(projectId)}/promote/preview`)
+}
+
+export async function promoteProjectConfigs(
+  projectId: string,
+  paths: string[],
+): Promise<{ promoted: string[]; targetProjectId: string; configs: ProjectConfigSummary[] }> {
+  const data = await request<{
+    promoted: string[]
+    targetProjectId: string
+    configs: ProjectConfigSummary[]
+  }>(`/projects/${encodeURIComponent(projectId)}/promote`, {
+    method: 'POST',
+    body: JSON.stringify({ paths }),
+  })
+  emitProjectsUpdated()
+  return data
 }
 
 export async function uploadProjectConfig(

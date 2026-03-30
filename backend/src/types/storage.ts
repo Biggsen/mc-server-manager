@@ -38,6 +38,8 @@ export interface StoredProject {
   configs?: StoredProjectConfigEntry[];
   manifest?: ManifestMetadata;
   snapshotSourceProjectId?: string;
+  /** When set, this project can promote staged configs to that downstream project. */
+  promoteTargetProjectId?: string;
   sftp?: ProjectSftpConfig;
   createdAt: string;
   updatedAt: string;

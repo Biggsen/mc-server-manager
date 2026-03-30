@@ -33,6 +33,7 @@ import NewProject from './pages/NewProject'
 import NotFound from './pages/NotFound'
 import Projects from './pages/Projects'
 import ProjectDetail from './pages/ProjectDetail'
+import PromoteConfigs from './pages/PromoteConfigs'
 import Deployments from './pages/Deployments'
 import Upload from './pages/Upload'
 import TestTools from './pages/TestTools'
@@ -435,6 +436,7 @@ function App() {
                 <Route path="/projects/new" element={<NewProject />} />
                 <Route path="/projects/import" element={<ImportProject />} />
                 <Route path="/projects/:id" element={<ProjectDetail />} />
+                <Route path="/projects/:id/promote" element={<PromoteConfigs />} />
                 <Route path="/projects/:id/profile" element={<GenerateProfile />} />
                 <Route path="/plugins" element={<PluginLibrary />} />
                 <Route path="/live-editor" element={<LiveEditor />} />
