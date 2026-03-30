@@ -64,6 +64,7 @@ import {
   writePluginFile,
   deletePluginFile,
   promotePluginFiles,
+  inferPluginIdFromWorkspacePath,
 } from "../services/workspacePluginFiles";
 import { optionalAuth } from "../middleware/auth";
 
@@ -2227,6 +2228,47 @@ async function listAllProjectConfigs(project: StoredProject): Promise<ConfigFile
   return allSummaries;
 }
 
+/**
+ * Which plugin "owns" this config on the source project (for cross-project promote eligibility).
+ * Handles e.g. plugins/GriefPreventionData/... when the project lists plugin id GriefPrevention.
+ */
+async function resolveRequiredPluginIdForPromote(
+  sourceProject: StoredProject,
+  summary: ConfigFileSummary,
+): Promise<string | undefined> {
+  if (summary.pluginId) {
+    return summary.pluginId;
+  }
+  const mapped = findPluginMappingForPath(sourceProject, summary.path);
+  if (mapped?.pluginId) {
+    return mapped.pluginId;
+  }
+  const fromFolder = inferPluginIdFromWorkspacePath(sourceProject, summary.path);
+  if (fromFolder) {
+    return fromFolder;
+  }
+  const lib = await findLibraryDefinitionForPath(sourceProject, summary.path);
+  if (lib?.pluginId) {
+    return lib.pluginId;
+  }
+  const m = summary.path.match(/^plugins\/([^/]+)/);
+  if (!m) {
+    return undefined;
+  }
+  const folder = m[1];
+  const dataSuffix = /^(.+)data$/i.exec(folder);
+  if (dataSuffix?.[1]) {
+    const base = dataSuffix[1];
+    const plugin = sourceProject.plugins?.find(
+      (p) => p.id && p.id.toLowerCase() === base.toLowerCase(),
+    );
+    if (plugin) {
+      return plugin.id;
+    }
+  }
+  return undefined;
+}
+
 async function wouldCreatePromoteCycle(currentId: string, proposedTarget: string): Promise<boolean> {
   const visited = new Set<string>();
   let cursor: string | undefined = proposedTarget;
@@ -2247,13 +2289,14 @@ async function wouldCreatePromoteCycle(currentId: string, proposedTarget: string
 async function buildPromotePreviewRows(
   sourceProject: StoredProject,
   targetProject: StoredProject,
-): Promise<
-  Array<{
+): Promise<{
+  rows: Array<{
     path: string;
     source: { generatorVersion?: string; sha256?: string };
     target: { generatorVersion?: string; sha256?: string } | null;
-  }>
-> {
+  }>;
+  missingDownstreamPluginIds: string[];
+}> {
   const sourceList = await listAllProjectConfigs(sourceProject);
   const targetList = await listAllProjectConfigs(targetProject);
   const targetMap = new Map(targetList.map((s) => [s.path, s]));
@@ -2262,17 +2305,72 @@ async function buildPromotePreviewRows(
     source: { generatorVersion?: string; sha256?: string };
     target: { generatorVersion?: string; sha256?: string } | null;
   }> = [];
+  const missingDownstream = new Set<string>();
   for (const source of sourceList) {
     const t = targetMap.get(source.path);
-    if (isPromoteConfigMismatch(source, t)) {
-      rows.push({
-        path: source.path,
-        source: { generatorVersion: source.generatorVersion, sha256: source.sha256 },
-        target: t ? { generatorVersion: t.generatorVersion, sha256: t.sha256 } : null,
-      });
+    if (!isPromoteConfigMismatch(source, t)) {
+      continue;
     }
+    if (source.path.startsWith("plugins/")) {
+      const requiredPluginId = await resolveRequiredPluginIdForPromote(sourceProject, source);
+      if (
+        requiredPluginId &&
+        !findProjectPluginById(targetProject.plugins, requiredPluginId)
+      ) {
+        missingDownstream.add(requiredPluginId);
+        continue;
+      }
+    }
+    rows.push({
+      path: source.path,
+      source: { generatorVersion: source.generatorVersion, sha256: source.sha256 },
+      target: t ? { generatorVersion: t.generatorVersion, sha256: t.sha256 } : null,
+    });
   }
   rows.sort((a, b) => a.path.localeCompare(b.path));
+  const missingDownstreamPluginIds = [...missingDownstream].sort((a, b) =>
+    a.localeCompare(b, undefined, { sensitivity: "base" }),
+  );
+  return { rows, missingDownstreamPluginIds };
+}
+
+interface PromotePluginCompareRow {
+  id: string;
+  source: { version: string; enabled: boolean } | null;
+  target: { version: string; enabled: boolean } | null;
+}
+
+function buildPromotePluginCompareRows(
+  sourceProject: StoredProject,
+  targetProject: StoredProject,
+): PromotePluginCompareRow[] {
+  const srcByLower = new Map<string, { id: string; version: string; enabled: boolean }>();
+  for (const p of sourceProject.plugins ?? []) {
+    srcByLower.set(p.id.toLowerCase(), {
+      id: p.id,
+      version: (p.version ?? "latest").trim() || "latest",
+      enabled: p.enabled !== false,
+    });
+  }
+  const tgtByLower = new Map<string, { id: string; version: string; enabled: boolean }>();
+  for (const p of targetProject.plugins ?? []) {
+    tgtByLower.set(p.id.toLowerCase(), {
+      id: p.id,
+      version: (p.version ?? "latest").trim() || "latest",
+      enabled: p.enabled !== false,
+    });
+  }
+  const keys = new Set([...srcByLower.keys(), ...tgtByLower.keys()]);
+  const rows: PromotePluginCompareRow[] = [...keys].map((lower) => {
+    const s = srcByLower.get(lower);
+    const t = tgtByLower.get(lower);
+    return {
+      id: s?.id ?? t?.id ?? lower,
+      source: s ? { version: s.version, enabled: s.enabled } : null,
+      target: t ? { version: t.version, enabled: t.enabled } : null,
+    };
+  });
+  rows.sort((a, b) => a.id.localeCompare(b.id, undefined, { sensitivity: "base" }));
   return rows;
 }
 
@@ -2294,13 +2392,19 @@ router.get("/:id/promote/preview", async (req: Request, res: Response) => {
       res.status(400).json({ error: "Promote target project no longer exists" });
       return;
     }
-    const rows = await buildPromotePreviewRows(sourceProject, targetProject);
+    const { rows, missingDownstreamPluginIds } = await buildPromotePreviewRows(
+      sourceProject,
+      targetProject,
+    );
+    const pluginCompareRows = buildPromotePluginCompareRows(sourceProject, targetProject);
     res.json({
       sourceProjectId: sourceProject.id,
       sourceProjectName: sourceProject.name,
       targetProjectId: targetProject.id,
       targetProjectName: targetProject.name,
       rows,
+      missingDownstreamPluginIds,
+      pluginCompareRows,
     });
   } catch (error) {
     console.error("Failed to build promote preview", error);
@@ -2346,7 +2450,7 @@ router.post("/:id/promote", async (req: Request, res: Response) => {
 
     const sourceSummaries = await listAllProjectConfigs(sourceProject);
     const sourceByPath = new Map(sourceSummaries.map((s) => [s.path, s]));
-    const previewRows = await buildPromotePreviewRows(sourceProject, targetProject);
+    const { rows: previewRows } = await buildPromotePreviewRows(sourceProject, targetProject);
     const mismatchPaths = new Set(previewRows.map((r) => r.path));
     for (const path of paths) {
       if (!sourceByPath.has(path)) {

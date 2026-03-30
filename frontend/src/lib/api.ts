@@ -872,12 +872,20 @@ export interface PromotePreviewRow {
   target: { generatorVersion?: string; sha256?: string } | null
 }
 
+export interface PromotePluginCompareRow {
+  id: string
+  source: { version: string; enabled: boolean } | null
+  target: { version: string; enabled: boolean } | null
+}
+
 export async function fetchPromotePreview(projectId: string): Promise<{
   sourceProjectId: string
   sourceProjectName: string
   targetProjectId: string
   targetProjectName: string
   rows: PromotePreviewRow[]
+  missingDownstreamPluginIds: string[]
+  pluginCompareRows: PromotePluginCompareRow[]
 }> {
   return request(`/projects/${encodeURIComponent(projectId)}/promote/preview`)
 }
