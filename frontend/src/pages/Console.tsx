@@ -14,7 +14,7 @@ import { Button } from '../components/ui'
 import { ContentSection } from '../components/layout'
 import { RunLogsAndConsole } from '../components/RunLogsAndConsole'
 import { fetchProjects, type ProjectSummary, type RunJob } from '../lib/api'
-import { useActiveRuns } from '../lib/useActiveRuns'
+import { useActiveRunsContext } from '../lib/activeRunsContext'
 
 const runStatusLabel: Record<
   RunJob['status'],
@@ -59,7 +59,6 @@ function Console() {
     activeRuns,
     runsLoading,
     runsError,
-    projectLookup,
     requestStopRun,
     sendRunCommandAction,
     commandInputs,
@@ -67,7 +66,12 @@ function Console() {
     commandBusy,
     runBusy,
     registerLogRef,
-  } = useActiveRuns(projects)
+  } = useActiveRunsContext()
+
+  const projectLookup = projects.reduce<Record<string, ProjectSummary>>((acc, project) => {
+    acc[project.id] = project
+    return acc
+  }, {})
 
   const loading = projectsLoading || runsLoading
 

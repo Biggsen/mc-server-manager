@@ -30,7 +30,7 @@ import {
   type RunJob,
   type StoredPluginRecord,
 } from '../lib/api'
-import { useActiveRuns } from '../lib/useActiveRuns'
+import { useActiveRunsContext } from '../lib/activeRunsContext'
 
 const sourceLabel: Record<'download' | 'upload', string> = {
   download: 'Download URL',
@@ -81,7 +81,6 @@ function Dashboard() {
     runsLoading,
     runsError,
     setRunsError,
-    projectLookup,
     requestStopRun,
     sendRunCommandAction,
     commandInputs,
@@ -90,7 +89,16 @@ function Dashboard() {
     runBusy,
     registerLogRef,
     prependRun,
-  } = useActiveRuns(projects)
+  } = useActiveRunsContext()
+
+  const projectLookup = useMemo(
+    () =>
+      projects.reduce<Record<string, ProjectSummary>>((acc, project) => {
+        acc[project.id] = project
+        return acc
+      }, {}),
+    [projects],
+  )
 
   const { run: queueProjectBuild } = useAsyncAction<
     [ProjectSummary, BuildOptions?],
