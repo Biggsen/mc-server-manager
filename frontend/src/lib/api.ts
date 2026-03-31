@@ -1534,3 +1534,24 @@ export async function deleteUploadLocalFile(
   })
 }
 
+export async function getUploadLocalFileGeneratorVersion(
+  projectId: string,
+  path: string,
+): Promise<string | null> {
+  const q = new URLSearchParams({ projectId, path })
+  const data = await request<{ path: string; generatorVersion: string | null }>(`/upload/file-version-local?${q}`)
+  return data.generatorVersion
+}
+
+export async function getUploadRemoteFileGeneratorVersion(
+  projectId: string,
+  password: string,
+  path: string,
+): Promise<string | null> {
+  const data = await request<{ path: string; generatorVersion: string | null }>('/upload/file-version-remote', {
+    method: 'POST',
+    body: JSON.stringify({ projectId, password, path }),
+  })
+  return data.generatorVersion
+}
+
