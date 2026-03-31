@@ -1027,7 +1027,25 @@ function ProjectDetail() {
       }
 
       if (errors.length > 0) {
-        const details = errors
+        const skippedUnmatched = errors.filter((error) =>
+          /No project plugin matches folder/i.test(error.error),
+        )
+        const actionableErrors = errors.filter(
+          (error) => !/No project plugin matches folder/i.test(error.error),
+        )
+        if (actionableErrors.length === 0) {
+          toast({
+            title: promoted.length > 0 ? 'Promoted with skips' : 'Skipped unmatched paths',
+            description:
+              promoted.length > 0
+                ? `${promoted.length} file(s) promoted, ${skippedUnmatched.length} skipped because plugin folders do not match this project's plugin ids.`
+                : `${skippedUnmatched.length} path(s) skipped because plugin folders do not match this project's plugin ids.`,
+            variant: 'warning',
+          })
+          return
+        }
+
+        const details = actionableErrors
           .slice(0, 5)
           .map((error) => `${error.path}: ${error.error}`)
           .join('; ')
@@ -1036,7 +1054,7 @@ function ProjectDetail() {
           title: promoted.length > 0 ? 'Promoted with issues' : 'Promote failed',
           description:
             promoted.length > 0
-              ? `${promoted.length} file(s) promoted, ${errors.length} failed.`
+              ? `${promoted.length} file(s) promoted, ${actionableErrors.length} failed${skippedUnmatched.length > 0 ? `, ${skippedUnmatched.length} skipped` : ''}.`
               : details,
           variant: promoted.length > 0 ? 'warning' : 'danger',
         })
