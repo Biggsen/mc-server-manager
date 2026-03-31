@@ -24,6 +24,7 @@ import {
   fetchProjectRuns,
   fetchPluginLibrary,
   linkProjectRepo,
+  promoteWorkspacePluginFiles,
   resetProjectWorkspace,
   runProjectLocally,
   saveProjectProfile,
@@ -440,6 +441,8 @@ function ProjectDetail() {
   const [configUploadName, setConfigUploadName] = useState('')
   const [configUploadPathDirty, setConfigUploadPathDirty] = useState(false)
   const [configUploadBusy, setConfigUploadBusy] = useState(false)
+  const [promoteWorkspaceConfigsBusy, setPromoteWorkspaceConfigsBusy] = useState(false)
+  const [removeAllPluginConfigsBusy, setRemoveAllPluginConfigsBusy] = useState<Record<string, boolean>>({})
   const [configUploadModalOpened, setConfigUploadModalOpened] = useState(false)
   const [expandedConfigPlugins, setExpandedConfigPlugins] = useState<Set<string>>(new Set())
   const [configEditor, setConfigEditor] = useState<{
@@ -998,6 +1001,131 @@ function ProjectDetail() {
       setConfigsLoading(false)
     }
   }, [id])
+
+  const handlePromoteWorkspaceConfigs = useCallback(async () => {
+    if (!id) return
+    try {
+      setPromoteWorkspaceConfigsBusy(true)
+      setConfigsError(null)
+      const establishedEntries = configFiles.length > 0 ? configFiles : (project?.configs ?? [])
+      const toPromote = establishedEntries
+        .filter((entry) => entry.path.startsWith('plugins/'))
+        .map((entry) => entry.path)
+
+      if (toPromote.length === 0) {
+        toast({
+          title: 'No established plugin configs',
+          description: 'Nothing to promote. Add project config files first.',
+          variant: 'default',
+        })
+        return
+      }
+
+      const { promoted, errors } = await promoteWorkspacePluginFiles(id, toPromote)
+      if (promoted.length > 0) {
+        await loadConfigs()
+      }
+
+      if (errors.length > 0) {
+        const details = errors
+          .slice(0, 5)
+          .map((error) => `${error.path}: ${error.error}`)
+          .join('; ')
+        setConfigsError(details)
+        toast({
+          title: promoted.length > 0 ? 'Promoted with issues' : 'Promote failed',
+          description:
+            promoted.length > 0
+              ? `${promoted.length} file(s) promoted, ${errors.length} failed.`
+              : details,
+          variant: promoted.length > 0 ? 'warning' : 'danger',
+        })
+        return
+      }
+
+      toast({
+        title: 'Workspace configs promoted',
+        description: `${promoted.length} file(s) copied into project config files.`,
+        variant: 'success',
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to promote workspace configs.'
+      setConfigsError(message)
+      toast({
+        title: 'Promote failed',
+        description: message,
+        variant: 'danger',
+      })
+    } finally {
+      setPromoteWorkspaceConfigsBusy(false)
+    }
+  }, [id, project?.configs, configFiles, loadConfigs, toast])
+
+  const handleRemoveAllConfigsForPlugin = useCallback(
+    async (pluginId: string, files: ProjectConfigSummary[]) => {
+      if (!id || files.length === 0) return
+      const label = pluginId === 'No plugin' ? 'unassigned files' : pluginId
+      if (
+        !window.confirm(
+          `Remove all ${files.length} config file(s) for ${label} from project staging? This cannot be undone.`,
+        )
+      ) {
+        return
+      }
+
+      setRemoveAllPluginConfigsBusy((prev) => ({ ...prev, [pluginId]: true }))
+      setConfigsError(null)
+
+      let removed = 0
+      const failed: string[] = []
+      try {
+        for (const file of files) {
+          try {
+            await deleteProjectConfigFile(id, file.path)
+            removed += 1
+          } catch (err) {
+            failed.push(`${file.path}: ${err instanceof Error ? err.message : 'Failed to remove config file.'}`)
+          }
+        }
+
+        await loadConfigs()
+
+        if (pluginId !== 'No plugin') {
+          void fetchProjectPluginConfigs(id, pluginId)
+            .then((data) => {
+              setPluginDefinitionCache((prev) => ({
+                ...prev,
+                [pluginId]: data.definitions,
+              }))
+            })
+            .catch(() => {})
+        }
+
+        if (failed.length > 0) {
+          const details = failed.slice(0, 5).join('; ')
+          setConfigsError(details)
+          toast({
+            title: removed > 0 ? 'Removed with issues' : 'Remove failed',
+            description:
+              removed > 0
+                ? `${removed} file(s) removed, ${failed.length} failed.`
+                : details,
+            variant: removed > 0 ? 'warning' : 'danger',
+          })
+          return
+        }
+
+        toast({
+          title: 'Configs removed',
+          description: `${removed} file(s) removed for ${label}.`,
+          variant: 'warning',
+        })
+      } finally {
+        setRemoveAllPluginConfigsBusy((prev) => ({ ...prev, [pluginId]: false }))
+      }
+    },
+    [id, loadConfigs, toast],
+  )
 
   const pluginDefinitionOptions = useMemo(() => {
     const map: Record<string, Array<{ definitionId: string; path: string; label: string }>> = {}
@@ -3515,16 +3643,27 @@ useEffect(() => {
                     <Stack gap="md">
                       <Group justify="space-between" align="center">
                         <Title order={3}>Plugin Config Files</Title>
-                        <Button
-                          variant="primary"
-                          icon={<Upload size={18} weight="fill" aria-hidden="true" />}
-                          onClick={() => {
-                            setConfigUploadModalOpened(true)
-                            setConfigsError(null)
-                          }}
-                        >
-                          Upload Config
-                        </Button>
+                        <Group gap="xs">
+                          <Button
+                            variant="ghost"
+                            icon={<ArrowCircleUp size={18} weight="fill" aria-hidden="true" />}
+                            loading={promoteWorkspaceConfigsBusy}
+                            disabled={configsLoading || configUploadBusy}
+                            onClick={() => void handlePromoteWorkspaceConfigs()}
+                          >
+                            Promote workspace config
+                          </Button>
+                          <Button
+                            variant="primary"
+                            icon={<Upload size={18} weight="fill" aria-hidden="true" />}
+                            onClick={() => {
+                              setConfigUploadModalOpened(true)
+                              setConfigsError(null)
+                            }}
+                          >
+                            Upload Config
+                          </Button>
+                        </Group>
                       </Group>
                       {configsError && (
                         <Alert color="red" title="Error">
@@ -3565,7 +3704,19 @@ useEffect(() => {
                             <Card key={pluginId}>
                               <CardContent>
                                 <Stack gap="md">
-                                  <Title order={4}>{pluginId}</Title>
+                                  <Group justify="space-between" align="center">
+                                    <Title order={4}>{pluginId}</Title>
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      icon={<Trash size={14} weight="fill" aria-hidden="true" />}
+                                      loading={Boolean(removeAllPluginConfigsBusy[pluginId])}
+                                      onClick={() => void handleRemoveAllConfigsForPlugin(pluginId, files)}
+                                    >
+                                      Remove all
+                                    </Button>
+                                  </Group>
                                   <Stack gap="xs">
                                     {displayFiles.map((file) => {
                                       const pathRegistered =
@@ -3643,7 +3794,7 @@ useEffect(() => {
                                             style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
                                             onClick={async () => {
                                               if (!id) return
-                                              if (!window.confirm(`Delete config file ${file.path}? This cannot be undone.`)) {
+                                              if (!window.confirm(`Remove config file ${file.path} from project? This cannot be undone.`)) {
                                                 return
                                               }
                                               try {
@@ -3660,22 +3811,22 @@ useEffect(() => {
                                                     .catch(() => {})
                                                 }
                                                 toast({
-                                                  title: 'Config deleted',
+                                                  title: 'Config removed',
                                                   description: `${file.path} removed from project.`,
                                                   variant: 'warning',
                                                 })
                                               } catch (err) {
                                                 toast({
-                                                  title: 'Delete failed',
+                                                  title: 'Remove failed',
                                                   description:
-                                                    err instanceof Error ? err.message : 'Failed to delete config file.',
+                                                    err instanceof Error ? err.message : 'Failed to remove config file.',
                                                   variant: 'danger',
                                                 })
                                               }
                                             }}
                                           >
                                             <Trash size={16} weight="fill" aria-hidden="true" />
-                                            Delete
+                                            Remove
                                           </Anchor>
                                         </Group>
                                       </Group>
