@@ -4,6 +4,8 @@ import {
   fetchProjectConfigs,
   listUploadLocal,
   listUploadRemote,
+  getUploadLocalFileGeneratorVersion,
+  getUploadRemoteFileGeneratorVersion,
   uploadFileToRemote,
   downloadUploadRemoteFile,
   deleteUploadRemoteFile,
@@ -15,7 +17,7 @@ import { Alert, Anchor, Box, Grid, Group, Loader as MantineLoader, Paper, Scroll
 import { Button, Card, CardContent } from '../components/ui'
 import { useToast } from '../components/ui/toast'
 import { ContentSection } from '../components/layout'
-import { Folder, File, ArrowRight, ArrowDown, ArrowsClockwise, FolderOpen, Trash } from '@phosphor-icons/react'
+import { Folder, File, ArrowRight, ArrowDown, ArrowsClockwise, FolderOpen, Trash, LockSimple, LockSimpleOpen } from '@phosphor-icons/react'
 
 function formatBytes(bytes?: number): string {
   if (bytes == null) return '—'
@@ -38,6 +40,33 @@ function formatMtime(mtime?: string): string {
 function pathToBreadcrumbs(path: string, leadingSlash = false): string[] {
   const segments = path.replace(/\\/g, '/').split('/').filter(Boolean)
   return leadingSlash && segments.length > 0 ? ['', ...segments] : segments
+}
+
+function normalizePath(path: string): string {
+  return path.replace(/\\/g, '/').replace(/\/+$/, '')
+}
+
+function trimLeadingSlashes(path: string): string {
+  return path.replace(/^\/+/, '')
+}
+
+function getRelativePath(path: string, root: string): string {
+  const normalizedPath = normalizePath(path)
+  const normalizedRoot = normalizePath(root)
+  if (!normalizedRoot) return trimLeadingSlashes(normalizedPath)
+  if (normalizedPath === normalizedRoot) return ''
+  if (normalizedPath.startsWith(`${normalizedRoot}/`)) {
+    return trimLeadingSlashes(normalizedPath.slice(normalizedRoot.length))
+  }
+  return trimLeadingSlashes(normalizedPath)
+}
+
+function joinPath(root: string, relative: string): string {
+  const normalizedRoot = normalizePath(root)
+  const normalizedRelative = trimLeadingSlashes(normalizePath(relative))
+  if (!normalizedRoot) return normalizedRelative
+  if (!normalizedRelative) return normalizedRoot
+  return `${normalizedRoot}/${normalizedRelative}`
 }
 
 export default function Upload() {
@@ -63,6 +92,11 @@ export default function Upload() {
   } | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [projectConfigPaths, setProjectConfigPaths] = useState<Set<string>>(new Set())
+  const [selectedLocalVersion, setSelectedLocalVersion] = useState<string | null>(null)
+  const [selectedRemoteVersion, setSelectedRemoteVersion] = useState<string | null>(null)
+  const [selectedLocalVersionLoading, setSelectedLocalVersionLoading] = useState(false)
+  const [selectedRemoteVersionLoading, setSelectedRemoteVersionLoading] = useState(false)
+  const [linkedBrowse, setLinkedBrowse] = useState(false)
   const { toast } = useToast()
 
   useEffect(() => {
@@ -144,22 +178,47 @@ export default function Upload() {
     loadLocal()
   }, [projectId, localPath, loadLocal])
 
-  const handleRemoteEntryClick = (entry: UploadListEntry) => {
-    if (entry.type === 'directory') {
-      loadRemote(entry.path)
-      setSelectedRemote(null)
-    } else {
-      setSelectedRemote(entry.path)
+  useEffect(() => {
+    if (!projectId || !selectedLocal) {
+      setSelectedLocalVersion(null)
+      setSelectedLocalVersionLoading(false)
+      return
     }
-  }
+    let cancelled = false
+    setSelectedLocalVersionLoading(true)
+    getUploadLocalFileGeneratorVersion(projectId, selectedLocal)
+      .then((version) => {
+        if (!cancelled) setSelectedLocalVersion(version)
+      })
+      .catch(() => {
+        if (!cancelled) setSelectedLocalVersion(null)
+      })
+      .finally(() => {
+        if (!cancelled) setSelectedLocalVersionLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [projectId, selectedLocal])
 
-  const handleLocalEntryClick = (entry: UploadListEntry) => {
-    if (entry.type === 'directory') {
-      setLocalPath(entry.path)
-    } else {
-      setSelectedLocal(entry.path)
+  useEffect(() => {
+    if (!projectId || !password || !selectedRemote) {
+      setSelectedRemoteVersion(null)
+      setSelectedRemoteVersionLoading(false)
+      return
     }
-  }
+    let cancelled = false
+    setSelectedRemoteVersionLoading(true)
+    getUploadRemoteFileGeneratorVersion(projectId, password, selectedRemote)
+      .then((version) => {
+        if (!cancelled) setSelectedRemoteVersion(version)
+      })
+      .catch(() => {
+        if (!cancelled) setSelectedRemoteVersion(null)
+      })
+      .finally(() => {
+        if (!cancelled) setSelectedRemoteVersionLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [projectId, password, selectedRemote])
 
   const handleUpload = async () => {
     if (!projectId || !password || !selectedLocal) return
@@ -246,29 +305,68 @@ export default function Upload() {
   }, [contextMenu, projectId, password, remotePath, selectedLocal, loadRemote, loadLocal, toast])
 
   const selectedProject = projects.find((p) => p.id === projectId)
-
-  const remoteDisplayPath = remotePath || selectedProject?.sftp?.remotePath || ''
+  const remoteRootPath = selectedProject?.sftp?.remotePath ?? ''
+  const remoteDisplayPath = remotePath || remoteRootPath
   const remoteBreadcrumbs = useMemo(() => pathToBreadcrumbs(remoteDisplayPath, false), [remoteDisplayPath])
   const localBreadcrumbs = useMemo(() => pathToBreadcrumbs(localPath, false), [localPath])
+
+  const syncRemoteToLocal = useCallback((targetRemotePath: string) => {
+    const relative = getRelativePath(targetRemotePath, remoteRootPath)
+    setLocalPath(relative)
+  }, [remoteRootPath])
+
+  const syncLocalToRemote = useCallback((targetLocalPath: string) => {
+    const targetRemotePath = joinPath(remoteRootPath, targetLocalPath)
+    void loadRemote(targetRemotePath || undefined)
+  }, [loadRemote, remoteRootPath])
+
+  const handleRemoteEntryClick = useCallback((entry: UploadListEntry) => {
+    if (entry.type === 'directory') {
+      void loadRemote(entry.path)
+      if (linkedBrowse) syncRemoteToLocal(entry.path)
+      setSelectedRemote(null)
+      return
+    }
+    setSelectedRemote(entry.path)
+    if (linkedBrowse) {
+      setSelectedLocal(getRelativePath(entry.path, remoteRootPath))
+    }
+  }, [linkedBrowse, loadRemote, remoteRootPath, syncRemoteToLocal])
+
+  const handleLocalEntryClick = useCallback((entry: UploadListEntry) => {
+    if (entry.type === 'directory') {
+      setLocalPath(entry.path)
+      if (linkedBrowse) syncLocalToRemote(entry.path)
+      return
+    }
+    setSelectedLocal(entry.path)
+    if (linkedBrowse) {
+      setSelectedRemote(joinPath(remoteRootPath, entry.path))
+    }
+  }, [linkedBrowse, remoteRootPath, syncLocalToRemote])
 
   const handleRemoteBreadcrumbClick = useCallback(
     (index: number) => {
       if (index < 0) {
         setRemotePath('')
-        loadRemote(selectedProject?.sftp?.remotePath || undefined)
+        void loadRemote(remoteRootPath || undefined)
+        if (linkedBrowse) setLocalPath('')
         return
       }
       const segments = remoteBreadcrumbs.filter(Boolean)
       const path = '/' + segments.slice(0, index + 1).join('/')
-      loadRemote(path)
+      void loadRemote(path)
+      if (linkedBrowse) syncRemoteToLocal(path)
     },
-    [remoteBreadcrumbs, loadRemote, selectedProject?.sftp?.remotePath],
+    [linkedBrowse, remoteBreadcrumbs, loadRemote, remoteRootPath, syncRemoteToLocal],
   )
 
   const handleLocalBreadcrumbClick = useCallback((index: number) => {
     const segments = localBreadcrumbs
-    setLocalPath(index < 0 ? '' : segments.slice(0, index + 1).join('/'))
-  }, [localBreadcrumbs])
+    const nextPath = index < 0 ? '' : segments.slice(0, index + 1).join('/')
+    setLocalPath(nextPath)
+    if (linkedBrowse) syncLocalToRemote(nextPath)
+  }, [linkedBrowse, localBreadcrumbs, syncLocalToRemote])
 
   return (
     <ContentSection>
@@ -359,8 +457,11 @@ export default function Upload() {
                     onChange={(v) => {
                       setProjectId(v || '')
                       setSelectedLocal(null)
+                      setSelectedLocalVersion(null)
                       setRemotePath('')
                       setLocalPath('')
+                      setSelectedRemote(null)
+                      setSelectedRemoteVersion(null)
                     }}
                     data={projectsWithSftp.map((p) => ({ value: p.id, label: p.name || p.id }))}
                     clearable
@@ -393,6 +494,7 @@ export default function Upload() {
                       setRemotePath('')
                       setPassword('')
                       setSelectedRemote(null)
+                      setSelectedRemoteVersion(null)
                       setError(null)
                     }}
                   >
@@ -412,6 +514,19 @@ export default function Upload() {
       </Card>
 
       {!projectId ? null : (
+        <Stack gap="xs">
+          <Group justify="flex-end">
+            <Button
+              variant={linkedBrowse ? 'primary' : 'secondary'}
+              size="sm"
+              icon={linkedBrowse ? <LockSimple size={16} /> : <LockSimpleOpen size={16} />}
+              iconPosition="left"
+              onClick={() => setLinkedBrowse((prev) => !prev)}
+              title="Lock both panes so folder navigation stays in sync"
+            >
+              {linkedBrowse ? 'Linked browse on' : 'Linked browse off'}
+            </Button>
+          </Group>
         <Grid>
           <Grid.Col span={{ base: 12, md: 6 }}>
             <Paper
@@ -438,7 +553,10 @@ export default function Upload() {
                     size="sm"
                     icon={<ArrowsClockwise size={16} />}
                     iconPosition="left"
-                    onClick={() => loadRemote(remotePath || undefined)}
+                    onClick={() => {
+                      void loadRemote(remotePath || undefined)
+                      if (linkedBrowse) void loadLocal()
+                    }}
                     disabled={remoteLoading}
                     title="Refresh directory"
                   >
@@ -550,7 +668,10 @@ export default function Upload() {
                   size="sm"
                   icon={<ArrowsClockwise size={16} />}
                   iconPosition="left"
-                  onClick={() => loadLocal()}
+                  onClick={() => {
+                    void loadLocal()
+                    if (linkedBrowse) void loadRemote(remotePath || remoteRootPath || undefined)
+                  }}
                   disabled={localLoading}
                   title="Refresh directory"
                 >
@@ -644,15 +765,36 @@ export default function Upload() {
             </Paper>
           </Grid.Col>
         </Grid>
+        </Stack>
       )}
 
       {projectId && selectedLocal && (
         <Card>
           <CardContent>
-            <Group justify="space-between">
-              <Text size="sm">
-                Upload <strong>{selectedLocal.split(/[/\\]/).pop()}</strong> to server
-              </Text>
+            <Stack gap={8}>
+              <Group justify="space-between">
+                <Text size="sm">
+                  Upload <strong>{selectedLocal.split(/[/\\]/).pop()}</strong> to server
+                </Text>
+                <Text size="xs" c="dimmed">
+                  Local gen: {selectedLocalVersionLoading ? 'Loading…' : (selectedLocalVersion ?? '—')}
+                </Text>
+              </Group>
+              <Group justify="space-between">
+                <Text size="xs" c="dimmed">
+                  Remote selected gen: {selectedRemoteVersionLoading ? 'Loading…' : (selectedRemoteVersion ?? '—')}
+                </Text>
+                {selectedRemote && !selectedLocalVersionLoading && !selectedRemoteVersionLoading && (
+                  <Text
+                    size="xs"
+                    c={selectedLocalVersion && selectedRemoteVersion && selectedLocalVersion === selectedRemoteVersion ? 'teal' : 'orange'}
+                  >
+                    {selectedLocalVersion && selectedRemoteVersion && selectedLocalVersion === selectedRemoteVersion
+                      ? 'Versions match'
+                      : 'Versions differ'}
+                  </Text>
+                )}
+              </Group>
               <Button
                 variant="primary"
                 icon={<ArrowRight size={18} />}
@@ -663,7 +805,7 @@ export default function Upload() {
               >
                 Upload
               </Button>
-            </Group>
+            </Stack>
           </CardContent>
         </Card>
       )}
@@ -671,10 +813,30 @@ export default function Upload() {
       {projectId && selectedRemote && (
         <Card>
           <CardContent>
-            <Group justify="space-between">
-              <Text size="sm">
-                Download <strong>{selectedRemote.split(/[/\\]/).pop()}</strong> to local workspace
-              </Text>
+            <Stack gap={8}>
+              <Group justify="space-between">
+                <Text size="sm">
+                  Download <strong>{selectedRemote.split(/[/\\]/).pop()}</strong> to local workspace
+                </Text>
+                <Text size="xs" c="dimmed">
+                  Remote gen: {selectedRemoteVersionLoading ? 'Loading…' : (selectedRemoteVersion ?? '—')}
+                </Text>
+              </Group>
+              <Group justify="space-between">
+                <Text size="xs" c="dimmed">
+                  Local selected gen: {selectedLocalVersionLoading ? 'Loading…' : (selectedLocalVersion ?? '—')}
+                </Text>
+                {selectedLocal && !selectedLocalVersionLoading && !selectedRemoteVersionLoading && (
+                  <Text
+                    size="xs"
+                    c={selectedLocalVersion && selectedRemoteVersion && selectedLocalVersion === selectedRemoteVersion ? 'teal' : 'orange'}
+                  >
+                    {selectedLocalVersion && selectedRemoteVersion && selectedLocalVersion === selectedRemoteVersion
+                      ? 'Versions match'
+                      : 'Versions differ'}
+                  </Text>
+                )}
+              </Group>
               <Button
                 variant="primary"
                 icon={<ArrowDown size={18} />}
@@ -685,7 +847,7 @@ export default function Upload() {
               >
                 Download
               </Button>
-            </Group>
+            </Stack>
           </CardContent>
         </Card>
       )}
