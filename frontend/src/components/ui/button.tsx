@@ -19,6 +19,8 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   iconPosition?: 'left' | 'right'
   loading?: boolean
   styles?: MantineButtonStyles
+  /** Mantine theme color; overrides the variant default when set. */
+  color?: string
 }
 
 const sizeMap: Record<ButtonSize, 'xs' | 'sm' | 'md'> = {
@@ -52,11 +54,13 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       children,
       style: inlineStyle,
       styles,
+      color: colorOverride,
       ...props
     },
     ref,
   ) => {
     const settings = variantMap[variant]
+    const mantineColor = colorOverride ?? settings.color
     const combinedStyle =
       settings.underline && inlineStyle
         ? { ...inlineStyle, textDecoration: 'underline' }
@@ -68,7 +72,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         ref={ref}
         className={className}
         variant={settings.variant}
-        color={settings.color}
+        color={mantineColor}
         radius={settings.radius ?? 'md'}
         size={sizeMap[size]}
         leftSection={icon && iconPosition === 'left' ? icon : undefined}

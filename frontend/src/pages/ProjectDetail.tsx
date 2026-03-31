@@ -1747,6 +1747,13 @@ useEffect(() => {
     [builds],
   )
 
+  /** True when a successful build exists but no run yet, or the latest run used an older artifact. */
+  const latestBuildNotRunYet = useMemo(() => {
+    if (!latestBuild) return false
+    if (runs.length === 0) return true
+    return runs[0].buildId !== latestBuild.id
+  }, [latestBuild, runs])
+
   const handleRemovePlugin = useCallback(
     async (pluginId: string) => {
       if (!id) return
@@ -2621,6 +2628,7 @@ useEffect(() => {
                 </Button>
                 <Button
                   variant="pill"
+                  color={latestBuildNotRunYet ? 'orange' : 'blue'}
                   icon={<Play size={18} weight="fill" aria-hidden="true" />}
                   onClick={() => setShowRunOptions(true)}
                   disabled={busy}
