@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, memo, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { Play, FileText, MagnifyingGlass, Package as PackageIcon, Upload, PencilSimple, ArrowsClockwise, Trash, FloppyDisk, Plus, Copy, ArrowCircleUp, ListPlus } from '@phosphor-icons/react'
+import { Play, FileText, MagnifyingGlass, Package as PackageIcon, Upload, PencilSimple, ArrowsClockwise, Trash, FloppyDisk, Plus, Copy, ArrowCircleUp, ListPlus, ArrowsLeftRight } from '@phosphor-icons/react'
 import CodeMirror from '@uiw/react-codemirror'
 import { yaml } from '@codemirror/lang-yaml'
 import { oneDark } from '@codemirror/theme-one-dark'
@@ -71,7 +71,26 @@ import { CustomPathModal, type CustomPathModalState } from '../components/Custom
 import { RunLogsAndConsole } from '../components/RunLogsAndConsole'
 
 import { getApiBase } from '../lib/api'
+import {
+  countDiffEntries,
+  diffBuildManifests,
+  parseManifestForDiff,
+  type BuildManifestDiff,
+} from '../lib/buildManifestDiff'
 const API_BASE = getApiBase()
+
+type BuildDiffModalContent =
+  | {
+      mode: 'compare'
+      diff: BuildManifestDiff
+      olderLabel: string
+      newerLabel: string
+    }
+  | {
+      mode: 'latestOnly'
+      newerLabel: string
+      inventory: { configs: string[]; plugins: Array<{ id: string; version?: string }> }
+    }
 
 const runStatusLabel: Record<
   RunJob['status'],
@@ -485,6 +504,10 @@ function ProjectDetail() {
   const [descriptionBusy, setDescriptionBusy] = useState(false)
   const [activeTab, setActiveTab] = useState<string>('overview')
   const [showRunOptions, setShowRunOptions] = useState(false)
+  const [buildDiffModalOpen, setBuildDiffModalOpen] = useState(false)
+  const [buildDiffLoading, setBuildDiffLoading] = useState(false)
+  const [buildDiffError, setBuildDiffError] = useState<string | null>(null)
+  const [buildDiffContent, setBuildDiffContent] = useState<BuildDiffModalContent | null>(null)
   const [runOptions, setRunOptions] = useState({ resetWorld: false, resetPlugins: false, useSnapshot: false })
   const [showBuildOptions, setShowBuildOptions] = useState(false)
   const [buildOptions, setBuildOptions] = useState<BuildOptions>({ skipPush: true })
@@ -1754,6 +1777,56 @@ useEffect(() => {
     return runs[0].buildId !== latestBuild.id
   }, [latestBuild, runs])
 
+  const openBuildDiffModal = useCallback(async () => {
+    if (!latestBuild?.id) {
+      return
+    }
+    setBuildDiffModalOpen(true)
+    setBuildDiffLoading(true)
+    setBuildDiffError(null)
+    setBuildDiffContent(null)
+    try {
+      if (runs.length === 0) {
+        const raw = await fetchBuildManifest(latestBuild.id)
+        const parsed = parseManifestForDiff(raw)
+        setBuildDiffContent({
+          mode: 'latestOnly',
+          newerLabel: latestBuild.id,
+          inventory: {
+            configs: [...(parsed.configs ?? [])].map((c) => c.path).sort(),
+            plugins: [...(parsed.plugins ?? [])]
+              .map((p) => ({ id: p.id, version: p.version }))
+              .sort((a, b) => a.id.localeCompare(b.id)),
+          },
+        })
+        return
+      }
+
+      const runBuildId = runs[0].buildId
+      const [olderRaw, newerRaw] = await Promise.all([
+        fetchBuildManifest(runBuildId),
+        fetchBuildManifest(latestBuild.id),
+      ])
+      const diff = diffBuildManifests(parseManifestForDiff(olderRaw), parseManifestForDiff(newerRaw))
+      setBuildDiffContent({
+        mode: 'compare',
+        diff,
+        olderLabel: runBuildId,
+        newerLabel: latestBuild.id,
+      })
+    } catch (e) {
+      setBuildDiffError(e instanceof Error ? e.message : 'Failed to load build manifests')
+    } finally {
+      setBuildDiffLoading(false)
+    }
+  }, [latestBuild, runs])
+
+  const closeBuildDiffModal = useCallback(() => {
+    setBuildDiffModalOpen(false)
+    setBuildDiffError(null)
+    setBuildDiffContent(null)
+  }, [])
+
   const handleRemovePlugin = useCallback(
     async (pluginId: string) => {
       if (!id) return
@@ -2636,6 +2709,19 @@ useEffect(() => {
                   Run locally
                 </Button>
               </Group>
+              {latestBuildNotRunYet && latestBuild && (
+                <Group gap="xs">
+                  <Button
+                    variant="link"
+                    size="sm"
+                    icon={<ArrowsLeftRight size={16} weight="bold" aria-hidden="true" />}
+                    onClick={() => void openBuildDiffModal()}
+                    disabled={busy || buildDiffLoading}
+                  >
+                    {runs.length === 0 ? 'View latest build contents' : 'Changes since last run'}
+                  </Button>
+                </Group>
+              )}
               <Group gap="sm">
                 <Anchor
                   component="button"
@@ -4816,6 +4902,216 @@ useEffect(() => {
             </Group>
           </Stack>
         )}
+      </Modal>
+
+      <Modal
+        opened={buildDiffModalOpen}
+        onClose={closeBuildDiffModal}
+        title={
+          buildDiffContent?.mode === 'latestOnly' || (buildDiffLoading && runs.length === 0)
+            ? 'Latest build contents'
+            : 'Changes since last run'
+        }
+        size="lg"
+        centered
+      >
+        <Stack gap="md">
+          {buildDiffLoading ? (
+            <Group justify="center" py="md">
+              <Loader />
+            </Group>
+          ) : null}
+          {buildDiffError ? (
+            <Text size="sm" c="red">
+              {buildDiffError}
+            </Text>
+          ) : null}
+          {!buildDiffLoading && !buildDiffError && buildDiffContent?.mode === 'latestOnly' ? (
+            <>
+              <Text size="sm" c="dimmed">
+                Config paths and plugins recorded in the manifest for build{' '}
+                <Code>{buildDiffContent.newerLabel}</Code>. No local run has used this artifact yet.
+              </Text>
+              <Text size="sm" fw={600}>
+                Config files ({buildDiffContent.inventory.configs.length})
+              </Text>
+              <ScrollArea h={buildDiffContent.inventory.configs.length > 12 ? 200 : 'auto'} type="auto">
+                <Stack gap={4}>
+                  {buildDiffContent.inventory.configs.length === 0 ? (
+                    <Text size="sm" c="dimmed">
+                      None listed in manifest
+                    </Text>
+                  ) : (
+                    buildDiffContent.inventory.configs.map((path) => (
+                      <Text key={path} size="sm" c="dimmed">
+                        {path}
+                      </Text>
+                    ))
+                  )}
+                </Stack>
+              </ScrollArea>
+              <Text size="sm" fw={600}>
+                Plugins ({buildDiffContent.inventory.plugins.length})
+              </Text>
+              <ScrollArea h={buildDiffContent.inventory.plugins.length > 12 ? 200 : 'auto'} type="auto">
+                <Stack gap={4}>
+                  {buildDiffContent.inventory.plugins.length === 0 ? (
+                    <Text size="sm" c="dimmed">
+                      None listed in manifest
+                    </Text>
+                  ) : (
+                    buildDiffContent.inventory.plugins.map((p) => (
+                      <Text key={p.id} size="sm" c="dimmed">
+                        {p.id}
+                        {p.version ? ` @ ${p.version}` : ''}
+                      </Text>
+                    ))
+                  )}
+                </Stack>
+              </ScrollArea>
+            </>
+          ) : null}
+          {!buildDiffLoading && !buildDiffError && buildDiffContent?.mode === 'compare' ? (
+            <>
+              <Text size="sm" c="dimmed">
+                Last run used build <Code>{buildDiffContent.olderLabel}</Code> · Latest successful build{' '}
+                <Code>{buildDiffContent.newerLabel}</Code>
+              </Text>
+              {buildDiffContent.diff.oldCommit &&
+              buildDiffContent.diff.newCommit &&
+              project?.repo?.fullName ? (
+                <Anchor
+                  href={`https://github.com/${project.repo.fullName}/compare/${buildDiffContent.diff.oldCommit}...${buildDiffContent.diff.newCommit}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  size="sm"
+                >
+                  Open compare on GitHub
+                </Anchor>
+              ) : null}
+              {countDiffEntries(buildDiffContent.diff) === 0 ? (
+                <Text size="sm" c="dimmed">
+                  No differences in manifest config paths, plugin entries, Minecraft metadata, or artifact checksum.
+                  Rebuilds can still differ in ways not reflected here.
+                </Text>
+              ) : null}
+              {buildDiffContent.diff.minecraftChanged ? (
+                <Text size="sm">
+                  <Text span fw={600}>
+                    Minecraft
+                  </Text>{' '}
+                  — loader or version changed in manifest
+                </Text>
+              ) : null}
+              {buildDiffContent.diff.artifactChanged ? (
+                <Text size="sm">
+                  <Text span fw={600}>
+                    Artifact ZIP
+                  </Text>{' '}
+                  — checksum or size changed
+                </Text>
+              ) : null}
+              {buildDiffContent.diff.configs.added.length > 0 ? (
+                <>
+                  <Text size="sm" fw={600}>
+                    Config files added ({buildDiffContent.diff.configs.added.length})
+                  </Text>
+                  <ScrollArea h={buildDiffContent.diff.configs.added.length > 10 ? 160 : 'auto'} type="auto">
+                    <Stack gap={4}>
+                      {buildDiffContent.diff.configs.added.map((path) => (
+                        <Text key={path} size="sm" c="dimmed">
+                          {path}
+                        </Text>
+                      ))}
+                    </Stack>
+                  </ScrollArea>
+                </>
+              ) : null}
+              {buildDiffContent.diff.configs.removed.length > 0 ? (
+                <>
+                  <Text size="sm" fw={600}>
+                    Config files removed ({buildDiffContent.diff.configs.removed.length})
+                  </Text>
+                  <ScrollArea h={buildDiffContent.diff.configs.removed.length > 10 ? 160 : 'auto'} type="auto">
+                    <Stack gap={4}>
+                      {buildDiffContent.diff.configs.removed.map((path) => (
+                        <Text key={path} size="sm" c="dimmed">
+                          {path}
+                        </Text>
+                      ))}
+                    </Stack>
+                  </ScrollArea>
+                </>
+              ) : null}
+              {buildDiffContent.diff.configs.changed.length > 0 ? (
+                <>
+                  <Text size="sm" fw={600}>
+                    Config files changed ({buildDiffContent.diff.configs.changed.length})
+                  </Text>
+                  <ScrollArea h={buildDiffContent.diff.configs.changed.length > 10 ? 160 : 'auto'} type="auto">
+                    <Stack gap={4}>
+                      {buildDiffContent.diff.configs.changed.map((row) => (
+                        <Text key={row.path} size="sm" c="dimmed">
+                          {row.path}{' '}
+                          <Text span size="xs" ff="monospace">
+                            {row.oldSha.slice(0, 8)}… → {row.newSha.slice(0, 8)}…
+                          </Text>
+                        </Text>
+                      ))}
+                    </Stack>
+                  </ScrollArea>
+                </>
+              ) : null}
+              {buildDiffContent.diff.plugins.added.length > 0 ? (
+                <>
+                  <Text size="sm" fw={600}>
+                    Plugins added ({buildDiffContent.diff.plugins.added.length})
+                  </Text>
+                  <Stack gap={4}>
+                    {buildDiffContent.diff.plugins.added.map((p) => (
+                      <Text key={p.id} size="sm" c="dimmed">
+                        {p.id}
+                        {p.version ? ` @ ${p.version}` : ''}
+                      </Text>
+                    ))}
+                  </Stack>
+                </>
+              ) : null}
+              {buildDiffContent.diff.plugins.removed.length > 0 ? (
+                <>
+                  <Text size="sm" fw={600}>
+                    Plugins removed ({buildDiffContent.diff.plugins.removed.length})
+                  </Text>
+                  <Stack gap={4}>
+                    {buildDiffContent.diff.plugins.removed.map((p) => (
+                      <Text key={p.id} size="sm" c="dimmed">
+                        {p.id}
+                        {p.version ? ` @ ${p.version}` : ''}
+                      </Text>
+                    ))}
+                  </Stack>
+                </>
+              ) : null}
+              {buildDiffContent.diff.plugins.changed.length > 0 ? (
+                <>
+                  <Text size="sm" fw={600}>
+                    Plugins changed ({buildDiffContent.diff.plugins.changed.length})
+                  </Text>
+                  <Stack gap={4}>
+                    {buildDiffContent.diff.plugins.changed.map((p) => (
+                      <Text key={p.id} size="sm" c="dimmed">
+                        {p.id}:{' '}
+                        {(p.oldVersion ?? '—') !== (p.newVersion ?? '—')
+                          ? `${p.oldVersion ?? '—'} → ${p.newVersion ?? '—'}`
+                          : `artifact ${(p.oldSha ?? '').slice(0, 8)}… → ${(p.newSha ?? '').slice(0, 8)}…`}
+                      </Text>
+                    ))}
+                  </Stack>
+                </>
+              ) : null}
+            </>
+          ) : null}
+        </Stack>
       </Modal>
 
       <Modal
