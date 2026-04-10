@@ -74,6 +74,20 @@ async function collectAllFilePaths(
   return paths
 }
 
+/** Matches backend inferPluginIdFromWorkspacePath: first segment under plugins/ vs project plugin id. */
+function inferPluginIdFromWorkspacePath(
+  plugins: ProjectSummary['plugins'] | undefined,
+  path: string,
+): string | undefined {
+  const match = path.match(/^plugins\/([^/]+)/)
+  if (!match) return undefined
+  const folderName = match[1]
+  const plugin = (plugins ?? []).find(
+    (p) => p.id && p.id.toLowerCase() === folderName.toLowerCase(),
+  )
+  return plugin?.id
+}
+
 function LiveEditor() {
   const { toast: showToast } = useToast()
   const [projects, setProjects] = useState<ProjectSummary[]>([])
@@ -207,6 +221,37 @@ function LiveEditor() {
     }
   }, [projectId, selectedFile, loadEntries, showToast])
 
+  const currentFolderPath = useMemo(
+    () => (breadcrumb.length > 0 ? `plugins/${breadcrumb.join('/')}` : 'plugins'),
+    [breadcrumb],
+  )
+
+  const projectPlugins = useMemo(
+    () => projects.find((p) => p.id === projectId)?.plugins,
+    [projects, projectId],
+  )
+
+  const canPromoteSelectedFile = useMemo(
+    () =>
+      Boolean(selectedFile && inferPluginIdFromWorkspacePath(projectPlugins, selectedFile)),
+    [selectedFile, projectPlugins],
+  )
+
+  const canPromoteFolder = useMemo(
+    () =>
+      breadcrumb.length > 0 &&
+      Boolean(
+        inferPluginIdFromWorkspacePath(
+          projectPlugins,
+          `plugins/${breadcrumb[0]}/.placeholder`,
+        ),
+      ),
+    [breadcrumb, projectPlugins],
+  )
+
+  const promoteDisabledTitle =
+    'Add a project plugin whose id matches the first folder under plugins/ before promoting configs.'
+
   const { run: promoteFile, busy: promoteLoading } = useAsyncAction(
     async () => {
       if (!projectId || !selectedFile) return
@@ -240,7 +285,18 @@ function LiveEditor() {
     async () => {
       if (!projectId || !currentFolderPath || currentFolderPath === 'plugins') return []
       const allPaths = await collectAllFilePaths(projectId, currentFolderPath, listWorkspacePluginFiles)
-      const toPromote = allPaths.filter((p) => !projectConfigPaths.has(p))
+      const pluginMatched = allPaths.filter((p) =>
+        inferPluginIdFromWorkspacePath(projectPlugins, p),
+      )
+      if (allPaths.length > 0 && pluginMatched.length === 0) {
+        showToast({
+          title: 'No matching plugin',
+          description: promoteDisabledTitle,
+          variant: 'warning',
+        })
+        return []
+      }
+      const toPromote = pluginMatched.filter((p) => !projectConfigPaths.has(p))
       if (toPromote.length === 0) return []
       const { promoted, errors } = await promoteWorkspacePluginFiles(projectId, toPromote)
       if (errors.length > 0) {
@@ -313,11 +369,6 @@ function LiveEditor() {
       showToast({ title: 'Paste failed', description: err instanceof Error ? err.message : 'Unknown error', variant: 'danger' })
     }
   }, [showToast])
-
-  const currentFolderPath = useMemo(
-    () => (breadcrumb.length > 0 ? `plugins/${breadcrumb.join('/')}` : 'plugins'),
-    [breadcrumb],
-  )
 
   const handleAddFile = useCallback(async () => {
     if (!projectId) return
@@ -449,8 +500,12 @@ function LiveEditor() {
             size="sm"
             icon={<FolderPlus size={16} />}
             onClick={() => promoteFolder()}
-            disabled={promoteFolderLoading}
-            title="Add all files in this folder to project"
+            disabled={promoteFolderLoading || !canPromoteFolder}
+            title={
+              canPromoteFolder
+                ? 'Add all files in this folder to project'
+                : promoteDisabledTitle
+            }
           >
             {promoteFolderLoading ? 'Adding…' : 'Add folder to project'}
           </UIButton>
@@ -657,7 +712,8 @@ function LiveEditor() {
                         size="sm"
                         icon={<ArrowSquareUp size={16} />}
                         onClick={() => promoteFile()}
-                        disabled={promoteLoading}
+                        disabled={promoteLoading || !canPromoteSelectedFile}
+                        title={canPromoteSelectedFile ? undefined : promoteDisabledTitle}
                       >
                         {promoteLoading
                           ? projectConfigPaths.has(selectedFile)

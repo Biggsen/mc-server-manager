@@ -75,6 +75,7 @@ function toSummary(project: StoredProject): ProjectSummary {
     configs,
     repo,
     snapshotSourceProjectId,
+    promoteTargetProjectId,
     sftp,
   } = project;
   return {
@@ -90,6 +91,7 @@ function toSummary(project: StoredProject): ProjectSummary {
     configs,
     repo,
     snapshotSourceProjectId,
+    promoteTargetProjectId,
     sftp,
   };
 }

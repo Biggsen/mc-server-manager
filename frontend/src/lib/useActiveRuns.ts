@@ -4,12 +4,11 @@ import {
   getApiBase,
   stopRunJob,
   sendRunCommand,
-  type ProjectSummary,
   type RunJob,
 } from './api'
 import { useAsyncAction } from './useAsyncAction'
 
-export function useActiveRuns(projects: ProjectSummary[]) {
+export function useActiveRuns() {
   const [runs, setRuns] = useState<RunJob[]>([])
   const [runsLoading, setRunsLoading] = useState(true)
   const [runsError, setRunsError] = useState<string | null>(null)
@@ -244,15 +243,6 @@ export function useActiveRuns(projects: ProjectSummary[]) {
     }
   }, [])
 
-  const projectLookup = useMemo(
-    () =>
-      projects.reduce<Record<string, ProjectSummary>>((acc, project) => {
-        acc[project.id] = project
-        return acc
-      }, {}),
-    [projects],
-  )
-
   const activeRuns = useMemo(
     () => runs.filter((run) => ['pending', 'running', 'stopping'].includes(run.status)),
     [runs],
@@ -276,7 +266,6 @@ export function useActiveRuns(projects: ProjectSummary[]) {
     runsLoading,
     runsError,
     setRunsError,
-    projectLookup,
     requestStopRun,
     sendRunCommandAction,
     commandInputs,

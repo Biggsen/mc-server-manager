@@ -3,8 +3,9 @@ import { Router } from "express";
 import { readdir, stat, unlink, mkdir } from "fs/promises";
 import { join, dirname } from "path";
 import { findProject } from "../storage/projectsStore";
-import { listRemote, uploadFile, deleteRemoteFile, downloadRemoteFile } from "../services/sftpClient";
+import { listRemote, uploadFile, deleteRemoteFile, downloadRemoteFile, readRemoteGeneratorVersion } from "../services/sftpClient";
 import { getRunsRoot } from "../config";
+import { readGeneratorVersionFromFile } from "../services/configUploads";
 
 const router = Router();
 const WORKSPACE_ROOT = join(getRunsRoot(), "workspaces");
@@ -109,6 +110,80 @@ router.get("/list-local", async (req: Request, res: Response) => {
     const message = error instanceof Error ? error.message : String(error);
     console.error("Upload list-local error", error);
     res.status(500).json({ error: message });
+  }
+});
+
+router.get("/file-version-local", async (req: Request, res: Response) => {
+  try {
+    const projectId = typeof req.query.projectId === "string" ? req.query.projectId : "";
+    const pathParam = typeof req.query.path === "string" ? req.query.path : "";
+    if (!projectId || !pathParam) {
+      res.status(400).json({ error: "projectId and path are required" });
+      return;
+    }
+    const project = await findProject(projectId);
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    const relPath = sanitizeRelativePath(pathParam);
+    if (!relPath) {
+      res.status(400).json({ error: "Invalid path" });
+      return;
+    }
+    const workspaceDir = getProjectWorkspacePath(projectId);
+    const fullPath = join(workspaceDir, relPath);
+    if (!fullPath.startsWith(workspaceDir)) {
+      res.status(400).json({ error: "Invalid path" });
+      return;
+    }
+    const entry = await stat(fullPath);
+    if (!entry.isFile()) {
+      res.status(400).json({ error: "Only files can be inspected" });
+      return;
+    }
+    const generatorVersion = await readGeneratorVersionFromFile(fullPath, relPath);
+    res.json({ path: relPath, generatorVersion: generatorVersion ?? null });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("Upload file-version-local error", error);
+    res.status(500).json({ error: message });
+  }
+});
+
+router.post("/file-version-remote", async (req: Request, res: Response) => {
+  try {
+    const { projectId, password, path: pathParam } = req.body ?? {};
+    if (
+      !projectId ||
+      typeof projectId !== "string" ||
+      !password ||
+      typeof password !== "string" ||
+      !pathParam ||
+      typeof pathParam !== "string"
+    ) {
+      res.status(400).json({ error: "projectId, password, and path are required" });
+      return;
+    }
+    const project = await findProject(projectId);
+    if (!project?.sftp) {
+      res.status(400).json({ error: "Project has no SFTP config; set it in Project Settings" });
+      return;
+    }
+    const path = pathParam.trim().replace(/\\/g, "/");
+    const generatorVersion = await readRemoteGeneratorVersion(project.sftp, password, path);
+    res.json({ path, generatorVersion: generatorVersion ?? null });
+  } catch (error) {
+    const detail = formatSftpError(error);
+    const projectIdForContext = req.body?.projectId;
+    const projectForContext =
+      typeof projectIdForContext === "string" ? await findProject(projectIdForContext) : undefined;
+    const context =
+      projectForContext?.sftp
+        ? ` (${projectForContext.sftp.host}:${projectForContext.sftp.port ?? 22})`
+        : "";
+    console.error("Upload file-version-remote error", error);
+    res.status(500).json({ error: detail + context });
   }
 });
 

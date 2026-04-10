@@ -33,6 +33,7 @@ import NewProject from './pages/NewProject'
 import NotFound from './pages/NotFound'
 import Projects from './pages/Projects'
 import ProjectDetail from './pages/ProjectDetail'
+import PromoteConfigs from './pages/PromoteConfigs'
 import Deployments from './pages/Deployments'
 import Upload from './pages/Upload'
 import TestTools from './pages/TestTools'
@@ -42,10 +43,10 @@ import Console from './pages/Console'
 import AddPlugin from './pages/AddPlugin'
 import GenerateProfile from './pages/GenerateProfile'
 import Styleguide from './pages/Styleguide'
-import { ActiveActionIndicator, Button, ToastProvider, ToastViewport } from './components/ui'
+import { ActiveActionIndicator, Button, ToastViewport } from './components/ui'
 import { AppShell, MainCanvas } from './components/layout'
 import { ActiveBackendJobsProvider } from './components/ActiveBackendJobsProvider'
-import { AsyncActionsProvider } from './lib/asyncActions'
+import { useActiveRunsContext } from './lib/activeRunsContext'
 
 type NavItem = {
   to: string
@@ -123,6 +124,8 @@ const NAV_SECTIONS: NavSection[] = [
 
 function App() {
   const location = useLocation()
+  const { activeRuns } = useActiveRunsContext()
+  const hasActiveRun = activeRuns.length > 0
   const [authStatus, setAuthStatus] = useState<AuthStatus | null>(null)
   const [authError, setAuthError] = useState<string | null>(null)
   const [signingOut, setSigningOut] = useState(false)
@@ -358,17 +361,32 @@ function App() {
             {section.label}
           </Text>
           <Stack gap={4}>
-            {section.items.map((item) => (
-              <MantineNavLink
-                key={item.to}
-                component={RouterNavLink}
-                to={item.to}
-                label={item.label}
-                leftSection={item.icon}
-                variant="light"
-                active={isActivePath(item)}
-              />
-            ))}
+            {section.items.map((item) => {
+              const consoleActiveRunHighlight = item.to === '/console' && hasActiveRun
+              return (
+                <MantineNavLink
+                  key={item.to}
+                  component={RouterNavLink}
+                  to={item.to}
+                  label={item.label}
+                  leftSection={
+                    consoleActiveRunHighlight ? (
+                      <Terminal
+                        size={18}
+                        weight="fill"
+                        aria-hidden="true"
+                        color="var(--mantine-color-green-4)"
+                      />
+                    ) : (
+                      item.icon
+                    )
+                  }
+                  variant="light"
+                  active={isActivePath(item)}
+                  c={consoleActiveRunHighlight ? 'green.4' : undefined}
+                />
+              )
+            })}
           </Stack>
         </Box>
       ))}
@@ -423,35 +441,32 @@ function App() {
   )
 
   return (
-    <AsyncActionsProvider>
-      <ActiveBackendJobsProvider isAuthenticated={authStatus?.authenticated ?? false}>
-        <ToastProvider>
-          <AppShell sidebar={sidebar} topbar={topbar} isDev={isDev}>
-            <MainCanvas data-route={location.pathname}>
-              {authError && <p className="error-text">{authError}</p>}
-              <Routes>
-                <Route path="/" element={<Dashboard />} />
-                <Route path="/projects" element={<Projects />} />
-                <Route path="/projects/new" element={<NewProject />} />
-                <Route path="/projects/import" element={<ImportProject />} />
-                <Route path="/projects/:id" element={<ProjectDetail />} />
-                <Route path="/projects/:id/profile" element={<GenerateProfile />} />
-                <Route path="/plugins" element={<PluginLibrary />} />
-                <Route path="/live-editor" element={<LiveEditor />} />
-                <Route path="/console" element={<Console />} />
-                <Route path="/plugins/add" element={<AddPlugin />} />
-                {isDev && <Route path="/dev/tools" element={<TestTools />} />}
-                <Route path="/deployments" element={<Deployments />} />
-                <Route path="/upload" element={<Upload />} />
-                {isDev && <Route path="/styleguide" element={<Styleguide />} />}
-                <Route path="*" element={<NotFound />} />
-              </Routes>
-            </MainCanvas>
-          </AppShell>
-          <ToastViewport />
-        </ToastProvider>
-      </ActiveBackendJobsProvider>
-    </AsyncActionsProvider>
+    <ActiveBackendJobsProvider isAuthenticated={authStatus?.authenticated ?? false}>
+      <AppShell sidebar={sidebar} topbar={topbar} isDev={isDev}>
+        <MainCanvas data-route={location.pathname}>
+          {authError && <p className="error-text">{authError}</p>}
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/projects" element={<Projects />} />
+            <Route path="/projects/new" element={<NewProject />} />
+            <Route path="/projects/import" element={<ImportProject />} />
+            <Route path="/projects/:id" element={<ProjectDetail />} />
+            <Route path="/projects/:id/promote" element={<PromoteConfigs />} />
+            <Route path="/projects/:id/profile" element={<GenerateProfile />} />
+            <Route path="/plugins" element={<PluginLibrary />} />
+            <Route path="/live-editor" element={<LiveEditor />} />
+            <Route path="/console" element={<Console />} />
+            <Route path="/plugins/add" element={<AddPlugin />} />
+            {isDev && <Route path="/dev/tools" element={<TestTools />} />}
+            <Route path="/deployments" element={<Deployments />} />
+            <Route path="/upload" element={<Upload />} />
+            {isDev && <Route path="/styleguide" element={<Styleguide />} />}
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </MainCanvas>
+      </AppShell>
+      <ToastViewport />
+    </ActiveBackendJobsProvider>
   )
 }
 

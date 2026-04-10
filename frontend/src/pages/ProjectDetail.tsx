@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, memo, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { Play, FileText, MagnifyingGlass, Package as PackageIcon, Upload, PencilSimple, ArrowsClockwise, Trash, FloppyDisk, Plus, Copy, ArrowCircleUp } from '@phosphor-icons/react'
+import { Play, FileText, MagnifyingGlass, Package as PackageIcon, Upload, PencilSimple, ArrowsClockwise, Trash, FloppyDisk, Plus, Copy, ArrowCircleUp, ListPlus, ArrowsLeftRight } from '@phosphor-icons/react'
 import CodeMirror from '@uiw/react-codemirror'
 import { yaml } from '@codemirror/lang-yaml'
 import { oneDark } from '@codemirror/theme-one-dark'
@@ -24,6 +24,7 @@ import {
   fetchProjectRuns,
   fetchPluginLibrary,
   linkProjectRepo,
+  promoteWorkspacePluginFiles,
   resetProjectWorkspace,
   runProjectLocally,
   saveProjectProfile,
@@ -39,6 +40,7 @@ import {
   updateProjectSftp,
   updateProjectConfigFile,
   updateProjectPluginConfigs,
+  updateLibraryPluginConfigs,
   uploadProjectConfig,
   fetchInitStatus,
   clearInitMarker,
@@ -51,6 +53,7 @@ import {
   type ProjectSummary,
   type RunJob,
   type RunLogEntry,
+  type PluginConfigDefinition,
   type StoredPluginRecord,
   type InitStatusResponse,
 } from '../lib/api'
@@ -60,11 +63,34 @@ import { Badge, Button, Card, CardContent, CardHeader, Modal, Skeleton } from '.
 import { useToast } from '../components/ui/toast'
 import { ContentSection } from '../components/layout'
 import { useAsyncAction } from '../lib/useAsyncAction'
+import {
+  AddConfigPathChoiceModal,
+  type AddConfigPathChoicePayload,
+} from '../components/AddConfigPathChoiceModal'
 import { CustomPathModal, type CustomPathModalState } from '../components/CustomPathModal'
 import { RunLogsAndConsole } from '../components/RunLogsAndConsole'
 
 import { getApiBase } from '../lib/api'
+import {
+  countDiffEntries,
+  diffBuildManifests,
+  parseManifestForDiff,
+  type BuildManifestDiff,
+} from '../lib/buildManifestDiff'
 const API_BASE = getApiBase()
+
+type BuildDiffModalContent =
+  | {
+      mode: 'compare'
+      diff: BuildManifestDiff
+      olderLabel: string
+      newerLabel: string
+    }
+  | {
+      mode: 'latestOnly'
+      newerLabel: string
+      inventory: { configs: string[]; plugins: Array<{ id: string; version?: string }> }
+    }
 
 const runStatusLabel: Record<
   RunJob['status'],
@@ -107,6 +133,15 @@ function formatBytes(bytes: number): string {
   }
   return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[unitIndex]}`
 }
+
+function defaultLabelFromConfigPath(path: string): string {
+  const base = path.split('/').pop() ?? path
+  const dot = base.lastIndexOf('.')
+  return dot > 0 ? base.slice(0, dot) : base
+}
+
+/** Default backend limit (see MCSM_MAX_CONFIG_PAYLOAD_MB); used for editor warnings only. */
+const CONFIG_EDITOR_JSON_SAVE_LIMIT_BYTES = 32 * 1024 * 1024
 
 interface PluginCardProps {
   plugin: NonNullable<ProjectSummary['plugins']>[number]
@@ -425,9 +460,15 @@ function ProjectDetail() {
   const [configUploadName, setConfigUploadName] = useState('')
   const [configUploadPathDirty, setConfigUploadPathDirty] = useState(false)
   const [configUploadBusy, setConfigUploadBusy] = useState(false)
+  const [promoteWorkspaceConfigsBusy, setPromoteWorkspaceConfigsBusy] = useState(false)
+  const [removeAllPluginConfigsBusy, setRemoveAllPluginConfigsBusy] = useState<Record<string, boolean>>({})
   const [configUploadModalOpened, setConfigUploadModalOpened] = useState(false)
   const [expandedConfigPlugins, setExpandedConfigPlugins] = useState<Set<string>>(new Set())
-  const [configEditor, setConfigEditor] = useState<{ path: string; content: string } | null>(null)
+  const [configEditor, setConfigEditor] = useState<{
+    path: string
+    content: string
+    listedSizeBytes?: number
+  } | null>(null)
   const [configEditorBusy, setConfigEditorBusy] = useState(false)
   const [configEditorError, setConfigEditorError] = useState<string | null>(null)
   const [customPathModal, setCustomPathModal] = useState<CustomPathModalState | null>(null)
@@ -436,6 +477,8 @@ function ProjectDetail() {
     definitionId: string
     path: string
   } | null>(null)
+  const [addConfigPathChoice, setAddConfigPathChoice] = useState<AddConfigPathChoicePayload | null>(null)
+  const [libraryTemplateBusy, setLibraryTemplateBusy] = useState(false)
   const [deleteRepo, setDeleteRepo] = useState(false)
   const [deleteBusy, setDeleteBusy] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
@@ -461,9 +504,13 @@ function ProjectDetail() {
   const [descriptionBusy, setDescriptionBusy] = useState(false)
   const [activeTab, setActiveTab] = useState<string>('overview')
   const [showRunOptions, setShowRunOptions] = useState(false)
+  const [buildDiffModalOpen, setBuildDiffModalOpen] = useState(false)
+  const [buildDiffLoading, setBuildDiffLoading] = useState(false)
+  const [buildDiffError, setBuildDiffError] = useState<string | null>(null)
+  const [buildDiffContent, setBuildDiffContent] = useState<BuildDiffModalContent | null>(null)
   const [runOptions, setRunOptions] = useState({ resetWorld: false, resetPlugins: false, useSnapshot: false })
   const [showBuildOptions, setShowBuildOptions] = useState(false)
-  const [buildOptions, setBuildOptions] = useState<BuildOptions>({ skipPush: false })
+  const [buildOptions, setBuildOptions] = useState<BuildOptions>({ skipPush: true })
   const [allProjects, setAllProjects] = useState<ProjectSummary[]>([])
   const [copyFromOpen, setCopyFromOpen] = useState(false)
   const [copyFromSourceId, setCopyFromSourceId] = useState('')
@@ -473,6 +520,9 @@ function ProjectDetail() {
   const [snapshotSourceBusy, setSnapshotSourceBusy] = useState(false)
   const [snapshotSourceEditMode, setSnapshotSourceEditMode] = useState(false)
   const [snapshotSourceDraft, setSnapshotSourceDraft] = useState<string>('')
+  const [promoteTargetEditMode, setPromoteTargetEditMode] = useState(false)
+  const [promoteTargetDraft, setPromoteTargetDraft] = useState('')
+  const [promoteTargetBusy, setPromoteTargetBusy] = useState(false)
   const [initCommands, setInitCommands] = useState<string[]>([])
   const [savedInitCommands, setSavedInitCommands] = useState<string[]>([])
   const [initCommandsLoading, setInitCommandsLoading] = useState(false)
@@ -974,6 +1024,149 @@ function ProjectDetail() {
       setConfigsLoading(false)
     }
   }, [id])
+
+  const handlePromoteWorkspaceConfigs = useCallback(async () => {
+    if (!id) return
+    try {
+      setPromoteWorkspaceConfigsBusy(true)
+      setConfigsError(null)
+      const establishedEntries = configFiles.length > 0 ? configFiles : (project?.configs ?? [])
+      const toPromote = establishedEntries
+        .filter((entry) => entry.path.startsWith('plugins/'))
+        .map((entry) => entry.path)
+
+      if (toPromote.length === 0) {
+        toast({
+          title: 'No established plugin configs',
+          description: 'Nothing to promote. Add project config files first.',
+          variant: 'default',
+        })
+        return
+      }
+
+      const { promoted, errors } = await promoteWorkspacePluginFiles(id, toPromote)
+      if (promoted.length > 0) {
+        await loadConfigs()
+      }
+
+      if (errors.length > 0) {
+        const skippedUnmatched = errors.filter((error) =>
+          /No project plugin matches folder/i.test(error.error),
+        )
+        const actionableErrors = errors.filter(
+          (error) => !/No project plugin matches folder/i.test(error.error),
+        )
+        if (actionableErrors.length === 0) {
+          toast({
+            title: promoted.length > 0 ? 'Promoted with skips' : 'Skipped unmatched paths',
+            description:
+              promoted.length > 0
+                ? `${promoted.length} file(s) promoted, ${skippedUnmatched.length} skipped because plugin folders do not match this project's plugin ids.`
+                : `${skippedUnmatched.length} path(s) skipped because plugin folders do not match this project's plugin ids.`,
+            variant: 'warning',
+          })
+          return
+        }
+
+        const details = actionableErrors
+          .slice(0, 5)
+          .map((error) => `${error.path}: ${error.error}`)
+          .join('; ')
+        setConfigsError(details)
+        toast({
+          title: promoted.length > 0 ? 'Promoted with issues' : 'Promote failed',
+          description:
+            promoted.length > 0
+              ? `${promoted.length} file(s) promoted, ${actionableErrors.length} failed${skippedUnmatched.length > 0 ? `, ${skippedUnmatched.length} skipped` : ''}.`
+              : details,
+          variant: promoted.length > 0 ? 'warning' : 'danger',
+        })
+        return
+      }
+
+      toast({
+        title: 'Workspace configs promoted',
+        description: `${promoted.length} file(s) copied into project config files.`,
+        variant: 'success',
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to promote workspace configs.'
+      setConfigsError(message)
+      toast({
+        title: 'Promote failed',
+        description: message,
+        variant: 'danger',
+      })
+    } finally {
+      setPromoteWorkspaceConfigsBusy(false)
+    }
+  }, [id, project?.configs, configFiles, loadConfigs, toast])
+
+  const handleRemoveAllConfigsForPlugin = useCallback(
+    async (pluginId: string, files: ProjectConfigSummary[]) => {
+      if (!id || files.length === 0) return
+      const label = pluginId === 'No plugin' ? 'unassigned files' : pluginId
+      if (
+        !window.confirm(
+          `Remove all ${files.length} config file(s) for ${label} from project staging? This cannot be undone.`,
+        )
+      ) {
+        return
+      }
+
+      setRemoveAllPluginConfigsBusy((prev) => ({ ...prev, [pluginId]: true }))
+      setConfigsError(null)
+
+      let removed = 0
+      const failed: string[] = []
+      try {
+        for (const file of files) {
+          try {
+            await deleteProjectConfigFile(id, file.path)
+            removed += 1
+          } catch (err) {
+            failed.push(`${file.path}: ${err instanceof Error ? err.message : 'Failed to remove config file.'}`)
+          }
+        }
+
+        await loadConfigs()
+
+        if (pluginId !== 'No plugin') {
+          void fetchProjectPluginConfigs(id, pluginId)
+            .then((data) => {
+              setPluginDefinitionCache((prev) => ({
+                ...prev,
+                [pluginId]: data.definitions,
+              }))
+            })
+            .catch(() => {})
+        }
+
+        if (failed.length > 0) {
+          const details = failed.slice(0, 5).join('; ')
+          setConfigsError(details)
+          toast({
+            title: removed > 0 ? 'Removed with issues' : 'Remove failed',
+            description:
+              removed > 0
+                ? `${removed} file(s) removed, ${failed.length} failed.`
+                : details,
+            variant: removed > 0 ? 'warning' : 'danger',
+          })
+          return
+        }
+
+        toast({
+          title: 'Configs removed',
+          description: `${removed} file(s) removed for ${label}.`,
+          variant: 'warning',
+        })
+      } finally {
+        setRemoveAllPluginConfigsBusy((prev) => ({ ...prev, [pluginId]: false }))
+      }
+    },
+    [id, loadConfigs, toast],
+  )
 
   const pluginDefinitionOptions = useMemo(() => {
     const map: Record<string, Array<{ definitionId: string; path: string; label: string }>> = {}
@@ -1577,6 +1770,63 @@ useEffect(() => {
     [builds],
   )
 
+  /** True when a successful build exists but no run yet, or the latest run used an older artifact. */
+  const latestBuildNotRunYet = useMemo(() => {
+    if (!latestBuild) return false
+    if (runs.length === 0) return true
+    return runs[0].buildId !== latestBuild.id
+  }, [latestBuild, runs])
+
+  const openBuildDiffModal = useCallback(async () => {
+    if (!latestBuild?.id) {
+      return
+    }
+    setBuildDiffModalOpen(true)
+    setBuildDiffLoading(true)
+    setBuildDiffError(null)
+    setBuildDiffContent(null)
+    try {
+      if (runs.length === 0) {
+        const raw = await fetchBuildManifest(latestBuild.id)
+        const parsed = parseManifestForDiff(raw)
+        setBuildDiffContent({
+          mode: 'latestOnly',
+          newerLabel: latestBuild.id,
+          inventory: {
+            configs: [...(parsed.configs ?? [])].map((c) => c.path).sort(),
+            plugins: [...(parsed.plugins ?? [])]
+              .map((p) => ({ id: p.id, version: p.version }))
+              .sort((a, b) => a.id.localeCompare(b.id)),
+          },
+        })
+        return
+      }
+
+      const runBuildId = runs[0].buildId
+      const [olderRaw, newerRaw] = await Promise.all([
+        fetchBuildManifest(runBuildId),
+        fetchBuildManifest(latestBuild.id),
+      ])
+      const diff = diffBuildManifests(parseManifestForDiff(olderRaw), parseManifestForDiff(newerRaw))
+      setBuildDiffContent({
+        mode: 'compare',
+        diff,
+        olderLabel: runBuildId,
+        newerLabel: latestBuild.id,
+      })
+    } catch (e) {
+      setBuildDiffError(e instanceof Error ? e.message : 'Failed to load build manifests')
+    } finally {
+      setBuildDiffLoading(false)
+    }
+  }, [latestBuild, runs])
+
+  const closeBuildDiffModal = useCallback(() => {
+    setBuildDiffModalOpen(false)
+    setBuildDiffError(null)
+    setBuildDiffContent(null)
+  }, [])
+
   const handleRemovePlugin = useCallback(
     async (pluginId: string) => {
       if (!id) return
@@ -1819,11 +2069,15 @@ useEffect(() => {
   )
 
   const handleEditConfig = useCallback(
-    async (path: string) => {
+    async (file: ProjectConfigSummary) => {
       if (!id) return
       try {
-        const file = await fetchProjectConfigFile(id, path)
-        setConfigEditor({ path: file.path, content: file.content })
+        const loaded = await fetchProjectConfigFile(id, file.path)
+        setConfigEditor({
+          path: loaded.path,
+          content: loaded.content,
+          listedSizeBytes: file.size,
+        })
         setConfigEditorError(null)
       } catch (err) {
         setConfigsError(err instanceof Error ? err.message : 'Failed to load config file.')
@@ -1936,6 +2190,126 @@ useEffect(() => {
       notes: '',
     })
   }, [])
+
+  const isPathAlreadyRegistered = useCallback(
+    (pluginId: string, path: string) => {
+      const defs = pluginDefinitionCache[pluginId]
+      if (!defs) return false
+      return defs.some((d) => d.resolvedPath === path)
+    },
+    [pluginDefinitionCache],
+  )
+
+  const handleChooseLibraryTemplateFromPath = useCallback(
+    async (payload: AddConfigPathChoicePayload) => {
+      if (!id || !project) return
+      setLibraryTemplateBusy(true)
+      try {
+        const projPlugin = project.plugins?.find((p) => p.id === payload.pluginId)
+        if (!projPlugin?.version) {
+          toast({
+            title: 'Cannot add library template',
+            description: 'This plugin has no version on the project.',
+            variant: 'danger',
+          })
+          return
+        }
+        const library = await fetchPluginLibrary()
+        const stored = library.find((p) => p.id === payload.pluginId && p.version === projPlugin.version)
+        if (!stored) {
+          toast({
+            title: 'Plugin not in library',
+            description: `No library entry for ${payload.pluginId} ${projPlugin.version}. Add the plugin to the library first.`,
+            variant: 'danger',
+          })
+          return
+        }
+        const existingDefs = stored.configDefinitions ?? []
+        let definitionId = existingDefs.find((d) => d.path === payload.path)?.id
+        if (!definitionId) {
+          const nextDefs: PluginConfigDefinition[] = [
+            ...existingDefs,
+            {
+              id: '',
+              path: payload.path,
+              label: defaultLabelFromConfigPath(payload.path),
+            },
+          ]
+          const updatedStored = await updateLibraryPluginConfigs(
+            payload.pluginId,
+            projPlugin.version,
+            { configDefinitions: nextDefs },
+          )
+          const def = (updatedStored.configDefinitions ?? []).find((d) => d.path === payload.path)
+          if (!def?.id) {
+            toast({
+              title: 'Library update failed',
+              description: 'Could not resolve the new config definition.',
+              variant: 'danger',
+            })
+            return
+          }
+          definitionId = def.id
+        }
+
+        const currentMappings = projPlugin.configMappings ?? []
+        if (currentMappings.some((m) => m.type === 'library' && m.definitionId === definitionId)) {
+          toast({
+            title: 'Already linked',
+            description: 'This library template is already a config path for this plugin.',
+            variant: 'success',
+          })
+          setAddConfigPathChoice(null)
+          return
+        }
+        if (currentMappings.some((m) => m.type === 'custom' && m.path === payload.path)) {
+          toast({
+            title: 'Path already registered',
+            description: 'Remove the custom config path for this file first, then add the library template.',
+            variant: 'danger',
+          })
+          return
+        }
+
+        const updatedMappings: ProjectPluginConfigMapping[] = [
+          ...currentMappings,
+          { type: 'library', definitionId },
+        ]
+        const response = await updateProjectPluginConfigs(id, payload.pluginId, {
+          mappings: updatedMappings,
+        })
+        setPluginDefinitionCache((prev) => ({
+          ...prev,
+          [payload.pluginId]: response.definitions,
+        }))
+        setProject((prev) =>
+          prev
+            ? {
+                ...prev,
+                plugins: prev.plugins?.map((p) =>
+                  p.id === payload.pluginId ? { ...p, configMappings: response.mappings } : p,
+                ),
+              }
+            : prev,
+        )
+        toast({
+          title: 'Library config path added',
+          description: `${payload.path} is linked via the library template.`,
+          variant: 'success',
+        })
+        setAddConfigPathChoice(null)
+      } catch (err) {
+        toast({
+          title: 'Could not add library path',
+          description: err instanceof Error ? err.message : 'Unknown error',
+          variant: 'danger',
+        })
+      } finally {
+        setLibraryTemplateBusy(false)
+      }
+    },
+    [id, project, toast],
+  )
 
   const handleDeleteProject = useCallback(async () => {
     if (!id || !project) {
@@ -2327,6 +2701,7 @@ useEffect(() => {
                 </Button>
                 <Button
                   variant="pill"
+                  color={latestBuildNotRunYet ? 'orange' : 'blue'}
                   icon={<Play size={18} weight="fill" aria-hidden="true" />}
                   onClick={() => setShowRunOptions(true)}
                   disabled={busy}
@@ -2334,6 +2709,19 @@ useEffect(() => {
                   Run locally
                 </Button>
               </Group>
+              {latestBuildNotRunYet && latestBuild && (
+                <Group gap="xs">
+                  <Button
+                    variant="link"
+                    size="sm"
+                    icon={<ArrowsLeftRight size={16} weight="bold" aria-hidden="true" />}
+                    onClick={() => void openBuildDiffModal()}
+                    disabled={busy || buildDiffLoading}
+                  >
+                    {runs.length === 0 ? 'View latest build contents' : 'Changes since last run'}
+                  </Button>
+                </Group>
+              )}
               <Group gap="sm">
                 <Anchor
                   component="button"
@@ -2345,6 +2733,24 @@ useEffect(() => {
                 >
                   Duplicate for upgrade
                 </Anchor>
+                <Text span size="sm" c="dimmed">
+                  ·
+                </Text>
+                {project?.promoteTargetProjectId ? (
+                  <Anchor
+                    component={Link}
+                    to={`/projects/${id}/promote`}
+                    size="sm"
+                    underline="hover"
+                    style={{ pointerEvents: busy ? 'none' : undefined, opacity: busy ? 0.5 : 1 }}
+                  >
+                    Promote
+                  </Anchor>
+                ) : (
+                  <Text size="sm" c="dimmed" title="Set a promote target in Settings">
+                    Promote
+                  </Text>
+                )}
                 {project?.repo && (
                   <>
                     <Text span size="sm" c="dimmed">
@@ -3349,16 +3755,27 @@ useEffect(() => {
                     <Stack gap="md">
                       <Group justify="space-between" align="center">
                         <Title order={3}>Plugin Config Files</Title>
-                        <Button
-                          variant="primary"
-                          icon={<Upload size={18} weight="fill" aria-hidden="true" />}
-                          onClick={() => {
-                            setConfigUploadModalOpened(true)
-                            setConfigsError(null)
-                          }}
-                        >
-                          Upload Config
-                        </Button>
+                        <Group gap="xs">
+                          <Button
+                            variant="ghost"
+                            icon={<ArrowCircleUp size={18} weight="fill" aria-hidden="true" />}
+                            loading={promoteWorkspaceConfigsBusy}
+                            disabled={configsLoading || configUploadBusy}
+                            onClick={() => void handlePromoteWorkspaceConfigs()}
+                          >
+                            Promote workspace config
+                          </Button>
+                          <Button
+                            variant="primary"
+                            icon={<Upload size={18} weight="fill" aria-hidden="true" />}
+                            onClick={() => {
+                              setConfigUploadModalOpened(true)
+                              setConfigsError(null)
+                            }}
+                          >
+                            Upload Config
+                          </Button>
+                        </Group>
                       </Group>
                       {configsError && (
                         <Alert color="red" title="Error">
@@ -3394,24 +3811,43 @@ useEffect(() => {
                                 ? files.slice(0, defaultVisible)
                                 : files
                             const hiddenCount = files.length - defaultVisible
+                            const canAddConfigPath = pluginId !== 'No plugin'
                             return (
                             <Card key={pluginId}>
                               <CardContent>
                                 <Stack gap="md">
-                                  <Title order={4}>{pluginId}</Title>
+                                  <Group justify="space-between" align="center">
+                                    <Title order={4}>{pluginId}</Title>
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      icon={<Trash size={14} weight="fill" aria-hidden="true" />}
+                                      loading={Boolean(removeAllPluginConfigsBusy[pluginId])}
+                                      onClick={() => void handleRemoveAllConfigsForPlugin(pluginId, files)}
+                                    >
+                                      Remove all
+                                    </Button>
+                                  </Group>
                                   <Stack gap="xs">
-                                    {displayFiles.map((file) => (
+                                    {displayFiles.map((file) => {
+                                      const pathRegistered =
+                                        canAddConfigPath && isPathAlreadyRegistered(pluginId, file.path)
+                                      return (
                                       <Group key={file.path} justify="space-between" align="flex-start">
                                         <Stack gap={2}>
                                           <Text fw={600} size="sm">{file.path}</Text>
+                                          {file.generatorVersion && (
+                                            <Text size="xs" c="dimmed">
+                                              Generator version:{' '}
+                                              <Text component="span" size="xs" c="white" inherit>
+                                                {file.generatorVersion}
+                                              </Text>
+                                            </Text>
+                                          )}
                                           {file.size !== undefined && file.modifiedAt && (
                                             <Text size="xs" c="dimmed">
                                               {formatBytes(file.size)} · Updated {new Date(file.modifiedAt).toLocaleString()}
-                                            </Text>
-                                          )}
-                                          {file.definitionId && (
-                                            <Text size="xs" c="dimmed">
-                                              Definition: {file.definitionId}
                                             </Text>
                                           )}
                                         </Stack>
@@ -3421,7 +3857,7 @@ useEffect(() => {
                                             type="button"
                                             size="sm"
                                             style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-                                            onClick={() => void handleEditConfig(file.path)}
+                                            onClick={() => void handleEditConfig(file)}
                                           >
                                             <PencilSimple size={16} weight="fill" aria-hidden="true" />
                                             Edit
@@ -3436,6 +3872,33 @@ useEffect(() => {
                                             <ArrowsClockwise size={16} weight="fill" aria-hidden="true" />
                                             Replace
                                           </Anchor>
+                                          {canAddConfigPath &&
+                                            (pathRegistered ? (
+                                              <Text
+                                                size="sm"
+                                                c="dimmed"
+                                                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                                              >
+                                                In config paths
+                                              </Text>
+                                            ) : (
+                                              <Anchor
+                                                component="button"
+                                                type="button"
+                                                size="sm"
+                                                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                                                onClick={() =>
+                                                  setAddConfigPathChoice({
+                                                    pluginId,
+                                                    path: file.path,
+                                                    labelSuggestion: defaultLabelFromConfigPath(file.path),
+                                                  })
+                                                }
+                                              >
+                                                <ListPlus size={16} weight="fill" aria-hidden="true" />
+                                                Add as config path
+                                              </Anchor>
+                                            ))}
                                           <Anchor
                                             component="button"
                                             type="button"
@@ -3443,7 +3906,7 @@ useEffect(() => {
                                             style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
                                             onClick={async () => {
                                               if (!id) return
-                                              if (!window.confirm(`Delete config file ${file.path}? This cannot be undone.`)) {
+                                              if (!window.confirm(`Remove config file ${file.path} from project? This cannot be undone.`)) {
                                                 return
                                               }
                                               try {
@@ -3460,26 +3923,27 @@ useEffect(() => {
                                                     .catch(() => {})
                                                 }
                                                 toast({
-                                                  title: 'Config deleted',
+                                                  title: 'Config removed',
                                                   description: `${file.path} removed from project.`,
                                                   variant: 'warning',
                                                 })
                                               } catch (err) {
                                                 toast({
-                                                  title: 'Delete failed',
+                                                  title: 'Remove failed',
                                                   description:
-                                                    err instanceof Error ? err.message : 'Failed to delete config file.',
+                                                    err instanceof Error ? err.message : 'Failed to remove config file.',
                                                   variant: 'danger',
                                                 })
                                               }
                                             }}
                                           >
                                             <Trash size={16} weight="fill" aria-hidden="true" />
-                                            Delete
+                                            Remove
                                           </Anchor>
                                         </Group>
                                       </Group>
-                                    ))}
+                                    )
+                                  })}
                                     {files.length > defaultVisible && (
                                       <Group mt="xs">
                                         <Anchor
@@ -3625,6 +4089,113 @@ useEffect(() => {
 
             <Tabs.Panel value="settings">
               <Stack gap="lg" pt="lg">
+                <Card>
+                  <CardContent>
+                    <Stack gap="md">
+                      <Title order={3}>Promote downstream</Title>
+                      <Text size="sm" c="dimmed">
+                        Choose the project that receives staged configs when you use Promote (e.g. live server receives
+                        configs from this &quot;next&quot; project).
+                      </Text>
+                      {project?.promoteTargetProjectId && !promoteTargetEditMode && promoteTargetDraft === '' ? (
+                        <Stack gap="sm">
+                          <Group gap="sm" align="center">
+                            <Text size="sm" fw={500}>
+                              Promote to:
+                            </Text>
+                            <Text size="sm">
+                              {allProjects.find((p) => p.id === project.promoteTargetProjectId)?.name ||
+                                project.promoteTargetProjectId}
+                            </Text>
+                            <Anchor
+                              size="sm"
+                              component="button"
+                              type="button"
+                              onClick={() => {
+                                setPromoteTargetEditMode(true)
+                                setPromoteTargetDraft(project.promoteTargetProjectId || '')
+                              }}
+                            >
+                              Change
+                            </Anchor>
+                          </Group>
+                        </Stack>
+                      ) : (
+                        <Stack gap="sm">
+                          <NativeSelect
+                            label="Promote to project"
+                            value={
+                              promoteTargetDraft !== ''
+                                ? promoteTargetDraft
+                                : project?.promoteTargetProjectId || ''
+                            }
+                            onChange={(event) => setPromoteTargetDraft(event.currentTarget.value)}
+                            disabled={promoteTargetBusy}
+                            data={[
+                              { value: '', label: 'None' },
+                              ...allProjects
+                                .filter((p) => p.id !== id)
+                                .map((p) => ({ value: p.id, label: p.name })),
+                            ]}
+                          />
+                          <Group>
+                            <Button
+                              variant="primary"
+                              onClick={async () => {
+                                if (!id) return
+                                const currentDraft =
+                                  promoteTargetDraft !== ''
+                                    ? promoteTargetDraft
+                                    : project?.promoteTargetProjectId || ''
+                                const newValue = currentDraft || undefined
+                                setPromoteTargetBusy(true)
+                                try {
+                                  const updated = await updateProject(id, {
+                                    promoteTargetProjectId: newValue,
+                                  })
+                                  setProject(updated)
+                                  setPromoteTargetEditMode(false)
+                                  setPromoteTargetDraft('')
+                                  toast({
+                                    title: 'Promote target updated',
+                                    description: newValue
+                                      ? `Configs can be promoted to ${allProjects.find((p) => p.id === newValue)?.name || 'selected project'}`
+                                      : 'Promote target cleared',
+                                    variant: 'success',
+                                  })
+                                } catch (err) {
+                                  toast({
+                                    title: 'Update failed',
+                                    description:
+                                      err instanceof Error ? err.message : 'Failed to update promote target',
+                                    variant: 'danger',
+                                  })
+                                } finally {
+                                  setPromoteTargetBusy(false)
+                                }
+                              }}
+                              disabled={promoteTargetBusy}
+                            >
+                              Save
+                            </Button>
+                            {promoteTargetEditMode && (
+                              <Button
+                                variant="ghost"
+                                onClick={() => {
+                                  setPromoteTargetEditMode(false)
+                                  setPromoteTargetDraft('')
+                                }}
+                                disabled={promoteTargetBusy}
+                              >
+                                Cancel
+                              </Button>
+                            )}
+                          </Group>
+                        </Stack>
+                      )}
+                    </Stack>
+                  </CardContent>
+                </Card>
                 <Card>
                   <CardContent>
                     <Stack gap="md">
@@ -4175,6 +4746,19 @@ useEffect(() => {
               {configEditorError}
             </Alert>
           )}
+          {configEditor &&
+            configEditor.listedSizeBytes != null &&
+            configEditor.listedSizeBytes > 8 * 1024 * 1024 && (
+              <Alert
+                color={configEditor.listedSizeBytes >= CONFIG_EDITOR_JSON_SAVE_LIMIT_BYTES ? 'orange' : 'yellow'}
+                title="Large config file"
+                style={{ flexShrink: 0 }}
+              >
+                On disk this file is about {formatBytes(configEditor.listedSizeBytes)}. Save sends the full text in one
+                JSON request (default backend limit {formatBytes(CONFIG_EDITOR_JSON_SAVE_LIMIT_BYTES)}). If save fails,
+                use Replace or edit the file outside the app. YAML validity does not change that limit.
+              </Alert>
+            )}
           {configEditor && (
             <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
               <CodeMirror
@@ -4223,6 +4807,25 @@ useEffect(() => {
         modal={customPathModal}
         onClose={() => setCustomPathModal(null)}
         onSubmit={handleCustomPathSubmit}
+      />
+
+      <AddConfigPathChoiceModal
+        payload={addConfigPathChoice}
+        onClose={() => {
+          if (!libraryTemplateBusy) setAddConfigPathChoice(null)
+        }}
+        onChooseCustom={(p) => {
+          setAddConfigPathChoice(null)
+          setCustomPathModal({
+            opened: true,
+            pluginId: p.pluginId,
+            path: p.path,
+            label: p.labelSuggestion,
+            notes: '',
+          })
+        }}
+        onChooseLibrary={(p) => void handleChooseLibraryTemplateFromPath(p)}
+        libraryBusy={libraryTemplateBusy}
       />
 
       <Modal
@@ -4302,6 +4905,216 @@ useEffect(() => {
       </Modal>
 
       <Modal
+        opened={buildDiffModalOpen}
+        onClose={closeBuildDiffModal}
+        title={
+          buildDiffContent?.mode === 'latestOnly' || (buildDiffLoading && runs.length === 0)
+            ? 'Latest build contents'
+            : 'Changes since last run'
+        }
+        size="lg"
+        centered
+      >
+        <Stack gap="md">
+          {buildDiffLoading ? (
+            <Group justify="center" py="md">
+              <Loader />
+            </Group>
+          ) : null}
+          {buildDiffError ? (
+            <Text size="sm" c="red">
+              {buildDiffError}
+            </Text>
+          ) : null}
+          {!buildDiffLoading && !buildDiffError && buildDiffContent?.mode === 'latestOnly' ? (
+            <>
+              <Text size="sm" c="dimmed">
+                Config paths and plugins recorded in the manifest for build{' '}
+                <Code>{buildDiffContent.newerLabel}</Code>. No local run has used this artifact yet.
+              </Text>
+              <Text size="sm" fw={600}>
+                Config files ({buildDiffContent.inventory.configs.length})
+              </Text>
+              <ScrollArea h={buildDiffContent.inventory.configs.length > 12 ? 200 : 'auto'} type="auto">
+                <Stack gap={4}>
+                  {buildDiffContent.inventory.configs.length === 0 ? (
+                    <Text size="sm" c="dimmed">
+                      None listed in manifest
+                    </Text>
+                  ) : (
+                    buildDiffContent.inventory.configs.map((path) => (
+                      <Text key={path} size="sm" c="dimmed">
+                        {path}
+                      </Text>
+                    ))
+                  )}
+                </Stack>
+              </ScrollArea>
+              <Text size="sm" fw={600}>
+                Plugins ({buildDiffContent.inventory.plugins.length})
+              </Text>
+              <ScrollArea h={buildDiffContent.inventory.plugins.length > 12 ? 200 : 'auto'} type="auto">
+                <Stack gap={4}>
+                  {buildDiffContent.inventory.plugins.length === 0 ? (
+                    <Text size="sm" c="dimmed">
+                      None listed in manifest
+                    </Text>
+                  ) : (
+                    buildDiffContent.inventory.plugins.map((p) => (
+                      <Text key={p.id} size="sm" c="dimmed">
+                        {p.id}
+                        {p.version ? ` @ ${p.version}` : ''}
+                      </Text>
+                    ))
+                  )}
+                </Stack>
+              </ScrollArea>
+            </>
+          ) : null}
+          {!buildDiffLoading && !buildDiffError && buildDiffContent?.mode === 'compare' ? (
+            <>
+              <Text size="sm" c="dimmed">
+                Last run used build <Code>{buildDiffContent.olderLabel}</Code> · Latest successful build{' '}
+                <Code>{buildDiffContent.newerLabel}</Code>
+              </Text>
+              {buildDiffContent.diff.oldCommit &&
+              buildDiffContent.diff.newCommit &&
+              project?.repo?.fullName ? (
+                <Anchor
+                  href={`https://github.com/${project.repo.fullName}/compare/${buildDiffContent.diff.oldCommit}...${buildDiffContent.diff.newCommit}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  size="sm"
+                >
+                  Open compare on GitHub
+                </Anchor>
+              ) : null}
+              {countDiffEntries(buildDiffContent.diff) === 0 ? (
+                <Text size="sm" c="dimmed">
+                  No differences in manifest config paths, plugin entries, Minecraft metadata, or artifact checksum.
+                  Rebuilds can still differ in ways not reflected here.
+                </Text>
+              ) : null}
+              {buildDiffContent.diff.minecraftChanged ? (
+                <Text size="sm">
+                  <Text span fw={600}>
+                    Minecraft
+                  </Text>{' '}
+                  — loader or version changed in manifest
+                </Text>
+              ) : null}
+              {buildDiffContent.diff.artifactChanged ? (
+                <Text size="sm">
+                  <Text span fw={600}>
+                    Artifact ZIP
+                  </Text>{' '}
+                  — checksum or size changed
+                </Text>
+              ) : null}
+              {buildDiffContent.diff.configs.added.length > 0 ? (
+                <>
+                  <Text size="sm" fw={600}>
+                    Config files added ({buildDiffContent.diff.configs.added.length})
+                  </Text>
+                  <ScrollArea h={buildDiffContent.diff.configs.added.length > 10 ? 160 : 'auto'} type="auto">
+                    <Stack gap={4}>
+                      {buildDiffContent.diff.configs.added.map((path) => (
+                        <Text key={path} size="sm" c="dimmed">
+                          {path}
+                        </Text>
+                      ))}
+                    </Stack>
+                  </ScrollArea>
+                </>
+              ) : null}
+              {buildDiffContent.diff.configs.removed.length > 0 ? (
+                <>
+                  <Text size="sm" fw={600}>
+                    Config files removed ({buildDiffContent.diff.configs.removed.length})
+                  </Text>
+                  <ScrollArea h={buildDiffContent.diff.configs.removed.length > 10 ? 160 : 'auto'} type="auto">
+                    <Stack gap={4}>
+                      {buildDiffContent.diff.configs.removed.map((path) => (
+                        <Text key={path} size="sm" c="dimmed">
+                          {path}
+                        </Text>
+                      ))}
+                    </Stack>
+                  </ScrollArea>
+                </>
+              ) : null}
+              {buildDiffContent.diff.configs.changed.length > 0 ? (
+                <>
+                  <Text size="sm" fw={600}>
+                    Config files changed ({buildDiffContent.diff.configs.changed.length})
+                  </Text>
+                  <ScrollArea h={buildDiffContent.diff.configs.changed.length > 10 ? 160 : 'auto'} type="auto">
+                    <Stack gap={4}>
+                      {buildDiffContent.diff.configs.changed.map((row) => (
+                        <Text key={row.path} size="sm" c="dimmed">
+                          {row.path}{' '}
+                          <Text span size="xs" ff="monospace">
+                            {row.oldSha.slice(0, 8)}… → {row.newSha.slice(0, 8)}…
+                          </Text>
+                        </Text>
+                      ))}
+                    </Stack>
+                  </ScrollArea>
+                </>
+              ) : null}
+              {buildDiffContent.diff.plugins.added.length > 0 ? (
+                <>
+                  <Text size="sm" fw={600}>
+                    Plugins added ({buildDiffContent.diff.plugins.added.length})
+                  </Text>
+                  <Stack gap={4}>
+                    {buildDiffContent.diff.plugins.added.map((p) => (
+                      <Text key={p.id} size="sm" c="dimmed">
+                        {p.id}
+                        {p.version ? ` @ ${p.version}` : ''}
+                      </Text>
+                    ))}
+                  </Stack>
+                </>
+              ) : null}
+              {buildDiffContent.diff.plugins.removed.length > 0 ? (
+                <>
+                  <Text size="sm" fw={600}>
+                    Plugins removed ({buildDiffContent.diff.plugins.removed.length})
+                  </Text>
+                  <Stack gap={4}>
+                    {buildDiffContent.diff.plugins.removed.map((p) => (
+                      <Text key={p.id} size="sm" c="dimmed">
+                        {p.id}
+                        {p.version ? ` @ ${p.version}` : ''}
+                      </Text>
+                    ))}
+                  </Stack>
+                </>
+              ) : null}
+              {buildDiffContent.diff.plugins.changed.length > 0 ? (
+                <>
+                  <Text size="sm" fw={600}>
+                    Plugins changed ({buildDiffContent.diff.plugins.changed.length})
+                  </Text>
+                  <Stack gap={4}>
+                    {buildDiffContent.diff.plugins.changed.map((p) => (
+                      <Text key={p.id} size="sm" c="dimmed">
+                        {p.id}:{' '}
+                        {(p.oldVersion ?? '—') !== (p.newVersion ?? '—')
+                          ? `${p.oldVersion ?? '—'} → ${p.newVersion ?? '—'}`
+                          : `artifact ${(p.oldSha ?? '').slice(0, 8)}… → ${(p.newSha ?? '').slice(0, 8)}…`}
+                      </Text>
+                    ))}
+                  </Stack>
+                </>
+              ) : null}
+            </>
+          ) : null}
+        </Stack>
+      </Modal>
+
+      <Modal
         opened={showRunOptions}
         onClose={() => {
           setShowRunOptions(false)
@@ -4374,7 +5187,7 @@ useEffect(() => {
         opened={showBuildOptions}
         onClose={() => {
           setShowBuildOptions(false)
-          setBuildOptions({ skipPush: false })
+          setBuildOptions({ skipPush: true })
         }}
         title="Build Options"
         size="sm"
@@ -4386,12 +5199,12 @@ useEffect(() => {
           </Text>
           {project?.repo && (
             <Checkbox
-              label="Build only (don't sync to repository)"
-              checked={buildOptions.skipPush ?? false}
+              label="Sync to repository"
+              checked={buildOptions.skipPush === false}
               onChange={(event) =>
-                setBuildOptions((prev) => ({ ...prev, skipPush: event.target.checked }))
+                setBuildOptions((prev) => ({ ...prev, skipPush: !event.target.checked }))
               }
-              description="Build artifact and manifest locally without pushing to GitHub. Use when GitHub is rate limiting or offline."
+              description="Push build artifact and manifest to GitHub after a successful build. Leave unchecked for local-only builds (e.g. rate limits or offline)."
             />
           )}
           <Group justify="flex-end" gap="sm">
@@ -4399,7 +5212,7 @@ useEffect(() => {
               variant="ghost"
               onClick={() => {
                 setShowBuildOptions(false)
-                setBuildOptions({ skipPush: false })
+                setBuildOptions({ skipPush: true })
               }}
             >
               Cancel
@@ -4408,7 +5221,7 @@ useEffect(() => {
               variant="primary"
               onClick={() => {
                 setShowBuildOptions(false)
-                setBuildOptions({ skipPush: false })
+                setBuildOptions({ skipPush: true })
                 void queueBuild(buildOptions)
               }}
               disabled={queueBuildBusy}

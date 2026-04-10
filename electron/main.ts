@@ -392,15 +392,15 @@ ipcMain.handle('api-request', async (_event, url: string, options?: {
 function createWindow(): void {
   logger.info('window-created', {
     isDev,
-    width: 1200,
-    height: 800,
+    width: 1440,
+    height: 900,
   }, 'main');
   
   mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    minWidth: 800,
-    minHeight: 600,
+    width: 1440,
+    height: 900,
+    minWidth: 900,
+    minHeight: 640,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,

@@ -24,6 +24,20 @@ function getPluginsDir(projectId: string): string {
 
 const PLUGINS_PREFIX = "plugins/";
 
+/** First path segment under plugins/ must match a project plugin id (case-insensitive). */
+export function inferPluginIdFromWorkspacePath(
+  project: StoredProject,
+  path: string,
+): string | undefined {
+  const match = path.match(/^plugins\/([^/]+)/);
+  if (!match) return undefined;
+  const folderName = match[1];
+  const plugin = (project.plugins ?? []).find(
+    (p) => p.id && p.id.toLowerCase() === folderName.toLowerCase(),
+  );
+  return plugin?.id;
+}
+
 function ensurePathUnderPlugins(path: string): string {
   const sanitized = sanitizeRelativePath(path);
   if (!sanitized.startsWith(PLUGINS_PREFIX) && sanitized !== "plugins") {
@@ -156,21 +170,22 @@ export async function promotePluginFiles(
   const promoted: string[] = [];
   const errors: { path: string; error: string }[] = [];
   const workspaceDir = getProjectWorkspacePath(projectId);
-  const newEntries: { path: string; sha256: string; pluginId?: string }[] = [];
-
-  function inferPluginIdFromPath(proj: StoredProject, path: string): string | undefined {
-    const match = path.match(/^plugins\/([^/]+)/);
-    if (!match) return undefined;
-    const folderName = match[1];
-    const plugin = (proj.plugins ?? []).find(
-      (p) => p.id && p.id.toLowerCase() === folderName.toLowerCase(),
-    );
-    return plugin?.id;
-  }
+  const newEntries: { path: string; sha256: string; pluginId: string }[] = [];
 
   for (const path of paths) {
     try {
       const sanitized = ensurePathUnderPlugins(path);
+      const pluginId = inferPluginIdFromWorkspacePath(project, sanitized);
+      if (!pluginId) {
+        const match = sanitized.match(/^plugins\/([^/]+)/);
+        const folder = match?.[1] ?? "unknown";
+        errors.push({
+          path: sanitized,
+          error: `No project plugin matches folder "${folder}". Add that plugin to the project first.`,
+        });
+        continue;
+      }
+
       const fullPath = join(workspaceDir, sanitized);
       const buffer = await readFile(fullPath);
       const entry = await stat(fullPath);
@@ -182,7 +197,6 @@ export async function promotePluginFiles(
       await saveUploadedConfigFile(project, sanitized, buffer);
 
       const sha256 = createHash("sha256").update(buffer).digest("hex");
-      const pluginId = inferPluginIdFromPath(project, sanitized);
       newEntries.push({ path: sanitized, sha256, pluginId });
       promoted.push(sanitized);
     } catch (error) {

@@ -1,5 +1,5 @@
 import { createHash } from "crypto";
-import { mkdir, readFile, readdir, rm, stat, unlink, writeFile } from "fs/promises";
+import { mkdir, open, readFile, readdir, rm, stat, unlink, writeFile } from "fs/promises";
 import { dirname, join, posix, relative as pathRelative } from "path";
 import type { StoredProject } from "../types/storage";
 import { getProjectsRoot } from "../config";
@@ -77,6 +77,43 @@ export interface ConfigFileSummary {
   sha256?: string;
   pluginId?: string;
   definitionId?: string;
+  /** From first-line `# mc-plugin-manager: generator-version=…` comment when present */
+  generatorVersion?: string;
+}
+
+const CONFIG_HEADER_PEEK_BYTES = 8192;
+
+/** Parses `generator-version=value` from a UTF-8 prefix of a config file (first line comment). */
+export function parseGeneratorVersionFromHeader(content: string): string | undefined {
+  const match = content.match(/generator-version\s*=\s*([^;\s]+)/i);
+  const raw = match?.[1]?.trim();
+  return raw || undefined;
+}
+
+/** Reads at most CONFIG_HEADER_PEEK_BYTES from disk and extracts generator-version for non-binary paths. */
+export async function readGeneratorVersionFromFile(
+  absolutePath: string,
+  relativePath: string,
+): Promise<string | undefined> {
+  if (isBinaryFile(relativePath)) {
+    return undefined;
+  }
+  let handle: Awaited<ReturnType<typeof open>>;
+  try {
+    handle = await open(absolutePath, "r");
+  } catch {
+    return undefined;
+  }
+  try {
+    const buf = Buffer.alloc(CONFIG_HEADER_PEEK_BYTES);
+    const { bytesRead } = await handle.read(buf, 0, CONFIG_HEADER_PEEK_BYTES, 0);
+    const chunk = buf.subarray(0, bytesRead).toString("utf8");
+    return parseGeneratorVersionFromHeader(chunk);
+  } catch {
+    return undefined;
+  } finally {
+    await handle.close().catch(() => {});
+  }
 }
 
 export interface ConfigFileContent {
@@ -155,6 +192,44 @@ export async function overwriteUploadedConfigFile(
     content: returnContent,
     sha256,
   };
+}
+
+/**
+ * Reads staged or materialized config bytes: tries `config/uploads/` first, then project root.
+ */
+export async function readConfigFileBytes(project: StoredProject, relativePath: string): Promise<Buffer> {
+  const sanitized = sanitizeRelativePath(relativePath);
+  const uploadsRoot = getUploadsRoot(project);
+  const uploadCandidate = join(uploadsRoot, sanitized);
+  try {
+    return await readFile(uploadCandidate);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT") {
+      throw error;
+    }
+  }
+  const direct = join(PROJECTS_ROOT, project.id, sanitized);
+  return readFile(direct);
+}
+
+/** True when target is missing or generator version / stored sha256 differ (human reviews the row). */
+export function isPromoteConfigMismatch(
+  source: ConfigFileSummary,
+  target: ConfigFileSummary | undefined,
+): boolean {
+  if (!target) {
+    return true;
+  }
+  const g1 = (source.generatorVersion ?? "").trim();
+  const g2 = (target.generatorVersion ?? "").trim();
+  if (g1 !== g2) {
+    return true;
+  }
+  if (source.sha256 !== target.sha256) {
+    return true;
+  }
+  return false;
 }
 
 export async function readUploadedConfigFile(
@@ -256,6 +331,7 @@ export async function listUploadedConfigFiles(project: StoredProject): Promise<C
         const details = await stat(entryPath);
         const relative = posix.normalize(pathRelative(root, entryPath).replace(/\\/g, "/"));
         const metadata = metadataMap.get(relative);
+        const generatorVersion = await readGeneratorVersionFromFile(entryPath, relative);
         summaries.push({
           path: relative,
           size: details.size,
@@ -263,6 +339,7 @@ export async function listUploadedConfigFiles(project: StoredProject): Promise<C
           sha256: metadata?.sha256,
           pluginId: metadata?.pluginId,
           definitionId: metadata?.definitionId,
+          generatorVersion,
         });
       }),
     );

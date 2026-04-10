@@ -30,7 +30,7 @@ import {
   type RunJob,
   type StoredPluginRecord,
 } from '../lib/api'
-import { useActiveRuns } from '../lib/useActiveRuns'
+import { useActiveRunsContext } from '../lib/activeRunsContext'
 
 const sourceLabel: Record<'download' | 'upload', string> = {
   download: 'Download URL',
@@ -73,7 +73,7 @@ function Dashboard() {
   const [runOptions, setRunOptions] = useState({ resetWorld: false, resetPlugins: false, useSnapshot: false })
   const [showBuildOptions, setShowBuildOptions] = useState(false)
   const [selectedProjectForBuild, setSelectedProjectForBuild] = useState<ProjectSummary | null>(null)
-  const [buildOptions, setBuildOptions] = useState<BuildOptions>({ skipPush: false })
+  const [buildOptions, setBuildOptions] = useState<BuildOptions>({ skipPush: true })
   const [renameTarget, setRenameTarget] = useState<ProjectSummary | null>(null)
 
   const {
@@ -81,7 +81,6 @@ function Dashboard() {
     runsLoading,
     runsError,
     setRunsError,
-    projectLookup,
     requestStopRun,
     sendRunCommandAction,
     commandInputs,
@@ -90,7 +89,16 @@ function Dashboard() {
     runBusy,
     registerLogRef,
     prependRun,
-  } = useActiveRuns(projects)
+  } = useActiveRunsContext()
+
+  const projectLookup = useMemo(
+    () =>
+      projects.reduce<Record<string, ProjectSummary>>((acc, project) => {
+        acc[project.id] = project
+        return acc
+      }, {}),
+    [projects],
+  )
 
   const { run: queueProjectBuild } = useAsyncAction<
     [ProjectSummary, BuildOptions?],
@@ -717,7 +725,7 @@ function Dashboard() {
         onClose={() => {
           setShowBuildOptions(false)
           setSelectedProjectForBuild(null)
-          setBuildOptions({ skipPush: false })
+          setBuildOptions({ skipPush: true })
         }}
         title="Build Options"
         size="sm"
@@ -729,12 +737,12 @@ function Dashboard() {
           </Text>
           {selectedProjectForBuild?.repo && (
             <Checkbox
-              label="Build only (don't sync to repository)"
-              checked={buildOptions.skipPush ?? false}
+              label="Sync to repository"
+              checked={buildOptions.skipPush === false}
               onChange={(event) =>
-                setBuildOptions((prev) => ({ ...prev, skipPush: event.target.checked }))
+                setBuildOptions((prev) => ({ ...prev, skipPush: !event.target.checked }))
               }
-              description="Build artifact and manifest locally without pushing to GitHub. Use when GitHub is rate limiting or offline."
+              description="Push build artifact and manifest to GitHub after a successful build. Leave unchecked for local-only builds (e.g. rate limits or offline)."
             />
           )}
           <Group justify="flex-end" gap="sm">
@@ -743,7 +751,7 @@ function Dashboard() {
               onClick={() => {
                 setShowBuildOptions(false)
                 setSelectedProjectForBuild(null)
-                setBuildOptions({ skipPush: false })
+                setBuildOptions({ skipPush: true })
               }}
             >
               Cancel
@@ -754,7 +762,7 @@ function Dashboard() {
                 if (selectedProjectForBuild) {
                   setShowBuildOptions(false)
                   setSelectedProjectForBuild(null)
-                  setBuildOptions({ skipPush: false })
+                  setBuildOptions({ skipPush: true })
                   void queueProjectBuild(selectedProjectForBuild, buildOptions).catch(() => null)
                 }
               }}

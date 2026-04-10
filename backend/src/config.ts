@@ -112,3 +112,15 @@ export function getDevDataPaths(): string[] {
   // In dev mode, use current working directory
   return [join(process.cwd(), "backend", "data")];
 }
+
+const parsedConfigPayloadMb = Number(process.env.MCSM_MAX_CONFIG_PAYLOAD_MB);
+/** Max JSON body size and config multipart upload size (single file). Default 32 MiB. */
+export const maxConfigPayloadBytes =
+  Number.isFinite(parsedConfigPayloadMb) && parsedConfigPayloadMb > 0
+    ? Math.floor(parsedConfigPayloadMb * 1024 * 1024)
+    : 32 * 1024 * 1024;
+
+export function describeMaxConfigPayload(): string {
+  const mb = maxConfigPayloadBytes / (1024 * 1024);
+  return Number.isInteger(mb) ? `${mb} MB` : `${mb.toFixed(1)} MB`;
+}

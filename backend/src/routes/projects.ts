@@ -31,7 +31,7 @@ import type {
 import { renderManifest, type ManifestOverrides } from "../services/manifestService";
 import { enqueueBuild } from "../services/buildQueue";
 import { scanProjectAssets } from "../services/projectScanner";
-import { getProjectsRoot, getDevDataPaths } from "../config";
+import { getProjectsRoot, getDevDataPaths, maxConfigPayloadBytes, describeMaxConfigPayload } from "../config";
 import { commitFiles, getOctokitForRequest } from "../services/githubClient";
 import {
   collectProjectDefinitionFiles,
@@ -52,6 +52,9 @@ import {
   deleteUploadedConfigFile,
   collectUploadedConfigMaterials,
   isBinaryFile,
+  readGeneratorVersionFromFile,
+  readConfigFileBytes,
+  isPromoteConfigMismatch,
   type ConfigFileSummary,
   sanitizeRelativePath,
 } from "../services/configUploads";
@@ -62,6 +65,11 @@ import {
   deletePluginFile,
   promotePluginFiles,
 } from "../services/workspacePluginFiles";
+import {
+  findPluginMappingForPath,
+  findLibraryDefinitionForPath,
+  resolvePluginIdForConfigSummary,
+} from "../services/configPluginResolution";
 import { optionalAuth } from "../middleware/auth";
 
 const router = Router();
@@ -76,7 +84,7 @@ const pluginUpload = multer({
 const configUpload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 16 * 1024 * 1024,
+    fileSize: maxConfigPayloadBytes,
   },
 });
 
@@ -337,57 +345,6 @@ function buildPluginConfigViews(
   return { definitions: views, unmatchedUploads };
 }
 
-function findPluginMappingForPath(
-  project: StoredProject,
-  path: string,
-): { pluginId: string; definitionId?: string } | undefined {
-  for (const plugin of project.plugins ?? []) {
-    for (const mapping of plugin.configMappings ?? []) {
-      // Handle new format (discriminated union)
-      if ('type' in mapping) {
-        if (mapping.type === 'custom' && mapping.path === path) {
-          return { pluginId: plugin.id, definitionId: mapping.customId };
-        } else if (mapping.type === 'library') {
-          // Library configs use definition path, check against stored plugin definition
-          // This is handled elsewhere, skip here
-          continue;
-        }
-      } else {
-        // Old format: check path
-        const oldMapping = mapping as any;
-        if (oldMapping.path === path) {
-          return { pluginId: plugin.id, definitionId: oldMapping.definitionId };
-        }
-      }
-    }
-  }
-  return undefined;
-}
-
-// Helper function to find library definition for a given path
-async function findLibraryDefinitionForPath(
-  project: StoredProject,
-  path: string,
-): Promise<{ pluginId: string; definitionId: string; label?: string } | undefined> {
-  for (const plugin of project.plugins ?? []) {
-    if (!plugin.version) continue;
-    
-    const stored = await findStoredPlugin(plugin.id, plugin.version);
-    if (!stored?.configDefinitions) continue;
-    
-    for (const definition of stored.configDefinitions) {
-      if (definition.path === path) {
-        return {
-          pluginId: plugin.id,
-          definitionId: definition.id,
-          label: definition.label,
-        };
-      }
-    }
-  }
-  return undefined;
-}
-
 async function reconcilePluginConfigMetadata(
   projectId: string,
   project: StoredProject,
@@ -617,6 +574,7 @@ function toSummary(project: StoredProject): ProjectSummary {
     configs: project.configs,
     repo: project.repo,
     snapshotSourceProjectId: project.snapshotSourceProjectId,
+    promoteTargetProjectId: project.promoteTargetProjectId,
     sftp: project.sftp,
   };
 }
@@ -1003,7 +961,15 @@ function parseSftpBody(body: unknown): { host: string; port?: number; username: 
 router.put("/:id", async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { name, minecraftVersion, loader, description, snapshotSourceProjectId, sftp: sftpBody } = req.body ?? {};
+    const {
+      name,
+      minecraftVersion,
+      loader,
+      description,
+      snapshotSourceProjectId,
+      promoteTargetProjectId,
+      sftp: sftpBody,
+    } = req.body ?? {};
 
     const project = await findProject(id);
     if (!project) {
@@ -1026,6 +992,26 @@ router.put("/:id", async (req: Request, res: Response) => {
       }
     }
 
+    if (promoteTargetProjectId !== undefined) {
+      const trimmed =
+        typeof promoteTargetProjectId === "string" ? promoteTargetProjectId.trim() : "";
+      if (trimmed === id) {
+        res.status(400).json({ error: "A project cannot promote to itself" });
+        return;
+      }
+      if (trimmed) {
+        const target = await findProject(trimmed);
+        if (!target) {
+          res.status(400).json({ error: "Promote target project not found" });
+          return;
+        }
+        if (await wouldCreatePromoteCycle(id, trimmed)) {
+          res.status(400).json({ error: "That promote target would create a cycle" });
+          return;
+        }
+      }
+    }
+
     const updated = await updateProject(id, (p) => {
       if (typeof name === "string" && name.trim()) {
         p.name = name.trim();
@@ -1042,6 +1028,10 @@ router.put("/:id", async (req: Request, res: Response) => {
       if (snapshotSourceProjectId !== undefined) {
         const trimmed = typeof snapshotSourceProjectId === "string" ? snapshotSourceProjectId.trim() : "";
         p.snapshotSourceProjectId = trimmed || undefined;
+      }
+      if (promoteTargetProjectId !== undefined) {
+        const trimmed = typeof promoteTargetProjectId === "string" ? promoteTargetProjectId.trim() : "";
+        p.promoteTargetProjectId = trimmed || undefined;
       }
       if (sftpBody !== undefined) {
         if (sftpBody === null || sftpBody === "") {
@@ -1851,6 +1841,7 @@ router.get("/:id/plugins/:pluginId/configs", async (req: Request, res: Response)
           }
           
           if (stats && filePath) {
+            const generatorVersion = await readGeneratorVersionFromFile(filePath, config.path);
             scannedSummaries.push({
               path: config.path,
               size: Number(stats.size),
@@ -1858,6 +1849,7 @@ router.get("/:id/plugins/:pluginId/configs", async (req: Request, res: Response)
               sha256: config.sha256,
               pluginId: config.pluginId,
               definitionId: config.definitionId,
+              generatorVersion,
             });
           } else {
             // File doesn't exist, but still include it as a summary for matching purposes
@@ -2161,6 +2153,7 @@ async function listAllProjectConfigs(project: StoredProject): Promise<ConfigFile
     }
     
     if (stats && filePath) {
+      const generatorVersion = await readGeneratorVersionFromFile(filePath, config.path);
       scannedSummaries.push({
         path: config.path,
         size: Number(stats.size),
@@ -2168,6 +2161,7 @@ async function listAllProjectConfigs(project: StoredProject): Promise<ConfigFile
         sha256: config.sha256,
         pluginId: config.pluginId,
         definitionId: config.definitionId,
+        generatorVersion,
       });
     } else {
       // File doesn't exist, but still include it as a summary
@@ -2184,8 +2178,257 @@ async function listAllProjectConfigs(project: StoredProject): Promise<ConfigFile
   
   const allSummaries = [...uploadedSummaries, ...scannedSummaries];
   allSummaries.sort((a, b) => a.path.localeCompare(b.path));
-  return allSummaries;
+  const enriched = await Promise.all(
+    allSummaries.map(async (s) => {
+      const pluginId = await resolvePluginIdForConfigSummary(project, s);
+      return pluginId !== s.pluginId ? { ...s, pluginId } : s;
+    }),
+  );
+  return enriched;
 }
+
+async function wouldCreatePromoteCycle(currentId: string, proposedTarget: string): Promise<boolean> {
+  const visited = new Set<string>();
+  let cursor: string | undefined = proposedTarget;
+  while (cursor) {
+    if (cursor === currentId) {
+      return true;
+    }
+    if (visited.has(cursor)) {
+      return false;
+    }
+    visited.add(cursor);
+    const p = await findProject(cursor);
+    cursor = p?.promoteTargetProjectId;
+  }
+  return false;
+}
+
+async function buildPromotePreviewRows(
+  sourceProject: StoredProject,
+  targetProject: StoredProject,
+): Promise<{
+  rows: Array<{
+    path: string;
+    source: { generatorVersion?: string; sha256?: string };
+    target: { generatorVersion?: string; sha256?: string } | null;
+  }>;
+  missingDownstreamPluginIds: string[];
+}> {
+  const sourceList = await listAllProjectConfigs(sourceProject);
+  const targetList = await listAllProjectConfigs(targetProject);
+  const targetMap = new Map(targetList.map((s) => [s.path, s]));
+  const rows: Array<{
+    path: string;
+    source: { generatorVersion?: string; sha256?: string };
+    target: { generatorVersion?: string; sha256?: string } | null;
+  }> = [];
+  const missingDownstream = new Set<string>();
+  for (const source of sourceList) {
+    const t = targetMap.get(source.path);
+    if (!isPromoteConfigMismatch(source, t)) {
+      continue;
+    }
+    if (source.path.startsWith("plugins/")) {
+      const requiredPluginId = await resolvePluginIdForConfigSummary(sourceProject, source);
+      if (
+        requiredPluginId &&
+        !findProjectPluginById(targetProject.plugins, requiredPluginId)
+      ) {
+        missingDownstream.add(requiredPluginId);
+        continue;
+      }
+    }
+    rows.push({
+      path: source.path,
+      source: { generatorVersion: source.generatorVersion, sha256: source.sha256 },
+      target: t ? { generatorVersion: t.generatorVersion, sha256: t.sha256 } : null,
+    });
+  }
+  rows.sort((a, b) => a.path.localeCompare(b.path));
+  const missingDownstreamPluginIds = [...missingDownstream].sort((a, b) =>
+    a.localeCompare(b, undefined, { sensitivity: "base" }),
+  );
+  return { rows, missingDownstreamPluginIds };
+}
+
+interface PromotePluginCompareRow {
+  id: string;
+  source: { version: string; enabled: boolean } | null;
+  target: { version: string; enabled: boolean } | null;
+}
+
+function buildPromotePluginCompareRows(
+  sourceProject: StoredProject,
+  targetProject: StoredProject,
+): PromotePluginCompareRow[] {
+  const srcByLower = new Map<string, { id: string; version: string; enabled: boolean }>();
+  for (const p of sourceProject.plugins ?? []) {
+    srcByLower.set(p.id.toLowerCase(), {
+      id: p.id,
+      version: (p.version ?? "latest").trim() || "latest",
+      enabled: p.enabled !== false,
+    });
+  }
+  const tgtByLower = new Map<string, { id: string; version: string; enabled: boolean }>();
+  for (const p of targetProject.plugins ?? []) {
+    tgtByLower.set(p.id.toLowerCase(), {
+      id: p.id,
+      version: (p.version ?? "latest").trim() || "latest",
+      enabled: p.enabled !== false,
+    });
+  }
+  const keys = new Set([...srcByLower.keys(), ...tgtByLower.keys()]);
+  const rows: PromotePluginCompareRow[] = [...keys].map((lower) => {
+    const s = srcByLower.get(lower);
+    const t = tgtByLower.get(lower);
+    return {
+      id: s?.id ?? t?.id ?? lower,
+      source: s ? { version: s.version, enabled: s.enabled } : null,
+      target: t ? { version: t.version, enabled: t.enabled } : null,
+    };
+  });
+  rows.sort((a, b) => a.id.localeCompare(b.id, undefined, { sensitivity: "base" }));
+  return rows;
+}
+
+router.get("/:id/promote/preview", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const sourceProject = await findProject(id);
+    if (!sourceProject) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    const targetId = sourceProject.promoteTargetProjectId?.trim();
+    if (!targetId) {
+      res.status(400).json({ error: "Set a promote target project in Settings first" });
+      return;
+    }
+    const targetProject = await findProject(targetId);
+    if (!targetProject) {
+      res.status(400).json({ error: "Promote target project no longer exists" });
+      return;
+    }
+    const { rows, missingDownstreamPluginIds } = await buildPromotePreviewRows(
+      sourceProject,
+      targetProject,
+    );
+    const pluginCompareRows = buildPromotePluginCompareRows(sourceProject, targetProject);
+    res.json({
+      sourceProjectId: sourceProject.id,
+      sourceProjectName: sourceProject.name,
+      targetProjectId: targetProject.id,
+      targetProjectName: targetProject.name,
+      rows,
+      missingDownstreamPluginIds,
+      pluginCompareRows,
+    });
+  } catch (error) {
+    console.error("Failed to build promote preview", error);
+    res.status(500).json({ error: "Failed to build promote preview" });
+  }
+});
+
+router.post("/:id/promote", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const rawPaths = req.body?.paths;
+    if (!Array.isArray(rawPaths) || rawPaths.length === 0) {
+      res.status(400).json({ error: "paths must be a non-empty array" });
+      return;
+    }
+    const paths = [
+      ...new Set(
+        rawPaths
+          .filter((p): p is string => typeof p === "string" && p.trim().length > 0)
+          .map((p) => sanitizeRelativePath(p.trim())),
+      ),
+    ];
+    if (paths.length === 0) {
+      res.status(400).json({ error: "paths must contain at least one valid path" });
+      return;
+    }
+
+    const sourceProject = await findProject(id);
+    if (!sourceProject) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    const targetId = sourceProject.promoteTargetProjectId?.trim();
+    if (!targetId) {
+      res.status(400).json({ error: "Set a promote target project in Settings first" });
+      return;
+    }
+    const targetProject = await findProject(targetId);
+    if (!targetProject) {
+      res.status(400).json({ error: "Promote target project no longer exists" });
+      return;
+    }
+
+    const sourceSummaries = await listAllProjectConfigs(sourceProject);
+    const sourceByPath = new Map(sourceSummaries.map((s) => [s.path, s]));
+    const { rows: previewRows } = await buildPromotePreviewRows(sourceProject, targetProject);
+    const mismatchPaths = new Set(previewRows.map((r) => r.path));
+    for (const path of paths) {
+      if (!sourceByPath.has(path)) {
+        res.status(400).json({ error: `Path not found on source project: ${path}` });
+        return;
+      }
+      if (!mismatchPaths.has(path)) {
+        res.status(400).json({
+          error: `Path is not a current mismatch (already in sync): ${path}`,
+        });
+        return;
+      }
+    }
+
+    const pathSet = new Set(paths);
+    const remaining = (targetProject.configs ?? []).filter((c) => !pathSet.has(c.path));
+    const newEntries: NonNullable<StoredProject["configs"]> = [];
+
+    for (const path of paths) {
+      const buffer = await readConfigFileBytes(sourceProject, path);
+      const saved = await saveUploadedConfigFile(targetProject, path, buffer);
+      const srcEntry = sourceProject.configs?.find((c) => c.path === path);
+      newEntries.push({
+        path: saved.path,
+        sha256: saved.sha256,
+        pluginId: srcEntry?.pluginId,
+        definitionId: srcEntry?.definitionId,
+      });
+    }
+
+    const merged = [...remaining, ...newEntries].sort((a, b) => a.path.localeCompare(b.path));
+    await setProjectAssets(targetId, { configs: merged });
+
+    let refreshed = (await findProject(targetId)) ?? targetProject;
+    for (const plugin of refreshed.plugins ?? []) {
+      if (!plugin.version) {
+        continue;
+      }
+      const stored = await findStoredPlugin(plugin.id, plugin.version);
+      await reconcilePluginConfigMetadata(
+        targetId,
+        refreshed,
+        plugin,
+        stored?.configDefinitions ?? [],
+      );
+      refreshed = (await findProject(targetId)) ?? refreshed;
+    }
+
+    const configs = await listAllProjectConfigs(refreshed);
+    res.json({ promoted: paths, targetProjectId: targetId, configs });
+  } catch (error) {
+    console.error("Failed to promote configs", error);
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.toLowerCase().includes("relativepath") || message.toLowerCase().includes("traversal")) {
+      res.status(400).json({ error: message });
+      return;
+    }
+    res.status(500).json({ error: message || "Failed to promote configs" });
+  }
+});
 
 router.get("/:id/configs", async (req: Request, res: Response) => {
   try {
@@ -2444,9 +2687,17 @@ router.put("/:id/configs/file", async (req: Request, res: Response) => {
     if (!project) {
       res.status(404).json({ error: "Project not found" });
       return;
-  }
+    }
     if (typeof path !== "string" || typeof content !== "string") {
       res.status(400).json({ error: "path and content are required" });
+      return;
+    }
+    const contentBytes = Buffer.byteLength(content, "utf8");
+    if (contentBytes > maxConfigPayloadBytes) {
+      const max = describeMaxConfigPayload();
+      res.status(413).json({
+        error: `Config content is about ${Math.ceil(contentBytes / (1024 * 1024))} MB; maximum for in-app save is ${max} (UTF-8 size). Use Replace to upload from disk, split or shrink the file, or raise MCSM_MAX_CONFIG_PAYLOAD_MB on the backend.`,
+      });
       return;
     }
     const pluginIdOverride =
