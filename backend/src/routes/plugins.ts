@@ -12,6 +12,7 @@ import {
   listStoredPlugins,
   upsertStoredPlugin,
 } from "../storage/pluginsStore";
+import { normalizePluginDataFolder } from "../services/pluginDataFolder";
 import type {
   PluginConfigDefinition,
   PluginProvider,
@@ -180,6 +181,7 @@ router.post("/library", async (req: Request, res: Response) => {
       minecraftVersionMax,
       cachePath,
       configDefinitions: rawConfigDefinitions,
+      dataFolder: rawDataFolder,
     } = req.body ?? {};
 
     if (!pluginId || !version) {
@@ -262,6 +264,14 @@ router.post("/library", async (req: Request, res: Response) => {
       return;
     }
 
+    let dataFolder: string | undefined;
+    try {
+      dataFolder = normalizePluginDataFolder(rawDataFolder);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : "Invalid dataFolder" });
+      return;
+    }
+
     const stored = await upsertStoredPlugin({
       id: pluginId,
       version,
@@ -272,6 +282,7 @@ router.post("/library", async (req: Request, res: Response) => {
       source: sourceRef,
       cachePath: cachePath ?? sourceRef?.cachePath,
       configDefinitions,
+      dataFolder,
     });
 
     const plugins = await listStoredPlugins();
@@ -294,6 +305,7 @@ router.post(
         minecraftVersionMin,
         minecraftVersionMax,
         configDefinitions: rawConfigDefinitions,
+        dataFolder: rawDataFolder,
       } = req.body ?? {};
 
       if (!file) {
@@ -329,6 +341,14 @@ router.post(
         return;
       }
 
+      let dataFolder: string | undefined;
+      try {
+        dataFolder = normalizePluginDataFolder(rawDataFolder);
+      } catch (error) {
+        res.status(400).json({ error: error instanceof Error ? error.message : "Invalid dataFolder" });
+        return;
+      }
+
       const stored = await upsertStoredPlugin({
         id: pluginId,
         version,
@@ -347,6 +367,7 @@ router.post(
         },
         cachePath,
         configDefinitions,
+        dataFolder,
       });
 
       const plugins = await listStoredPlugins();
@@ -377,6 +398,46 @@ router.delete("/library/:id/:version", async (req: Request, res: Response) => {
   } catch (error) {
     console.error("Failed to delete stored plugin", error);
     res.status(500).json({ error: "Failed to delete stored plugin" });
+  }
+});
+
+router.patch("/library/:id/:version", async (req: Request, res: Response) => {
+  try {
+    const { id, version } = req.params;
+    if (!id || !version) {
+      res.status(400).json({ error: "Plugin id and version are required" });
+      return;
+    }
+
+    const existing = await findStoredPlugin(id, version);
+    if (!existing) {
+      res.status(404).json({ error: "Plugin not found in library" });
+      return;
+    }
+
+    const body = req.body ?? {};
+    if (!Object.prototype.hasOwnProperty.call(body, "dataFolder")) {
+      res.status(400).json({
+        error: 'Body must include "dataFolder" (string, empty string, or null to use default folder = plugin id)',
+      });
+      return;
+    }
+
+    let dataFolder: string | undefined;
+    try {
+      const raw =
+        body.dataFolder === null || body.dataFolder === "" ? undefined : body.dataFolder;
+      dataFolder = normalizePluginDataFolder(raw);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : "Invalid dataFolder" });
+      return;
+    }
+
+    const updated = await upsertStoredPlugin({ ...existing, dataFolder });
+    res.json({ plugin: updated });
+  } catch (error) {
+    console.error("Failed to update library plugin metadata", error);
+    res.status(500).json({ error: "Failed to update library plugin metadata" });
   }
 });
 

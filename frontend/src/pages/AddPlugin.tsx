@@ -40,11 +40,13 @@ function AddPlugin() {
   const [manualPluginId, setManualPluginId] = useState('')
   const [manualPluginVersion, setManualPluginVersion] = useState('')
   const [manualPluginUrl, setManualPluginUrl] = useState('')
+  const [manualDataFolder, setManualDataFolder] = useState('')
   const [manualMinVersion, setManualMinVersion] = useState('')
   const [manualMaxVersion, setManualMaxVersion] = useState('')
   const [uploadPluginId, setUploadPluginId] = useState('')
   const [uploadPluginVersion, setUploadPluginVersion] = useState('')
   const [uploadPluginFile, setUploadPluginFile] = useState<File | null>(null)
+  const [uploadDataFolder, setUploadDataFolder] = useState('')
   const [uploadMinVersion, setUploadMinVersion] = useState('')
   const [uploadMaxVersion, setUploadMaxVersion] = useState('')
   const [manualBusy, setManualBusy] = useState(false)
@@ -103,6 +105,9 @@ function AddPlugin() {
                         downloadUrl: manualPluginUrl.trim(),
                         minecraftVersionMin: manualMinVersion.trim(),
                         minecraftVersionMax: manualMaxVersion.trim(),
+                        ...(manualDataFolder.trim()
+                          ? { dataFolder: manualDataFolder.trim() }
+                          : {}),
                       })
                       toast({
                         title: 'Plugin added',
@@ -187,6 +192,19 @@ function AddPlugin() {
                         />
                       </Stack>
                     </Grid.Col>
+                    <Grid.Col span={12}>
+                      <Stack gap={4}>
+                        <Text size="xs" fw={600} c="dimmed">
+                          Data folder under plugins/ (optional)
+                        </Text>
+                        <TextInput
+                          id="manual-data-folder"
+                          value={manualDataFolder}
+                          onChange={(event) => setManualDataFolder(event.currentTarget.value)}
+                          placeholder="Same as plugin id if empty — e.g. Essentials or GriefPreventionData"
+                        />
+                      </Stack>
+                    </Grid.Col>
                   </Grid>
                   <Group justify="flex-end" mt="md">
                     <Button type="submit" variant="primary" disabled={manualBusy}>
@@ -229,6 +247,7 @@ function AddPlugin() {
                         file: uploadPluginFile,
                         minecraftVersionMin: uploadMinVersion.trim(),
                         minecraftVersionMax: uploadMaxVersion.trim(),
+                        ...(uploadDataFolder.trim() ? { dataFolder: uploadDataFolder.trim() } : {}),
                       })
                       toast({
                         title: 'Plugin uploaded',
@@ -310,6 +329,19 @@ function AddPlugin() {
                           type="file"
                           accept=".jar,.zip"
                           onChange={(event) => setUploadPluginFile(event.currentTarget.files?.[0] ?? null)}
+                        />
+                      </Stack>
+                    </Grid.Col>
+                    <Grid.Col span={12}>
+                      <Stack gap={4}>
+                        <Text size="xs" fw={600} c="dimmed">
+                          Data folder under plugins/ (optional)
+                        </Text>
+                        <TextInput
+                          id="upload-data-folder"
+                          value={uploadDataFolder}
+                          onChange={(event) => setUploadDataFolder(event.currentTarget.value)}
+                          placeholder="Same as plugin id if empty"
                         />
                       </Stack>
                     </Grid.Col>
