@@ -72,6 +72,8 @@ export interface StoredPluginRecord {
   }
   createdAt: string
   updatedAt: string
+  /** Directory under plugins/ for this plugin's data; omit = same as id */
+  dataFolder?: string
   configDefinitions?: PluginConfigDefinition[]
 }
 
@@ -1106,6 +1108,7 @@ export async function addLibraryPlugin(payload: {
   cachePath?: string
   source?: Record<string, unknown>
   hash?: string
+  dataFolder?: string
 }): Promise<StoredPluginRecord> {
   const data = await request<{ plugin: StoredPluginRecord; plugins: StoredPluginRecord[] }>(
     '/plugins/library',
@@ -1123,6 +1126,7 @@ export async function uploadLibraryPlugin(payload: {
   file: File
   minecraftVersionMin: string
   minecraftVersionMax: string
+  dataFolder?: string
 }): Promise<StoredPluginRecord> {
   const formData = new FormData()
   formData.append('pluginId', payload.pluginId)
@@ -1130,6 +1134,9 @@ export async function uploadLibraryPlugin(payload: {
   formData.append('file', payload.file)
   formData.append('minecraftVersionMin', payload.minecraftVersionMin)
   formData.append('minecraftVersionMax', payload.minecraftVersionMax)
+  if (payload.dataFolder?.trim()) {
+    formData.append('dataFolder', payload.dataFolder.trim())
+  }
 
   const response = await fetch(`${API_BASE}/plugins/library/upload`, {
     method: 'POST',
@@ -1159,6 +1166,23 @@ export async function updateLibraryPluginConfigs(
     {
       method: 'PUT',
       body: JSON.stringify({ configDefinitions: payload.configDefinitions }),
+    },
+  )
+  return data.plugin
+}
+
+export async function patchLibraryPluginDataFolder(
+  pluginId: string,
+  version: string,
+  dataFolder: string | null,
+): Promise<StoredPluginRecord> {
+  const data = await request<{ plugin: StoredPluginRecord }>(
+    `/plugins/library/${encodeURIComponent(pluginId)}/${encodeURIComponent(version)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({
+        dataFolder: dataFolder === null ? null : dataFolder,
+      }),
     },
   )
   return data.plugin

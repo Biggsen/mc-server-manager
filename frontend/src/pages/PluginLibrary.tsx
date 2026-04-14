@@ -1,16 +1,18 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Plug, Plus } from '@phosphor-icons/react'
+import { PencilSimple, Plug, Plus, Trash } from '@phosphor-icons/react'
 import {
   fetchPluginLibrary,
   deleteLibraryPlugin,
   fetchProjects,
   updateLibraryPluginConfigs,
+  patchLibraryPluginDataFolder,
   type StoredPluginRecord,
   type ProjectSummary,
   type PluginConfigDefinition,
 } from '../lib/api'
 import {
+  ActionIcon,
   Anchor,
   Badge,
   Group,
@@ -24,7 +26,7 @@ import {
   TextInput,
   Title,
 } from '@mantine/core'
-import { Button, Card, CardContent } from '../components/ui'
+import { Button, Card, CardContent, Modal } from '../components/ui'
 import { ContentSection } from '../components/layout'
 
 type SourceFilter = 'all' | 'download' | 'upload'
@@ -37,7 +39,7 @@ function getPluginSourceKind(plugin: StoredPluginRecord): 'download' | 'upload' 
     return 'download'
   }
   // If neither exists, likely an uploaded plugin missing uploadPath in source
-  // (older data or edge case) - default to 'upload' to avoid misleading "Download URL" badge
+  // (older data or edge case) - default to 'upload' to avoid misleading "DL" badge
   return 'upload'
 }
 
@@ -70,8 +72,8 @@ function createEmptyDraft(): ConfigDefinitionDraft {
 }
 
 const sourceLabel: Record<'download' | 'upload', string> = {
-  download: 'Download URL',
-  upload: 'Uploaded jar',
+  download: 'DL',
+  upload: 'UL',
 }
 
 function PluginLibrary() {
@@ -86,6 +88,7 @@ function PluginLibrary() {
   const [configEditor, setConfigEditor] = useState<{
     plugin: StoredPluginRecord
     drafts: ConfigDefinitionDraft[]
+    dataFolderInput: string
     busy: boolean
     error: string | null
     touched: boolean
@@ -158,6 +161,7 @@ function PluginLibrary() {
           plugin.id,
           plugin.version,
           plugin.provider,
+          plugin.dataFolder,
           plugin.source?.slug,
           plugin.source?.projectUrl,
           plugin.source?.downloadUrl,
@@ -226,8 +230,8 @@ function PluginLibrary() {
               onChange={(event) => setSourceFilter((event.currentTarget.value || 'all') as SourceFilter)}
               data={[
                 { value: 'all', label: 'All sources' },
-                { value: 'download', label: 'Download URL' },
-                { value: 'upload', label: 'Uploaded jar' },
+                { value: 'download', label: 'DL' },
+                { value: 'upload', label: 'UL' },
               ]}
             />
           </Stack>
@@ -280,9 +284,9 @@ function PluginLibrary() {
                 <Table.Tr>
                   <Table.Th>Plugin</Table.Th>
                   <Table.Th>Version</Table.Th>
+                  <Table.Th>Data folder</Table.Th>
                   <Table.Th>Source</Table.Th>
                   <Table.Th>Minecraft</Table.Th>
-                  <Table.Th>Cache</Table.Th>
                   <Table.Th>Projects</Table.Th>
                   <Table.Th />
                 </Table.Tr>
@@ -321,19 +325,18 @@ function PluginLibrary() {
                       </Table.Td>
                       <Table.Td>{plugin.version}</Table.Td>
                       <Table.Td>
+                        <Text size="sm" ff="monospace">
+                          {plugin.dataFolder?.trim() || plugin.id}
+                        </Text>
+                        {plugin.dataFolder?.trim() ? (
+                          <Text size="xs" c="dimmed">
+                            plugin id: {plugin.id}
+                          </Text>
+                        ) : null}
+                      </Table.Td>
+                      <Table.Td>
                         <Stack gap={4}>
                           <Badge variant="light">{sourceLabel[kind]}</Badge>
-                          {plugin.source?.downloadUrl && (
-                            <Anchor
-                              href={plugin.source.downloadUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              size="sm"
-                              style={{ wordBreak: 'break-all', overflowWrap: 'break-word' }}
-                            >
-                              {plugin.source.downloadUrl}
-                            </Anchor>
-                          )}
                           {plugin.source?.uploadPath && (
                             <Text size="sm" c="dimmed" style={{ wordBreak: 'break-all', overflowWrap: 'break-word' }}>
                               {plugin.source.uploadPath}
@@ -347,31 +350,6 @@ function PluginLibrary() {
                           {plugin.source?.loader && (
                             <Text size="xs" c="dimmed">
                               Loader: {plugin.source.loader}
-                            </Text>
-                          )}
-                        </Stack>
-                      </Table.Td>
-                      <Table.Td>
-                        <Stack gap={4}>
-                          {plugin.cachePath ? (
-                            <>
-                              <Text size="sm" style={{ wordBreak: 'break-all', overflowWrap: 'break-word' }}>
-                                <code>{plugin.cachePath}</code>
-                              </Text>
-                              {plugin.cachedAt && (
-                                <Text size="xs" c="dimmed">
-                                  Cached {new Date(plugin.cachedAt).toLocaleString()}
-                                </Text>
-                              )}
-                              {plugin.lastUsedAt && (
-                                <Text size="xs" c="dimmed">
-                                  Last used {new Date(plugin.lastUsedAt).toLocaleString()}
-                                </Text>
-                              )}
-                            </>
-                          ) : (
-                            <Text size="sm" c="dimmed">
-                              Pending
                             </Text>
                           )}
                         </Stack>
@@ -392,10 +370,33 @@ function PluginLibrary() {
                         )}
                       </Table.Td>
                       <Table.Td>
-                        <Group gap="xs" wrap="wrap" justify="flex-end">
-                          <Button
-                            size="sm"
-                            variant="ghost"
+                        <Group gap="xs" wrap="nowrap" justify="flex-end">
+                          <ActionIcon
+                            variant="subtle"
+                            color="gray"
+                            aria-label={`Edit ${plugin.id} ${plugin.version}`}
+                            title={`Edit ${plugin.id} ${plugin.version}`}
+                            onClick={() => {
+                              const drafts: ConfigDefinitionDraft[] = (plugin.configDefinitions ?? []).map(
+                                (definition, index) => definitionToDraft(definition, index),
+                              )
+                              setConfigEditor({
+                                plugin,
+                                drafts,
+                                dataFolderInput: plugin.dataFolder ?? '',
+                                busy: false,
+                                error: null,
+                                touched: false,
+                              })
+                            }}
+                          >
+                            <PencilSimple size={18} weight="bold" aria-hidden="true" />
+                          </ActionIcon>
+                          <ActionIcon
+                            variant="subtle"
+                            color="red"
+                            aria-label={`Delete ${plugin.id} ${plugin.version}`}
+                            title={`Delete ${plugin.id} ${plugin.version}`}
                             onClick={async () => {
                               if (
                                 !window.confirm(
@@ -412,26 +413,8 @@ function PluginLibrary() {
                               }
                             }}
                           >
-                            Delete
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => {
-                              const drafts: ConfigDefinitionDraft[] = (plugin.configDefinitions ?? []).map(
-                                (definition, index) => definitionToDraft(definition, index),
-                              )
-                              setConfigEditor({
-                                plugin,
-                                drafts,
-                                busy: false,
-                                error: null,
-                                touched: false,
-                              })
-                            }}
-                          >
-                            Manage config paths
-                          </Button>
+                            <Trash size={18} weight="bold" aria-hidden="true" />
+                          </ActionIcon>
                         </Group>
                       </Table.Td>
                     </Table.Tr>
@@ -442,35 +425,105 @@ function PluginLibrary() {
           </ScrollArea>
         )}
 
-        {configEditor && (
-          <ContentSection as="article" padding="xl">
-            <Stack gap="lg">
-              <Group justify="space-between" align="flex-start">
-                <Stack gap={4}>
-                  <Title order={3}>
-                    Manage Config Paths · {configEditor.plugin.id} {configEditor.plugin.version}
-                  </Title>
-                  <Text size="sm" c="dimmed">
-                    Define expected config files for this plugin. Paths are relative to the project root.
-                  </Text>
-                </Stack>
-                <Button
-                  variant="ghost"
-                  onClick={() => {
-                    setCopyFromVersion('')
-                    setConfigEditor(null)
-                  }}
-                  disabled={configEditor.busy}
-                >
-                  Close
-                </Button>
-              </Group>
+        <Modal
+          opened={Boolean(configEditor)}
+          onClose={() => {
+            if (configEditor?.busy) return
+            setCopyFromVersion('')
+            setConfigEditor(null)
+          }}
+          title={
+            configEditor
+              ? `Edit — ${configEditor.plugin.id} ${configEditor.plugin.version}`
+              : 'Edit'
+          }
+          size="xl"
+          centered
+        >
+          {configEditor && (
+            <ScrollArea h={560} type="scroll" offsetScrollbars>
+              <Stack gap="lg" pr="xs">
+              <Text size="sm" c="dimmed">
+                Define expected config files for this plugin. Paths are relative to the project root.
+              </Text>
 
               {configEditor.error && (
                 <Text size="sm" c="red.4">
                   {configEditor.error}
                 </Text>
               )}
+
+              <Stack gap={4}>
+                <Text size="xs" fw={600} c="dimmed">
+                  Data folder under plugins/
+                </Text>
+                <Text size="xs" c="dimmed">
+                  Folder the server uses for this plugin&apos;s files (often differs from plugin id, e.g.
+                  EssentialsX → Essentials). Leave empty to use the plugin id.
+                </Text>
+                <Group align="flex-end" gap="sm" wrap="wrap">
+                  <TextInput
+                    style={{ flex: 1, minWidth: 200 }}
+                    value={configEditor.dataFolderInput}
+                    onChange={(event) => {
+                      const value = event.currentTarget.value
+                      setConfigEditor((prev) =>
+                        prev ? { ...prev, dataFolderInput: value, touched: true } : prev,
+                      )
+                    }}
+                    placeholder={configEditor.plugin.id}
+                    disabled={configEditor.busy}
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    disabled={configEditor.busy}
+                    onClick={async () => {
+                      if (!configEditor) return
+                      const next = configEditor.dataFolderInput.trim()
+                      const prev = configEditor.plugin.dataFolder?.trim() ?? ''
+                      if (next === prev) return
+                      try {
+                        setConfigEditor((p) => (p ? { ...p, busy: true, error: null } : p))
+                        const updated = await patchLibraryPluginDataFolder(
+                          configEditor.plugin.id,
+                          configEditor.plugin.version,
+                          next.length > 0 ? next : null,
+                        )
+                        setPlugins((list) =>
+                          list.map((pl) =>
+                            pl.id === updated.id && pl.version === updated.version ? updated : pl,
+                          ),
+                        )
+                        setConfigEditor((p) =>
+                          p
+                            ? {
+                                ...p,
+                                plugin: updated,
+                                dataFolderInput: updated.dataFolder ?? '',
+                                busy: false,
+                                error: null,
+                              }
+                            : p,
+                        )
+                      } catch (err) {
+                        setConfigEditor((p) =>
+                          p
+                            ? {
+                                ...p,
+                                busy: false,
+                                error: err instanceof Error ? err.message : 'Failed to save data folder.',
+                              }
+                            : p,
+                        )
+                      }
+                    }}
+                  >
+                    Save data folder
+                  </Button>
+                </Group>
+              </Stack>
 
               {(() => {
                 const otherVersions = plugins.filter(
@@ -695,6 +748,7 @@ function PluginLibrary() {
                         drafts: (updated.configDefinitions ?? []).map((definition, index) =>
                           definitionToDraft(definition, index),
                         ),
+                        dataFolderInput: updated.dataFolder ?? '',
                         busy: false,
                         error: null,
                         touched: false,
@@ -725,6 +779,7 @@ function PluginLibrary() {
                       drafts: (plugin.configDefinitions ?? []).map((definition, index) =>
                         definitionToDraft(definition, index),
                       ),
+                      dataFolderInput: plugin.dataFolder ?? '',
                       busy: false,
                       error: null,
                       touched: false,
@@ -734,9 +789,10 @@ function PluginLibrary() {
                   Reset
                 </Button>
               </Group>
-            </Stack>
-          </ContentSection>
-        )}
+              </Stack>
+            </ScrollArea>
+          )}
+        </Modal>
       </Stack>
     </ContentSection>
   )

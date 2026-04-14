@@ -122,6 +122,9 @@ export async function upsertStoredPlugin(record: StoredPluginInput): Promise<Sto
       provider: record.provider ?? existing.provider,
       source: record.source ?? existing.source,
       configDefinitions: record.configDefinitions ?? existing.configDefinitions,
+      dataFolder: Object.prototype.hasOwnProperty.call(record, "dataFolder")
+        ? record.dataFolder
+        : existing.dataFolder,
     };
   } else {
     const created: StoredPluginRecord = {
@@ -136,6 +139,7 @@ export async function upsertStoredPlugin(record: StoredPluginInput): Promise<Sto
       artifactFileName: record.artifactFileName,
       cachedAt,
       lastUsedAt,
+      dataFolder: record.dataFolder,
       createdAt: record.createdAt ?? now,
       updatedAt: now,
       configDefinitions: record.configDefinitions ? [...record.configDefinitions] : undefined,

@@ -39,6 +39,7 @@ import {
   fetchProjects,
   fetchRuns,
   fetchProjectConfigs,
+  fetchPluginLibrary,
   listWorkspacePluginFiles,
   readWorkspacePluginFile,
   writeWorkspacePluginFile,
@@ -46,6 +47,7 @@ import {
   promoteWorkspacePluginFiles,
   type ProjectSummary,
   type RunJob,
+  type StoredPluginRecord,
   type WorkspaceFileEntry,
 } from '../lib/api'
 import { useToast } from '../components/ui'
@@ -74,18 +76,25 @@ async function collectAllFilePaths(
   return paths
 }
 
-/** Matches backend inferPluginIdFromWorkspacePath: first segment under plugins/ vs project plugin id. */
-function inferPluginIdFromWorkspacePath(
-  plugins: ProjectSummary['plugins'] | undefined,
-  path: string,
-): string | undefined {
+/** Matches backend buildWorkspacePluginFolderIndex: folder under plugins/ → project plugin id. */
+function buildWorkspaceFolderIndex(
+  projectPlugins: ProjectSummary['plugins'] | undefined,
+  libraryPlugins: StoredPluginRecord[],
+): Map<string, string> {
+  const index = new Map<string, string>()
+  for (const p of projectPlugins ?? []) {
+    if (!p.id) continue
+    const lib = libraryPlugins.find((l) => l.id === p.id && l.version === p.version)
+    const folder = (lib?.dataFolder?.trim() || p.id).toLowerCase()
+    index.set(folder, p.id)
+  }
+  return index
+}
+
+function inferPluginIdFromPathWithMap(index: Map<string, string>, path: string): string | undefined {
   const match = path.match(/^plugins\/([^/]+)/)
   if (!match) return undefined
-  const folderName = match[1]
-  const plugin = (plugins ?? []).find(
-    (p) => p.id && p.id.toLowerCase() === folderName.toLowerCase(),
-  )
-  return plugin?.id
+  return index.get(match[1].toLowerCase())
 }
 
 function LiveEditor() {
@@ -109,6 +118,7 @@ function LiveEditor() {
   const [addFileModal, setAddFileModal] = useState(false)
   const [addFileName, setAddFileName] = useState('')
   const [addFileBusy, setAddFileBusy] = useState(false)
+  const [libraryPlugins, setLibraryPlugins] = useState<StoredPluginRecord[]>([])
   const containerRef = useRef<HTMLDivElement>(null)
 
   const activeRun = useMemo(
@@ -132,6 +142,16 @@ function LiveEditor() {
       setProjectId(activeRun.projectId)
     }
   }, [activeRun, projectId])
+
+  useEffect(() => {
+    if (!projectId) {
+      setLibraryPlugins([])
+      return
+    }
+    fetchPluginLibrary()
+      .then(setLibraryPlugins)
+      .catch(() => setLibraryPlugins([]))
+  }, [projectId])
 
   const loadEntries = useCallback(async () => {
     if (!projectId) return
@@ -231,26 +251,31 @@ function LiveEditor() {
     [projects, projectId],
   )
 
+  const workspaceFolderIndex = useMemo(
+    () => buildWorkspaceFolderIndex(projectPlugins, libraryPlugins),
+    [projectPlugins, libraryPlugins],
+  )
+
   const canPromoteSelectedFile = useMemo(
     () =>
-      Boolean(selectedFile && inferPluginIdFromWorkspacePath(projectPlugins, selectedFile)),
-    [selectedFile, projectPlugins],
+      Boolean(selectedFile && inferPluginIdFromPathWithMap(workspaceFolderIndex, selectedFile)),
+    [selectedFile, workspaceFolderIndex],
   )
 
   const canPromoteFolder = useMemo(
     () =>
       breadcrumb.length > 0 &&
       Boolean(
-        inferPluginIdFromWorkspacePath(
-          projectPlugins,
+        inferPluginIdFromPathWithMap(
+          workspaceFolderIndex,
           `plugins/${breadcrumb[0]}/.placeholder`,
         ),
       ),
-    [breadcrumb, projectPlugins],
+    [breadcrumb, workspaceFolderIndex],
   )
 
   const promoteDisabledTitle =
-    'Add a project plugin whose id matches the first folder under plugins/ before promoting configs.'
+    'Add a project plugin and set its data folder in the Plugin Library if the folder under plugins/ is not the plugin id.'
 
   const { run: promoteFile, busy: promoteLoading } = useAsyncAction(
     async () => {
@@ -286,7 +311,7 @@ function LiveEditor() {
       if (!projectId || !currentFolderPath || currentFolderPath === 'plugins') return []
       const allPaths = await collectAllFilePaths(projectId, currentFolderPath, listWorkspacePluginFiles)
       const pluginMatched = allPaths.filter((p) =>
-        inferPluginIdFromWorkspacePath(projectPlugins, p),
+        inferPluginIdFromPathWithMap(workspaceFolderIndex, p),
       )
       if (allPaths.length > 0 && pluginMatched.length === 0) {
         showToast({

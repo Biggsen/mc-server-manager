@@ -1,6 +1,9 @@
 import type { StoredProject } from "../types/storage";
 import { findStoredPlugin } from "../storage/pluginsStore";
-import { inferPluginIdFromWorkspacePath } from "./workspacePluginFiles";
+import {
+  buildWorkspacePluginFolderIndex,
+  inferPluginIdFromWorkspacePathWithMap,
+} from "./workspacePluginFiles";
 import type { ConfigFileSummary } from "./configUploads";
 
 export function findPluginMappingForPath(
@@ -64,7 +67,8 @@ export async function resolvePluginIdForConfigSummary(
   if (mapped?.pluginId) {
     return mapped.pluginId;
   }
-  const fromFolder = inferPluginIdFromWorkspacePath(project, summary.path);
+  const folderIndex = await buildWorkspacePluginFolderIndex(project);
+  const fromFolder = inferPluginIdFromWorkspacePathWithMap(folderIndex, summary.path);
   if (fromFolder) {
     return fromFolder;
   }

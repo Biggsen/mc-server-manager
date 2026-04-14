@@ -10,6 +10,7 @@ import {
 import type { StoredProject } from "../types/storage";
 import { findProject } from "../storage/projectsStore";
 import { setProjectAssets } from "../storage/projectsStore";
+import { findStoredPlugin } from "../storage/pluginsStore";
 
 const WORKSPACE_ROOT = join(getRunsRoot(), "workspaces");
 
@@ -24,18 +25,37 @@ function getPluginsDir(projectId: string): string {
 
 const PLUGINS_PREFIX = "plugins/";
 
-/** First path segment under plugins/ must match a project plugin id (case-insensitive). */
-export function inferPluginIdFromWorkspacePath(
+/**
+ * Maps lowercase folder name under plugins/ → project plugin id, using each plugin's
+ * library dataFolder when set, otherwise plugin id.
+ */
+export async function buildWorkspacePluginFolderIndex(
   project: StoredProject,
+): Promise<Map<string, string>> {
+  const index = new Map<string, string>();
+  for (const p of project.plugins ?? []) {
+    if (!p.id) continue;
+    let folderName = p.id;
+    if (p.version) {
+      const stored = await findStoredPlugin(p.id, p.version);
+      const fromLib = stored?.dataFolder?.trim();
+      if (fromLib) {
+        folderName = fromLib;
+      }
+    }
+    index.set(folderName.toLowerCase(), p.id);
+  }
+  return index;
+}
+
+/** Resolve plugin id from a workspace path using a prebuilt folder index. */
+export function inferPluginIdFromWorkspacePathWithMap(
+  folderIndex: Map<string, string>,
   path: string,
 ): string | undefined {
   const match = path.match(/^plugins\/([^/]+)/);
   if (!match) return undefined;
-  const folderName = match[1];
-  const plugin = (project.plugins ?? []).find(
-    (p) => p.id && p.id.toLowerCase() === folderName.toLowerCase(),
-  );
-  return plugin?.id;
+  return folderIndex.get(match[1].toLowerCase());
 }
 
 function ensurePathUnderPlugins(path: string): string {
@@ -167,6 +187,7 @@ export async function promotePluginFiles(
     throw new Error("Project not found");
   }
 
+  const folderIndex = await buildWorkspacePluginFolderIndex(project);
   const promoted: string[] = [];
   const errors: { path: string; error: string }[] = [];
   const workspaceDir = getProjectWorkspacePath(projectId);
@@ -175,7 +196,7 @@ export async function promotePluginFiles(
   for (const path of paths) {
     try {
       const sanitized = ensurePathUnderPlugins(path);
-      const pluginId = inferPluginIdFromWorkspacePath(project, sanitized);
+      const pluginId = inferPluginIdFromWorkspacePathWithMap(folderIndex, sanitized);
       if (!pluginId) {
         const match = sanitized.match(/^plugins\/([^/]+)/);
         const folder = match?.[1] ?? "unknown";

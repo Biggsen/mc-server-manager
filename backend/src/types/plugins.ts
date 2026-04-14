@@ -69,6 +69,8 @@ export interface StoredPluginRecord {
   artifactFileName?: string;
   cachedAt?: string;
   lastUsedAt?: string;
+  /** Directory name under plugins/ for this plugin's data (omit = same as id). */
+  dataFolder?: string;
   createdAt: string;
   updatedAt: string;
   configDefinitions?: PluginConfigDefinition[];
