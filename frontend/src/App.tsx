@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { NavLink as RouterNavLink, Route, Routes, useLocation } from 'react-router-dom'
 import {
+  Cloud,
   Package,
   PencilSimpleLine,
   Plug,
@@ -40,6 +41,7 @@ import TestTools from './pages/TestTools'
 import PluginLibrary from './pages/PluginLibrary'
 import LiveEditor from './pages/LiveEditor'
 import Console from './pages/Console'
+import TeledosiServer from './pages/TeledosiServer'
 import AddPlugin from './pages/AddPlugin'
 import GenerateProfile from './pages/GenerateProfile'
 import Styleguide from './pages/Styleguide'
@@ -80,6 +82,16 @@ const NAV_SECTIONS: NavSection[] = [
         to: '/plugins',
         label: 'Plugins',
         icon: <Plug size={18} weight="fill" aria-hidden="true" />,
+      },
+    ],
+  },
+  {
+    label: 'Live Servers',
+    items: [
+      {
+        to: '/teledosi',
+        label: 'Teledosi Server',
+        icon: <Cloud size={18} weight="fill" aria-hidden="true" />,
       },
     ],
   },
@@ -286,6 +298,9 @@ function App() {
     if (location.pathname.startsWith('/console')) {
       return 'Console'
     }
+    if (location.pathname.startsWith('/teledosi')) {
+      return 'Teledosi Server'
+    }
     if (location.pathname.startsWith('/deployments')) {
       return 'Deployments'
     }
@@ -456,6 +471,7 @@ function App() {
             <Route path="/plugins" element={<PluginLibrary />} />
             <Route path="/live-editor" element={<LiveEditor />} />
             <Route path="/console" element={<Console />} />
+            <Route path="/teledosi" element={<TeledosiServer />} />
             <Route path="/plugins/add" element={<AddPlugin />} />
             {isDev && <Route path="/dev/tools" element={<TestTools />} />}
             <Route path="/deployments" element={<Deployments />} />

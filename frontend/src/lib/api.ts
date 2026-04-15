@@ -1579,3 +1579,35 @@ export async function getUploadRemoteFileGeneratorVersion(
   return data.generatorVersion
 }
 
+export type TeledosiServiceState = 'running' | 'stopped' | 'failed'
+
+export async function fetchTeledosiStatus(): Promise<{ state: TeledosiServiceState; raw: string }> {
+  return request<{ state: TeledosiServiceState; raw: string }>('/teledosi/status')
+}
+
+export async function fetchTeledosiLogs(lines?: number): Promise<{ text: string }> {
+  const q = lines != null ? `?lines=${encodeURIComponent(String(lines))}` : ''
+  return request<{ text: string }>(`/teledosi/logs${q}`)
+}
+
+export async function teledosiStart(): Promise<{ ok: boolean; output?: string }> {
+  return request<{ ok: boolean; output?: string }>('/teledosi/start', { method: 'POST' })
+}
+
+export async function teledosiStop(): Promise<{ ok: boolean; output?: string }> {
+  return request<{ ok: boolean; output?: string }>('/teledosi/stop', { method: 'POST' })
+}
+
+export async function teledosiRestart(): Promise<{ ok: boolean; output?: string }> {
+  return request<{ ok: boolean; output?: string }>('/teledosi/restart', { method: 'POST' })
+}
+
+/** Absolute or origin-relative URL for EventSource (SSE). */
+export function getTeledosiLogsStreamUrl(): string {
+  const base = getApiBase().replace(/\/$/, '')
+  if (base.startsWith('http://') || base.startsWith('https://')) {
+    return `${base}/teledosi/logs/stream`
+  }
+  return `${base}/teledosi/logs/stream`
+}
+

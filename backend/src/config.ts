@@ -1,5 +1,6 @@
 import { config as loadEnv } from "dotenv";
 import { join } from "path";
+import { readFileSync } from "fs";
 
 // In Electron mode, load .env from userData
 // In dev mode, load from project root
@@ -12,7 +13,25 @@ if (!envPath) {
   }
 }
 
-loadEnv({ path: envPath });
+const dotenvResult = loadEnv({
+  path: envPath,
+  // Electron may inherit empty TELEDOSI_* from the parent process; file must win.
+  override: process.env.ELECTRON_MODE === "true",
+});
+if (dotenvResult.error && process.env.ELECTRON_MODE === "true") {
+  console.warn(`[config] dotenv could not read ${envPath}:`, dotenvResult.error.message);
+}
+if (process.env.ELECTRON_MODE === "true" && process.env.USER_DATA_PATH) {
+  const hostLen = (process.env.TELEDOSI_SSH_HOST ?? "").trim().length;
+  const userLen = (process.env.TELEDOSI_SSH_USER ?? "").trim().length;
+  const hasSecret =
+    Boolean((process.env.TELEDOSI_SSH_PASSWORD ?? "").length) ||
+    Boolean((process.env.TELEDOSI_SSH_PRIVATE_KEY ?? "").trim().length) ||
+    Boolean((process.env.TELEDOSI_SSH_PRIVATE_KEY_PATH ?? "").trim().length);
+  console.log(
+    `[config] Teledosi env: hostLen=${hostLen} userLen=${userLen} hasPasswordOrKey=${hasSecret} (from ${envPath})`,
+  );
+}
 
 export const githubClientId = process.env.GITHUB_CLIENT_ID ?? "";
 export const githubClientSecret = process.env.GITHUB_CLIENT_SECRET ?? "";
@@ -123,4 +142,57 @@ export const maxConfigPayloadBytes =
 export function describeMaxConfigPayload(): string {
   const mb = maxConfigPayloadBytes / (1024 * 1024);
   return Number.isInteger(mb) ? `${mb} MB` : `${mb.toFixed(1)} MB`;
+}
+
+/** Remote VPS SSH (Teledosi systemd / journalctl). Password or private key required when host and user are set. */
+export const teledosiSshHost = (process.env.TELEDOSI_SSH_HOST ?? "").trim();
+const teledosiPortParsed = Number(process.env.TELEDOSI_SSH_PORT);
+export const teledosiSshPort =
+  Number.isFinite(teledosiPortParsed) && teledosiPortParsed > 0 && teledosiPortParsed < 65536
+    ? Math.floor(teledosiPortParsed)
+    : 22;
+export const teledosiSshUser = (process.env.TELEDOSI_SSH_USER ?? "").trim();
+export const teledosiSshPassword = process.env.TELEDOSI_SSH_PASSWORD ?? "";
+export const teledosiSshPrivateKeyEnv = (process.env.TELEDOSI_SSH_PRIVATE_KEY ?? "").trim();
+export const teledosiSshPrivateKeyPath = (process.env.TELEDOSI_SSH_PRIVATE_KEY_PATH ?? "").trim();
+export const teledosiSshPassphrase = process.env.TELEDOSI_SSH_PASSPHRASE ?? "";
+export const teledosiSystemdUnit =
+  (process.env.TELEDOSI_SYSTEMD_UNIT ?? "minecraft-teledosi").trim() || "minecraft-teledosi";
+const teledosiLogsMaxParsed = Number(process.env.TELEDOSI_LOGS_MAX_LINES);
+/** Server-side cap for GET /logs ?lines= */
+export const teledosiLogsMaxLines =
+  Number.isFinite(teledosiLogsMaxParsed) && teledosiLogsMaxParsed > 0
+    ? Math.min(2000, Math.floor(teledosiLogsMaxParsed))
+    : 500;
+
+const TELEDOSI_UNIT_RE = /^[A-Za-z0-9:._@-]+$/;
+
+export function isValidTeledosiSystemdUnit(name: string): boolean {
+  return TELEDOSI_UNIT_RE.test(name) && name.length > 0 && name.length <= 256;
+}
+
+export function isTeledosiConfigured(): boolean {
+  if (!teledosiSshHost || !teledosiSshUser || !isValidTeledosiSystemdUnit(teledosiSystemdUnit)) {
+    return false;
+  }
+  if (teledosiSshPrivateKeyEnv || teledosiSshPrivateKeyPath) {
+    return true;
+  }
+  return teledosiSshPassword.length > 0;
+}
+
+export const TELEDOSI_NOT_CONFIGURED_MESSAGE =
+  "Teledosi remote control is not configured. Set TELEDOSI_SSH_HOST, TELEDOSI_SSH_USER, and TELEDOSI_SSH_PASSWORD or TELEDOSI_SSH_PRIVATE_KEY / TELEDOSI_SSH_PRIVATE_KEY_PATH in the backend environment.";
+
+/**
+ * Resolved private key for SSH (env body, or file path). Throws if path is set but unreadable.
+ */
+export function getTeledosiPrivateKeyPem(): string | undefined {
+  if (teledosiSshPrivateKeyEnv) {
+    return teledosiSshPrivateKeyEnv.replace(/\\n/g, "\n");
+  }
+  if (teledosiSshPrivateKeyPath) {
+    return readFileSync(teledosiSshPrivateKeyPath, "utf8");
+  }
+  return undefined;
 }

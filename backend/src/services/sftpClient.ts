@@ -1,5 +1,6 @@
 import { Client } from "ssh2";
 import type { ProjectSftpConfig } from "../types/storage";
+import { connectSsh2 } from "./sshConnection";
 
 export interface SftpListEntry {
   name: string;
@@ -18,71 +19,12 @@ function sortEntries<T extends { name: string; type: string }>(entries: T[]): T[
   });
 }
 
-function normalizeHost(host: string): string {
-  let h = host.trim();
-  const sftpPrefix = "sftp://";
-  if (h.toLowerCase().startsWith(sftpPrefix)) {
-    h = h.slice(sftpPrefix.length);
-  }
-  const slash = h.indexOf("/");
-  if (slash !== -1) h = h.slice(0, slash);
-  return h;
-}
-
 function connectClient(config: ProjectSftpConfig, password: string): Promise<Client> {
-  return new Promise((resolve, reject) => {
-    const conn = new Client();
-    const host = normalizeHost(config.host);
-    const port = config.port ?? 22;
-    const opts: Record<string, unknown> = {
-      host,
-      port,
-      username: config.username,
-      password,
-      tryKeyboard: true,
-      readyTimeout: 20000,
-      keyboardInteractive: (
-        _name: string,
-        _inst: string,
-        _lang: string,
-        prompts: Array<{ prompt: string; echo: boolean }>,
-        finish: (responses: string[]) => void,
-      ) => {
-        finish(prompts.map(() => password));
-      },
-    };
-    if (process.env.DEBUG_SFTP === "1" || process.env.DEBUG_SFTP === "true") {
-      opts.debug = (msg: string) => console.log("[ssh2]", msg);
-    }
-    opts.algorithms = {
-      kex: [
-        "ecdh-sha2-nistp256",
-        "ecdh-sha2-nistp384",
-        "ecdh-sha2-nistp521",
-        "diffie-hellman-group-exchange-sha256",
-        "diffie-hellman-group14-sha256",
-        "diffie-hellman-group14-sha1",
-      ],
-      cipher: [
-        "aes128-ctr",
-        "aes192-ctr",
-        "aes256-ctr",
-        "aes128-gcm",
-        "aes256-gcm",
-        "aes128-gcm@openssh.com",
-        "aes256-gcm@openssh.com",
-      ],
-      serverHostKey: [
-        "ssh-ed25519",
-        "ssh-rsa",
-        "ecdsa-sha2-nistp256",
-        "ecdsa-sha2-nistp384",
-        "ecdsa-sha2-nistp521",
-      ],
-    };
-    conn.on("ready", () => resolve(conn));
-    conn.on("error", reject);
-    conn.connect(opts as Parameters<Client["connect"]>[0]);
+  return connectSsh2({
+    host: config.host,
+    port: config.port,
+    username: config.username,
+    password,
   });
 }
 
