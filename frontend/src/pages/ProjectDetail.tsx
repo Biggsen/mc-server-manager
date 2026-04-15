@@ -1566,7 +1566,14 @@ function ProjectDetail() {
       setSftpUsername('')
       setSftpRemotePath('')
     }
-  }, [activeTab, project?.sftp, project?.id])
+  }, [
+    activeTab,
+    project?.id,
+    project?.sftp?.host,
+    project?.sftp?.port,
+    project?.sftp?.username,
+    project?.sftp?.remotePath,
+  ])
 
   useEffect(() => {
     if (!id) return
