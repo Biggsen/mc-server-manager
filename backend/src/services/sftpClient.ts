@@ -86,21 +86,9 @@ function connectClient(config: ProjectSftpConfig, password: string): Promise<Cli
   });
 }
 
-function sftpReadDir(conn: Client, path: string, remoteRoot?: string): Promise<SftpListEntry[]> {
-  const normalized = path.replace(/\/+$/, "").trim() || "/";
-  const root = remoteRoot ? remoteRoot.replace(/\/+$/, "").trim() : "";
-  let readdirPath: string;
-  if (root && (normalized === root || normalized.startsWith(root + "/"))) {
-    const relative = normalized === root ? "" : normalized.slice(root.length).replace(/^\/+/, "");
-    readdirPath = relative || ".";
-  } else {
-    const isRoot =
-      normalized === "/" ||
-      normalized === "." ||
-      normalized === "/home/container" ||
-      normalized.toLowerCase() === "/home/container";
-    readdirPath = isRoot ? "." : path;
-  }
+function sftpReadDir(conn: Client, path: string): Promise<SftpListEntry[]> {
+  const normalized = path.trim().replace(/\/+$/, "") || "/";
+  const readdirPath = normalized;
   return new Promise((resolve, reject) => {
     conn.sftp((err, sftp) => {
       if (err) {
@@ -112,7 +100,7 @@ function sftpReadDir(conn: Client, path: string, remoteRoot?: string): Promise<S
           reject(readErr);
           return;
         }
-        const base = path.replace(/\/+$/, "") || "/";
+        const base = normalized;
         const entries: SftpListEntry[] = (list ?? []).map((item) => {
           const filename = typeof item.filename === "string" ? item.filename : String(item.filename);
           const isDir = (item.attrs?.mode ?? 0) & 0o040000;
@@ -225,9 +213,7 @@ export async function listRemote(
   path: string,
 ): Promise<SftpListEntry[]> {
   const dirPath = path || config.remotePath;
-  return withSftp(config, password, (conn) =>
-    sftpReadDir(conn, dirPath, config.remotePath),
-  );
+  return withSftp(config, password, (conn) => sftpReadDir(conn, dirPath));
 }
 
 export async function uploadFile(
