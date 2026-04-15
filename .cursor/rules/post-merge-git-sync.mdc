@@ -1,0 +1,13 @@
+---
+description: After merging a PR into master, sync local repo
+alwaysApply: true
+---
+
+# Post-merge: checkout master and pull
+
+After completing a merge of a branch into `master` (or when the user confirms a PR was merged on GitHub), run in this repo:
+
+1. `git checkout master`
+2. `git pull origin master` (after `git fetch` if needed)
+
+Do this so the local workspace matches `origin/master` before further work.
