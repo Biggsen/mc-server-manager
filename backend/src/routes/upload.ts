@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 import { Router } from "express";
-import { readdir, stat, unlink, mkdir } from "fs/promises";
+import { readdir, stat, mkdir, rm } from "fs/promises";
 import { join, dirname } from "path";
 import { findProject } from "../storage/projectsStore";
 import { listRemote, uploadFile, deleteRemoteFile, downloadRemoteFile, readRemoteGeneratorVersion } from "../services/sftpClient";
@@ -352,12 +352,7 @@ router.post("/delete-local", async (req: Request, res: Response) => {
       res.status(400).json({ error: "Invalid path" });
       return;
     }
-    const entry = await stat(fullPath);
-    if (!entry.isFile()) {
-      res.status(400).json({ error: "Only files can be deleted; not directories" });
-      return;
-    }
-    await unlink(fullPath);
+    await rm(fullPath, { recursive: true, force: true });
     res.json({ ok: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
