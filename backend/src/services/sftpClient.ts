@@ -1,4 +1,5 @@
 import { Client } from "ssh2";
+import type { SFTPWrapper } from "ssh2";
 import type { ProjectSftpConfig } from "../types/storage";
 import { connectSsh2 } from "./sshConnection";
 
@@ -11,6 +12,27 @@ export interface SftpListEntry {
 }
 
 const REMOTE_PEEK_BYTES = 8192;
+
+function normalizeRemoteRoot(path: string | undefined): string {
+  const normalized = (path ?? "").trim().replace(/\\/g, "/").replace(/\/+$/, "");
+  if (!normalized) return "";
+  return normalized.startsWith("/") ? normalized : `/${normalized.replace(/^\/+/, "")}`;
+}
+
+function resolveRemotePath(config: ProjectSftpConfig, inputPath: string): string {
+  const root = normalizeRemoteRoot(config.remotePath);
+  const raw = inputPath.trim().replace(/\\/g, "/");
+  if (!raw || raw === ".") {
+    return root || ".";
+  }
+  if (raw.startsWith("/")) {
+    return raw.replace(/\/+$/, "") || "/";
+  }
+  const relative = raw.replace(/^\/+/, "").replace(/\/+$/, "");
+  if (!relative) return root || ".";
+  if (!root) return relative;
+  return `${root}/${relative}`;
+}
 
 function sortEntries<T extends { name: string; type: string }>(entries: T[]): T[] {
   return [...entries].sort((a, b) => {
@@ -95,17 +117,48 @@ function sftpFastGet(conn: Client, remotePath: string, localPath: string): Promi
   });
 }
 
-function sftpUnlink(conn: Client, remotePath: string): Promise<void> {
+function sftpRemoveRecursiveSftp(sftp: SFTPWrapper, remotePath: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    sftp.unlink(remotePath, (unlinkErr) => {
+      if (!unlinkErr) {
+        resolve();
+        return;
+      }
+      sftp.readdir(remotePath, (readErr, list) => {
+        if (readErr) {
+          reject(unlinkErr);
+          return;
+        }
+        const names = (list ?? []).map((item) =>
+          typeof item.filename === "string" ? item.filename : String(item.filename),
+        );
+        const base = remotePath.replace(/\/+$/, "") || "/";
+        const childPaths = names.map((name) => (base === "/" ? `/${name}` : `${base}/${name}`));
+        (async () => {
+          for (const child of childPaths) {
+            await sftpRemoveRecursiveSftp(sftp, child);
+          }
+          await new Promise<void>((res, rej) => {
+            sftp.rmdir(remotePath, (rmdirErr) => {
+              if (rmdirErr) rej(rmdirErr);
+              else res();
+            });
+          });
+          resolve();
+        })().catch(reject);
+      });
+    });
+  });
+}
+
+function sftpRemovePath(conn: Client, remotePath: string): Promise<void> {
   return new Promise((resolve, reject) => {
     conn.sftp((err, sftp) => {
       if (err) {
         reject(err);
         return;
       }
-      sftp.unlink(remotePath, (unlinkErr) => {
-        if (unlinkErr) reject(unlinkErr);
-        else resolve();
-      });
+      sftpRemoveRecursiveSftp(sftp, remotePath).then(resolve).catch(reject);
     });
   });
 }
@@ -154,7 +207,7 @@ export async function listRemote(
   password: string,
   path: string,
 ): Promise<SftpListEntry[]> {
-  const dirPath = path || config.remotePath;
+  const dirPath = resolveRemotePath(config, path || ".");
   return withSftp(config, password, (conn) => sftpReadDir(conn, dirPath));
 }
 
@@ -164,7 +217,8 @@ export async function uploadFile(
   localPath: string,
   remotePath: string,
 ): Promise<void> {
-  return withSftp(config, password, (conn) => sftpFastPut(conn, localPath, remotePath));
+  const resolved = resolveRemotePath(config, remotePath);
+  return withSftp(config, password, (conn) => sftpFastPut(conn, localPath, resolved));
 }
 
 export async function deleteRemoteFile(
@@ -172,13 +226,8 @@ export async function deleteRemoteFile(
   password: string,
   path: string,
 ): Promise<void> {
-  const root = (config.remotePath ?? "").replace(/\/+$/, "").trim();
-  const normalized = path.replace(/\/+$/, "").trim() || "/";
-  const remoteForSftp =
-    root && (normalized === root || normalized.startsWith(root + "/"))
-      ? normalized.slice(root.length).replace(/^\/+/, "")
-      : path;
-  return withSftp(config, password, (conn) => sftpUnlink(conn, remoteForSftp));
+  const resolved = resolveRemotePath(config, path);
+  return withSftp(config, password, (conn) => sftpRemovePath(conn, resolved));
 }
 
 export async function downloadRemoteFile(
@@ -187,12 +236,7 @@ export async function downloadRemoteFile(
   remotePath: string,
   localPath: string,
 ): Promise<void> {
-  const root = (config.remotePath ?? "").replace(/\/+$/, "").trim();
-  const normalized = remotePath.replace(/\/+$/, "").trim() || "/";
-  const remoteForSftp =
-    root && (normalized === root || normalized.startsWith(root + "/"))
-      ? normalized.slice(root.length).replace(/^\/+/, "")
-      : remotePath;
+  const remoteForSftp = resolveRemotePath(config, remotePath);
   return withSftp(config, password, (conn) =>
     sftpFastGet(conn, remoteForSftp, localPath),
   );
@@ -209,12 +253,7 @@ export async function readRemoteGeneratorVersion(
   password: string,
   remotePath: string,
 ): Promise<string | undefined> {
-  const root = (config.remotePath ?? "").replace(/\/+$/, "").trim();
-  const normalized = remotePath.replace(/\/+$/, "").trim() || "/";
-  const remoteForSftp =
-    root && (normalized === root || normalized.startsWith(root + "/"))
-      ? normalized.slice(root.length).replace(/^\/+/, "") || "."
-      : remotePath;
+  const remoteForSftp = resolveRemotePath(config, remotePath);
   const bytes = await withSftp(config, password, (conn) =>
     sftpReadFileHead(conn, remoteForSftp, REMOTE_PEEK_BYTES),
   );

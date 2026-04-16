@@ -69,6 +69,13 @@ function joinPath(root: string, relative: string): string {
   return `${normalizedRoot}/${normalizedRelative}`
 }
 
+/** True if `path` is the same as `ancestor` or a path inside it (both forward-slash normalized). */
+function isSameOrInsideDirectory(ancestor: string, path: string): boolean {
+  const a = normalizePath(ancestor)
+  const p = normalizePath(path)
+  return p === a || p.startsWith(`${a}/`)
+}
+
 export default function Upload() {
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [projectId, setProjectId] = useState<string>('')
@@ -243,7 +250,6 @@ export default function Upload() {
   }
 
   const handleContextMenu = useCallback((e: React.MouseEvent, entry: UploadListEntry, panel: 'remote' | 'local') => {
-    if (entry.type !== 'file') return
     e.preventDefault()
     setContextMenu({ x: e.clientX, y: e.clientY, entry, panel })
   }, [])
@@ -272,8 +278,11 @@ export default function Upload() {
   const handleDeleteFromContextMenu = useCallback(async () => {
     if (!contextMenu || !projectId) return
     const { entry, panel } = contextMenu
-    if (entry.type !== 'file') return
-    if (!window.confirm(`Delete "${entry.name}"? This cannot be undone.`)) {
+    const isDir = entry.type === 'directory'
+    const confirmMsg = isDir
+      ? `Delete folder "${entry.name}" and everything inside it? This cannot be undone.`
+      : `Delete "${entry.name}"? This cannot be undone.`
+    if (!window.confirm(confirmMsg)) {
       setContextMenu(null)
       return
     }
@@ -286,12 +295,19 @@ export default function Upload() {
           return
         }
         await deleteUploadRemoteFile(projectId, password, entry.path)
-        toast({ variant: 'success', description: `Deleted ${entry.name} on server` })
+        toast({
+          variant: 'success',
+          description: isDir ? `Deleted folder ${entry.name} on server` : `Deleted ${entry.name} on server`,
+        })
+        if (selectedRemote && isSameOrInsideDirectory(entry.path, selectedRemote)) setSelectedRemote(null)
         loadRemote(remotePath)
       } else {
         await deleteUploadLocalFile(projectId, entry.path)
-        toast({ variant: 'success', description: `Deleted ${entry.name} locally` })
-        if (selectedLocal === entry.path) setSelectedLocal(null)
+        toast({
+          variant: 'success',
+          description: isDir ? `Deleted folder ${entry.name} locally` : `Deleted ${entry.name} locally`,
+        })
+        if (selectedLocal && isSameOrInsideDirectory(entry.path, selectedLocal)) setSelectedLocal(null)
         loadLocal()
       }
     } catch (err) {
@@ -302,7 +318,7 @@ export default function Upload() {
     } finally {
       setDeleting(false)
     }
-  }, [contextMenu, projectId, password, remotePath, selectedLocal, loadRemote, loadLocal, toast])
+  }, [contextMenu, projectId, password, remotePath, selectedLocal, selectedRemote, loadRemote, loadLocal, toast])
 
   const selectedProject = projects.find((p) => p.id === projectId)
   const remoteRootPath = selectedProject?.sftp?.remotePath ?? ''
@@ -456,12 +472,15 @@ export default function Upload() {
                     value={projectId || null}
                     onChange={(v) => {
                       setProjectId(v || '')
+                      setPassword('')
+                      setRemoteEntries([])
                       setSelectedLocal(null)
                       setSelectedLocalVersion(null)
                       setRemotePath('')
                       setLocalPath('')
                       setSelectedRemote(null)
                       setSelectedRemoteVersion(null)
+                      setError(null)
                     }}
                     data={projectsWithSftp.map((p) => ({ value: p.id, label: p.name || p.id }))}
                     clearable
