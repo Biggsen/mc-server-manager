@@ -6,6 +6,7 @@ import {
   listUploadRemote,
   getUploadLocalFileGeneratorVersion,
   getUploadRemoteFileGeneratorVersion,
+  getUploadDefaultPassword,
   uploadFileToRemote,
   downloadUploadRemoteFile,
   deleteUploadRemoteFile,
@@ -114,6 +115,24 @@ export default function Upload() {
     fetchProjectConfigs(projectId)
       .then((configs) => setProjectConfigPaths(new Set(configs.map((c) => c.path))))
       .catch(() => setProjectConfigPaths(new Set()))
+  }, [projectId])
+
+  useEffect(() => {
+    if (!projectId) return
+    let cancelled = false
+    getUploadDefaultPassword(projectId)
+      .then((nextPassword) => {
+        if (cancelled) return
+        if (typeof nextPassword === 'string' && nextPassword.length > 0) {
+          setPassword(nextPassword)
+        }
+      })
+      .catch(() => {
+        // Keep manual entry flow when no default password is available.
+      })
+    return () => {
+      cancelled = true
+    }
   }, [projectId])
 
   useEffect(() => {

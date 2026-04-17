@@ -1,7 +1,7 @@
 import { Client } from "ssh2";
 import type { SFTPWrapper } from "ssh2";
 import type { ProjectSftpConfig } from "../types/storage";
-import { connectSsh2 } from "./sshConnection";
+import { connectSsh2, type SshConnectOptions } from "./sshConnection";
 
 export interface SftpListEntry {
   name: string;
@@ -50,7 +50,7 @@ function connectClient(config: ProjectSftpConfig, password: string): Promise<Cli
   });
 }
 
-function sftpReadDir(conn: Client, path: string): Promise<SftpListEntry[]> {
+export function sftpReadDir(conn: Client, path: string): Promise<SftpListEntry[]> {
   const normalized = path.trim().replace(/\/+$/, "") || "/";
   const readdirPath = normalized;
   return new Promise((resolve, reject) => {
@@ -189,6 +189,18 @@ function sftpReadFileHead(conn: Client, remotePath: string, maxBytes: number): P
   });
 }
 
+export async function withSftpConnection<T>(
+  options: SshConnectOptions,
+  fn: (conn: Client) => Promise<T>,
+): Promise<T> {
+  const conn = await connectSsh2(options);
+  try {
+    return await fn(conn);
+  } finally {
+    conn.end();
+  }
+}
+
 export async function withSftp<T>(
   config: ProjectSftpConfig,
   password: string,
@@ -200,6 +212,98 @@ export async function withSftp<T>(
   } finally {
     conn.end();
   }
+}
+
+/** Read entire remote file up to maxBytes (SFTP). */
+export async function sftpReadFullFile(
+  conn: Client,
+  remotePath: string,
+  maxBytes: number,
+): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let position = 0;
+  return new Promise((resolve, reject) => {
+    conn.sftp((err, sftp) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      sftp.open(remotePath, "r", (openErr, handle) => {
+        if (openErr) {
+          reject(openErr);
+          return;
+        }
+        const readNext = (): void => {
+          const remaining = maxBytes - position;
+          if (remaining <= 0) {
+            sftp.close(handle, () => {
+              resolve(Buffer.concat(chunks));
+            });
+            return;
+          }
+          const buf = Buffer.alloc(Math.min(65536, remaining));
+          sftp.read(handle, buf, 0, buf.length, position, (readErr, bytesRead) => {
+            if (readErr) {
+              sftp.close(handle, () => {
+                reject(readErr);
+              });
+              return;
+            }
+            if (!bytesRead) {
+              sftp.close(handle, () => {
+                resolve(Buffer.concat(chunks));
+              });
+              return;
+            }
+            chunks.push(buf.subarray(0, bytesRead));
+            position += bytesRead;
+            readNext();
+          });
+        };
+        readNext();
+      });
+    });
+  });
+}
+
+/** Replace remote file contents (SFTP). */
+export async function sftpWriteFullFile(conn: Client, remotePath: string, data: Buffer): Promise<void> {
+  return new Promise((resolve, reject) => {
+    conn.sftp((err, sftp) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      sftp.open(remotePath, "w", (openErr, handle) => {
+        if (openErr) {
+          reject(openErr);
+          return;
+        }
+        let offset = 0;
+        const writeNext = (): void => {
+          if (offset >= data.length) {
+            sftp.close(handle, (closeErr) => {
+              if (closeErr) reject(closeErr);
+              else resolve();
+            });
+            return;
+          }
+          const slice = data.subarray(offset, Math.min(offset + 65536, data.length));
+          sftp.write(handle, slice, 0, slice.length, offset, (writeErr) => {
+            if (writeErr) {
+              sftp.close(handle, () => {
+                reject(writeErr);
+              });
+              return;
+            }
+            offset += slice.length;
+            writeNext();
+          });
+        };
+        writeNext();
+      });
+    });
+  });
 }
 
 export async function listRemote(

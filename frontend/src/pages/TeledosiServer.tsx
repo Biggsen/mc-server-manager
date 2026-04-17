@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   ArrowClockwise,
   Cloud,
@@ -45,6 +46,7 @@ function stateLabel(state: TeledosiServiceState): string {
 }
 
 export default function TeledosiServer() {
+  const navigate = useNavigate()
   const [configured, setConfigured] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [status, setStatus] = useState<TeledosiServiceState | null>(null)
@@ -189,10 +191,16 @@ export default function TeledosiServer() {
               </Badge>
             )}
           </Group>
-          <Text c="dimmed" size="sm">
-            Remote systemd control and journal logs (separate from file upload). Configure{' '}
-            <Code>TELEDOSI_*</Code> in the backend environment.
-          </Text>
+          {configured && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => navigate('/teledosi/files')}
+              styles={{ root: { alignSelf: 'flex-start', width: 'fit-content' } }}
+            >
+              Edit files
+            </Button>
+          )}
           {statusRaw && (
             <Text size="xs" c="dimmed" ff="monospace">
               systemctl: {statusRaw}
@@ -294,11 +302,6 @@ export default function TeledosiServer() {
                 Restart
               </Button>
             </Group>
-
-            <Text size="xs" c="dimmed" mt="md">
-              Minecraft console commands (RCON) are not wired here yet—this panel is systemd +
-              journal only, like a slim server host—not a mind-reading pickaxe.
-            </Text>
           </>
         )}
       </ContentSection>

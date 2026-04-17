@@ -4,8 +4,17 @@ import { readdir, stat, mkdir, rm } from "fs/promises";
 import { join, dirname } from "path";
 import { findProject } from "../storage/projectsStore";
 import { listRemote, uploadFile, deleteRemoteFile, downloadRemoteFile, readRemoteGeneratorVersion } from "../services/sftpClient";
-import { getRunsRoot } from "../config";
+import {
+  getRunsRoot,
+  teledosiSftpPassword,
+  teledosiSshHost,
+  teledosiSshPassword,
+  teledosiSshPort,
+  teledosiSshUser,
+} from "../config";
 import { readGeneratorVersionFromFile } from "../services/configUploads";
+import { normalizeSshHost } from "../services/sshConnection";
+import type { StoredProject } from "../types/storage";
 
 const router = Router();
 const WORKSPACE_ROOT = join(getRunsRoot(), "workspaces");
@@ -32,6 +41,40 @@ function formatSftpError(error: unknown): string {
   }
   return String(error);
 }
+
+function isProjectTeledosiTarget(project: StoredProject): boolean {
+  const sftp = project.sftp;
+  if (!sftp) return false;
+  const projectHost = normalizeSshHost(sftp.host).toLowerCase();
+  const teledosiHost = normalizeSshHost(teledosiSshHost).toLowerCase();
+  if (!projectHost || !teledosiHost || projectHost !== teledosiHost) return false;
+  const projectUser = (sftp.username ?? "").trim().toLowerCase();
+  const teledosiUser = (teledosiSshUser ?? "").trim().toLowerCase();
+  if (!projectUser || !teledosiUser || projectUser !== teledosiUser) return false;
+  const projectPort = sftp.port ?? 22;
+  return projectPort === teledosiSshPort;
+}
+
+router.get("/default-password", async (req: Request, res: Response) => {
+  try {
+    const projectId = typeof req.query.projectId === "string" ? req.query.projectId : "";
+    if (!projectId) {
+      res.status(400).json({ error: "projectId is required" });
+      return;
+    }
+    const project = await findProject(projectId);
+    if (!project?.sftp || !isProjectTeledosiTarget(project)) {
+      res.json({ password: null });
+      return;
+    }
+    const password = (teledosiSftpPassword || teledosiSshPassword || "").trim();
+    res.json({ password: password || null });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("Upload default-password error", error);
+    res.status(500).json({ error: message });
+  }
+});
 
 router.post("/list-remote", async (req: Request, res: Response) => {
   try {
