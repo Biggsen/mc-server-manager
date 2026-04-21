@@ -258,6 +258,14 @@ function defaultLabelFromConfigPath(path: string): string {
   return dot > 0 ? base.slice(0, dot) : base
 }
 
+function formatDiffLimitBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  const kb = bytes / 1024
+  if (kb < 1024) return `${kb.toFixed(kb >= 10 ? 0 : 1)} KB`
+  const mb = kb / 1024
+  return `${mb.toFixed(mb >= 10 ? 0 : 1)} MB`
+}
+
 /** Default backend limit (see MCSM_MAX_CONFIG_PAYLOAD_MB); used for editor warnings only. */
 const CONFIG_EDITOR_JSON_SAVE_LIMIT_BYTES = 32 * 1024 * 1024
 
@@ -5298,6 +5306,10 @@ useEffect(() => {
             selectedConfigDiff.oldBinary || selectedConfigDiff.newBinary ? (
               <Text size="sm" c="dimmed">
                 This file looks binary in one of the builds, so text diff is not available.
+              </Text>
+            ) : selectedConfigDiff.oldTooLarge || selectedConfigDiff.newTooLarge ? (
+              <Text size="sm" c="dimmed">
+                This file is too large to diff inline (limit {formatDiffLimitBytes(selectedConfigDiff.maxDiffBytes)}).
               </Text>
             ) : selectedConfigDiff.oldMissing || selectedConfigDiff.newMissing ? (
               <Text size="sm" c="dimmed">

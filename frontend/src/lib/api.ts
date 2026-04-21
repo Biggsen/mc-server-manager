@@ -522,6 +522,9 @@ export interface BuildConfigDiff {
   newMissing: boolean
   oldBinary: boolean
   newBinary: boolean
+  oldTooLarge: boolean
+  newTooLarge: boolean
+  maxDiffBytes: number
 }
 
 export async function fetchBuildConfigDiff(

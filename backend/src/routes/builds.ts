@@ -13,6 +13,8 @@ interface ManifestConfigEntry {
   sha256: string | undefined;
 }
 
+const MAX_TEXT_DIFF_BYTES = 512 * 1024;
+
 function normalizeManifestConfigs(raw: unknown): ManifestConfigEntry[] {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
   const maybeConfigs = (raw as Record<string, unknown>).configs;
@@ -48,6 +50,9 @@ function readZipEntryAsText(zipPath: string, entryPath: string): { content: stri
   const data = entry.getData();
   if (isLikelyBinary(data)) {
     return { content: null, missing: false, binary: true };
+  }
+  if (data.length > MAX_TEXT_DIFF_BYTES) {
+    return { content: null, missing: false, binary: false };
   }
   return { content: data.toString("utf-8"), missing: false, binary: false };
 }
@@ -127,6 +132,8 @@ router.get("/:olderId/config-diff/:newerId", async (req: Request, res: Response)
 
     const oldFile = readZipEntryAsText(olderBuild.artifactPath, path);
     const newFile = readZipEntryAsText(newerBuild.artifactPath, path);
+    const oldTooLarge = !oldFile.missing && !oldFile.binary && oldFile.content === null;
+    const newTooLarge = !newFile.missing && !newFile.binary && newFile.content === null;
 
     res.json({
       diff: {
@@ -139,6 +146,9 @@ router.get("/:olderId/config-diff/:newerId", async (req: Request, res: Response)
         newMissing: newFile.missing,
         oldBinary: oldFile.binary,
         newBinary: newFile.binary,
+        oldTooLarge,
+        newTooLarge,
+        maxDiffBytes: MAX_TEXT_DIFF_BYTES,
       },
     });
   } catch (error) {
