@@ -5,6 +5,7 @@ import {
   TELEDOSI_NOT_CONFIGURED_MESSAGE,
   isTeledosiConfigured,
   isTeledosiFilesConfigured,
+  isTeledosiSshConfigured,
   teledosiFilesMaxBytes,
   teledosiSftpRemoteRoot,
 } from "../config";
@@ -164,14 +165,15 @@ router.get("/logs/stream", async (req: Request, res: Response) => {
 });
 
 router.get("/files/config", (_req: Request, res: Response) => {
-  if (notConfigured(res)) return;
   res.json({
     filesConfigured: isTeledosiFilesConfigured(),
     remoteRoot: isTeledosiFilesConfigured() ? teledosiSftpRemoteRoot : undefined,
     maxBytes: teledosiFilesMaxBytes,
     hint: isTeledosiFilesConfigured()
       ? undefined
-      : TELEDOSI_FILES_NOT_CONFIGURED_MESSAGE,
+      : isTeledosiSshConfigured()
+        ? TELEDOSI_FILES_NOT_CONFIGURED_MESSAGE
+        : TELEDOSI_NOT_CONFIGURED_MESSAGE,
   });
 });
 
@@ -179,12 +181,15 @@ function filesNotReady(res: Response): boolean {
   if (isTeledosiFilesConfigured()) {
     return false;
   }
-  res.status(503).json({ error: TELEDOSI_FILES_NOT_CONFIGURED_MESSAGE });
+  res.status(503).json({
+    error: isTeledosiSshConfigured()
+      ? TELEDOSI_FILES_NOT_CONFIGURED_MESSAGE
+      : TELEDOSI_NOT_CONFIGURED_MESSAGE,
+  });
   return true;
 }
 
 router.get("/files/list", async (req: Request, res: Response) => {
-  if (notConfigured(res)) return;
   if (filesNotReady(res)) return;
   const pathParam = typeof req.query.path === "string" ? req.query.path : "";
   try {
@@ -197,7 +202,6 @@ router.get("/files/list", async (req: Request, res: Response) => {
 });
 
 router.get("/files/read", async (req: Request, res: Response) => {
-  if (notConfigured(res)) return;
   if (filesNotReady(res)) return;
   const pathParam = typeof req.query.path === "string" ? req.query.path : "";
   if (!pathParam.trim()) {
@@ -218,7 +222,6 @@ router.get("/files/read", async (req: Request, res: Response) => {
 });
 
 router.put("/files/write", async (req: Request, res: Response) => {
-  if (notConfigured(res)) return;
   if (filesNotReady(res)) return;
   const body = req.body ?? {};
   const pathParam = typeof body.path === "string" ? body.path : "";
