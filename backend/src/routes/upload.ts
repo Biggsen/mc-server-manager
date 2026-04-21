@@ -4,8 +4,17 @@ import { readdir, stat, mkdir, rm } from "fs/promises";
 import { join, dirname } from "path";
 import { findProject } from "../storage/projectsStore";
 import { listRemote, uploadFile, deleteRemoteFile, downloadRemoteFile, readRemoteGeneratorVersion } from "../services/sftpClient";
-import { getRunsRoot } from "../config";
+import {
+  getRunsRoot,
+  teledosiSftpPassword,
+  teledosiSshHost,
+  teledosiSshPassword,
+  teledosiSshPort,
+  teledosiSshUser,
+} from "../config";
 import { readGeneratorVersionFromFile } from "../services/configUploads";
+import { normalizeSshHost } from "../services/sshConnection";
+import type { StoredProject } from "../types/storage";
 
 const router = Router();
 const WORKSPACE_ROOT = join(getRunsRoot(), "workspaces");
@@ -33,11 +42,60 @@ function formatSftpError(error: unknown): string {
   return String(error);
 }
 
+function isProjectTeledosiTarget(project: StoredProject): boolean {
+  const sftp = project.sftp;
+  if (!sftp) return false;
+  const projectHost = normalizeSshHost(sftp.host).toLowerCase();
+  const teledosiHost = normalizeSshHost(teledosiSshHost).toLowerCase();
+  if (!projectHost || !teledosiHost || projectHost !== teledosiHost) return false;
+  const projectUser = (sftp.username ?? "").trim().toLowerCase();
+  const teledosiUser = (teledosiSshUser ?? "").trim().toLowerCase();
+  if (!projectUser || !teledosiUser || projectUser !== teledosiUser) return false;
+  const projectPort = sftp.port ?? 22;
+  return projectPort === teledosiSshPort;
+}
+
+function resolveUploadPassword(project: StoredProject, providedRaw: unknown): string | null {
+  const provided =
+    typeof providedRaw === "string"
+      ? providedRaw.trim()
+      : "";
+  if (provided.length > 0) {
+    return provided;
+  }
+  if (!isProjectTeledosiTarget(project)) {
+    return null;
+  }
+  const fallback = (teledosiSftpPassword || teledosiSshPassword || "").trim();
+  return fallback.length > 0 ? fallback : null;
+}
+
+router.get("/default-password-available", async (req: Request, res: Response) => {
+  try {
+    const projectId = typeof req.query.projectId === "string" ? req.query.projectId : "";
+    if (!projectId) {
+      res.status(400).json({ error: "projectId is required" });
+      return;
+    }
+    const project = await findProject(projectId);
+    if (!project?.sftp || !isProjectTeledosiTarget(project)) {
+      res.json({ available: false });
+      return;
+    }
+    const hasDefault = (teledosiSftpPassword || teledosiSshPassword || "").trim().length > 0;
+    res.json({ available: hasDefault });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("Upload default-password-available error", error);
+    res.status(500).json({ error: message });
+  }
+});
+
 router.post("/list-remote", async (req: Request, res: Response) => {
   try {
     const { projectId, password, path: pathParam } = req.body ?? {};
-    if (!projectId || typeof projectId !== "string" || !password || typeof password !== "string") {
-      res.status(400).json({ error: "projectId and password are required" });
+    if (!projectId || typeof projectId !== "string") {
+      res.status(400).json({ error: "projectId is required" });
       return;
     }
     const project = await findProject(projectId);
@@ -45,10 +103,15 @@ router.post("/list-remote", async (req: Request, res: Response) => {
       res.status(400).json({ error: "Project has no SFTP config; set it in Project Settings" });
       return;
     }
+    const resolvedPassword = resolveUploadPassword(project, password);
+    if (!resolvedPassword) {
+      res.status(400).json({ error: "SFTP password is required" });
+      return;
+    }
     const path = typeof pathParam === "string" && pathParam.trim()
       ? pathParam.trim()
       : project.sftp.remotePath;
-    const entries = await listRemote(project.sftp, password, path);
+    const entries = await listRemote(project.sftp, resolvedPassword, path);
     res.json({ entries });
   } catch (error) {
     const detail = formatSftpError(error);
@@ -157,12 +220,10 @@ router.post("/file-version-remote", async (req: Request, res: Response) => {
     if (
       !projectId ||
       typeof projectId !== "string" ||
-      !password ||
-      typeof password !== "string" ||
       !pathParam ||
       typeof pathParam !== "string"
     ) {
-      res.status(400).json({ error: "projectId, password, and path are required" });
+      res.status(400).json({ error: "projectId and path are required" });
       return;
     }
     const project = await findProject(projectId);
@@ -170,8 +231,13 @@ router.post("/file-version-remote", async (req: Request, res: Response) => {
       res.status(400).json({ error: "Project has no SFTP config; set it in Project Settings" });
       return;
     }
+    const resolvedPassword = resolveUploadPassword(project, password);
+    if (!resolvedPassword) {
+      res.status(400).json({ error: "SFTP password is required" });
+      return;
+    }
     const path = pathParam.trim().replace(/\\/g, "/");
-    const generatorVersion = await readRemoteGeneratorVersion(project.sftp, password, path);
+    const generatorVersion = await readRemoteGeneratorVersion(project.sftp, resolvedPassword, path);
     res.json({ path, generatorVersion: generatorVersion ?? null });
   } catch (error) {
     const detail = formatSftpError(error);
@@ -193,19 +259,22 @@ router.post("/upload", async (req: Request, res: Response) => {
     if (
       !projectId ||
       typeof projectId !== "string" ||
-      !password ||
-      typeof password !== "string" ||
       !localPath ||
       typeof localPath !== "string" ||
       !remotePath ||
       typeof remotePath !== "string"
     ) {
-      res.status(400).json({ error: "projectId, password, localPath, and remotePath are required" });
+      res.status(400).json({ error: "projectId, localPath, and remotePath are required" });
       return;
     }
     const project = await findProject(projectId);
     if (!project?.sftp) {
       res.status(400).json({ error: "Project has no SFTP config" });
+      return;
+    }
+    const resolvedPassword = resolveUploadPassword(project, password);
+    if (!resolvedPassword) {
+      res.status(400).json({ error: "SFTP password is required" });
       return;
     }
     const sanitizedLocal = sanitizeRelativePath(localPath);
@@ -225,7 +294,7 @@ router.post("/upload", async (req: Request, res: Response) => {
       root && (fullRemotePath === root || fullRemotePath.startsWith(root + "/"))
         ? fullRemotePath.slice(root.length).replace(/^\/+/, "") || "."
         : fullRemotePath;
-    await uploadFile(project.sftp, password, fullLocalPath, remoteForSftp);
+    await uploadFile(project.sftp, resolvedPassword, fullLocalPath, remoteForSftp);
     res.json({ ok: true });
   } catch (error) {
     const detail = formatSftpError(error);
@@ -248,17 +317,20 @@ router.post("/download", async (req: Request, res: Response) => {
     if (
       !projectId ||
       typeof projectId !== "string" ||
-      !password ||
-      typeof password !== "string" ||
       !remotePath ||
       typeof remotePath !== "string"
     ) {
-      res.status(400).json({ error: "projectId, password, and remotePath are required" });
+      res.status(400).json({ error: "projectId and remotePath are required" });
       return;
     }
     const project = await findProject(projectId);
     if (!project?.sftp) {
       res.status(400).json({ error: "Project has no SFTP config" });
+      return;
+    }
+    const resolvedPassword = resolveUploadPassword(project, password);
+    if (!resolvedPassword) {
+      res.status(400).json({ error: "SFTP password is required" });
       return;
     }
     const name = remotePath.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? "download";
@@ -278,7 +350,7 @@ router.post("/download", async (req: Request, res: Response) => {
       return;
     }
     await mkdir(dirname(fullLocalPath), { recursive: true });
-    await downloadRemoteFile(project.sftp, password, remotePath.trim().replace(/\\/g, "/"), fullLocalPath);
+    await downloadRemoteFile(project.sftp, resolvedPassword, remotePath.trim().replace(/\\/g, "/"), fullLocalPath);
     res.json({ ok: true });
   } catch (error) {
     const detail = formatSftpError(error);
@@ -300,12 +372,10 @@ router.post("/delete-remote", async (req: Request, res: Response) => {
     if (
       !projectId ||
       typeof projectId !== "string" ||
-      !password ||
-      typeof password !== "string" ||
       !pathParam ||
       typeof pathParam !== "string"
     ) {
-      res.status(400).json({ error: "projectId, password, and path are required" });
+      res.status(400).json({ error: "projectId and path are required" });
       return;
     }
     const project = await findProject(projectId);
@@ -313,8 +383,13 @@ router.post("/delete-remote", async (req: Request, res: Response) => {
       res.status(400).json({ error: "Project has no SFTP config" });
       return;
     }
+    const resolvedPassword = resolveUploadPassword(project, password);
+    if (!resolvedPassword) {
+      res.status(400).json({ error: "SFTP password is required" });
+      return;
+    }
     const path = pathParam.trim().replace(/\\/g, "/");
-    await deleteRemoteFile(project.sftp, password, path);
+    await deleteRemoteFile(project.sftp, resolvedPassword, path);
     res.json({ ok: true });
   } catch (error) {
     const detail = formatSftpError(error);

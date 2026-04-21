@@ -171,14 +171,23 @@ export function isValidTeledosiSystemdUnit(name: string): boolean {
   return TELEDOSI_UNIT_RE.test(name) && name.length > 0 && name.length <= 256;
 }
 
-export function isTeledosiConfigured(): boolean {
-  if (!teledosiSshHost || !teledosiSshUser || !isValidTeledosiSystemdUnit(teledosiSystemdUnit)) {
+/** SSH host/user/auth only (no systemd unit requirement). */
+export function isTeledosiSshConfigured(): boolean {
+  if (!teledosiSshHost || !teledosiSshUser) {
     return false;
   }
   if (teledosiSshPrivateKeyEnv || teledosiSshPrivateKeyPath) {
     return true;
   }
   return teledosiSshPassword.length > 0;
+}
+
+/** Remote control readiness (includes valid systemd unit). */
+export function isTeledosiConfigured(): boolean {
+  if (!isTeledosiSshConfigured() || !isValidTeledosiSystemdUnit(teledosiSystemdUnit)) {
+    return false;
+  }
+  return true;
 }
 
 export const TELEDOSI_NOT_CONFIGURED_MESSAGE =
@@ -196,3 +205,35 @@ export function getTeledosiPrivateKeyPem(): string | undefined {
   }
   return undefined;
 }
+
+/**
+ * Absolute directory on the Teledosi VPS for SFTP file browser/editor (same SSH host as TELEDOSI_SSH_*).
+ * Use the same path you set for project SFTP "remote path" in Upload, e.g. /home/mc/server
+ */
+export const teledosiSftpRemoteRoot = (process.env.TELEDOSI_SFTP_REMOTE_ROOT ?? "").trim();
+
+/**
+ * Optional SFTP password when it differs from TELEDOSI_SSH_PASSWORD (ignored when authenticating with a private key).
+ */
+export const teledosiSftpPassword = process.env.TELEDOSI_SFTP_PASSWORD ?? "";
+
+const teledosiFilesMaxParsed = Number(process.env.TELEDOSI_FILES_MAX_BYTES);
+/** Max bytes for read/write of a single file via Teledosi file editor. Default 8 MiB, cap 32 MiB. */
+export const teledosiFilesMaxBytes =
+  Number.isFinite(teledosiFilesMaxParsed) && teledosiFilesMaxParsed > 0
+    ? Math.min(32 * 1024 * 1024, Math.floor(teledosiFilesMaxParsed))
+    : 8 * 1024 * 1024;
+
+export function isTeledosiFilesConfigured(): boolean {
+  if (!isTeledosiSshConfigured()) {
+    return false;
+  }
+  const root = teledosiSftpRemoteRoot;
+  if (!root.startsWith("/") || root === "/") {
+    return false;
+  }
+  return true;
+}
+
+export const TELEDOSI_FILES_NOT_CONFIGURED_MESSAGE =
+  "Teledosi remote files are not configured. Set TELEDOSI_SFTP_REMOTE_ROOT to an absolute directory on the VPS (for example the SFTP remote path you use on the Upload page), then restart the backend.";
