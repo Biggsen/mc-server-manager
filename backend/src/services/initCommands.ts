@@ -25,11 +25,7 @@ export async function shouldExecuteInitCommands(
   try {
     const content = await readFile(markerPath, "utf-8");
     const marker = JSON.parse(content) as InitializationMarker;
-    if (!marker || typeof marker.initializedAt !== "string") {
-      return true;
-    }
-    void currentBuildId;
-    return false;
+    return marker.buildId !== currentBuildId;
   } catch {
     return true;
   }

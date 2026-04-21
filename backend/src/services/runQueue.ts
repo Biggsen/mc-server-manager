@@ -455,7 +455,7 @@ async function executeInitCommandsIfNeeded(job: RunJob): Promise<void> {
   try {
     const shouldExecute = await shouldExecuteInitCommands(job.workspacePath, job.buildId);
     if (!shouldExecute) {
-      appendLog(job, "system", "Init commands already executed; skipping.");
+      appendLog(job, "system", "Init commands already executed for this build; skipping.");
       initCommandsExecuted.add(job.id);
       return;
     }
