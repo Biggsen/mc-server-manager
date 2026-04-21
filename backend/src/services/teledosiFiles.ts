@@ -1,12 +1,11 @@
 import type { SshConnectOptions } from "./sshConnection";
 import {
-  isTeledosiConfigured,
   isTeledosiFilesConfigured,
   teledosiFilesMaxBytes,
   teledosiSftpPassword,
   teledosiSftpRemoteRoot,
 } from "../config";
-import { getTeledosiSshOptions } from "./teledosiRemote";
+import { getTeledosiBaseSshOptions } from "./teledosiRemote";
 import {
   sftpReadDir,
   sftpReadFullFile,
@@ -15,13 +14,20 @@ import {
   type SftpListEntry,
 } from "./sftpClient";
 
+export class TeledosiFileTooLargeError extends Error {
+  constructor(public readonly maxBytes: number) {
+    super(`File exceeds maximum size (${maxBytes} bytes)`);
+    this.name = "TeledosiFileTooLargeError";
+  }
+}
+
 function normalizeRoot(root: string): string {
   return root.trim().replace(/\/+$/, "") || "/";
 }
 
 /** SFTP auth: same key as SSH, or password from TELEDOSI_SFTP_PASSWORD / TELEDOSI_SSH_PASSWORD. */
 export function getTeledosiFilesSshOptions(): SshConnectOptions {
-  const o = getTeledosiSshOptions();
+  const o = getTeledosiBaseSshOptions();
   if (o.privateKey) {
     return o;
   }
@@ -30,9 +36,6 @@ export function getTeledosiFilesSshOptions(): SshConnectOptions {
 }
 
 function assertFilesConfigured(): void {
-  if (!isTeledosiConfigured()) {
-    throw new Error("Teledosi is not configured");
-  }
   if (!isTeledosiFilesConfigured()) {
     throw new Error("Teledosi files root is not configured");
   }
@@ -86,7 +89,12 @@ export async function teledosiFilesRead(relPath: string): Promise<{ content: str
   assertFilesConfigured();
   const abs = teledosiAbsoluteFromRelative(relPath);
   const options = getTeledosiFilesSshOptions();
-  const buf = await withSftpConnection(options, (conn) => sftpReadFullFile(conn, abs, teledosiFilesMaxBytes));
+  const { buffer: buf, truncated } = await withSftpConnection(options, (conn) =>
+    sftpReadFullFile(conn, abs, teledosiFilesMaxBytes),
+  );
+  if (truncated) {
+    throw new TeledosiFileTooLargeError(teledosiFilesMaxBytes);
+  }
   if (buf.includes(0)) {
     return { content: "", isBinary: true };
   }

@@ -17,6 +17,7 @@ import {
 } from "../services/teledosiRemote";
 import {
   teledosiFilesList,
+  TeledosiFileTooLargeError,
   teledosiFilesRead,
   teledosiFilesWrite,
 } from "../services/teledosiFiles";
@@ -208,6 +209,10 @@ router.get("/files/read", async (req: Request, res: Response) => {
     res.json({ path: pathParam, content, isBinary });
   } catch (error) {
     console.error("Teledosi files read error", error);
+    if (error instanceof TeledosiFileTooLargeError) {
+      res.status(413).json({ error: error.message });
+      return;
+    }
     res.status(502).json({ error: formatError(error) });
   }
 });

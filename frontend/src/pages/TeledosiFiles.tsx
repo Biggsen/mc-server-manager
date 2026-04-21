@@ -50,6 +50,7 @@ export default function TeledosiFiles() {
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
   const [fileContent, setFileContent] = useState('')
   const [fileIsBinary, setFileIsBinary] = useState(false)
+  const [fileLoadError, setFileLoadError] = useState<string | null>(null)
   const [contentDirty, setContentDirty] = useState(false)
   const [fileLoading, setFileLoading] = useState(false)
   const [panelWidth, setPanelWidth] = useState(320)
@@ -118,16 +119,19 @@ export default function TeledosiFiles() {
       setFileLoading(true)
       setSelectedFile(relPath)
       setContentDirty(false)
+      setFileLoadError(null)
       try {
         const { content, isBinary } = await fetchTeledosiFileRead(relPath)
         setFileContent(content)
         setFileIsBinary(isBinary)
       } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error'
         showToast({
           title: 'Failed to load file',
-          description: err instanceof Error ? err.message : 'Unknown error',
+          description: message,
           variant: 'danger',
         })
+        setFileLoadError(message)
         setFileContent('')
         setFileIsBinary(false)
       } finally {
@@ -164,6 +168,7 @@ export default function TeledosiFiles() {
         setBreadcrumb((prev) => [...prev, entry.name])
         setSelectedFile(null)
         setFileContent('')
+        setFileLoadError(null)
         setContentDirty(false)
       } else {
         void loadFile(entry.relativePath)
@@ -176,6 +181,7 @@ export default function TeledosiFiles() {
     setBreadcrumb((prev) => prev.slice(0, index + 1))
     setSelectedFile(null)
     setFileContent('')
+    setFileLoadError(null)
     setContentDirty(false)
   }, [])
 
@@ -387,6 +393,8 @@ export default function TeledosiFiles() {
                   <MantineLoader size="sm" />
                   <Text size="sm">Loading file…</Text>
                 </Group>
+              ) : fileLoadError ? (
+                <Alert color="yellow">{fileLoadError}</Alert>
               ) : fileIsBinary ? (
                 <Alert color="gray">This file looks binary and cannot be edited as text here.</Alert>
               ) : (

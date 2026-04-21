@@ -1517,12 +1517,12 @@ export interface UploadListEntry {
 
 export async function listUploadRemote(
   projectId: string,
-  password: string,
+  password?: string,
   path?: string,
 ): Promise<UploadListEntry[]> {
   const data = await request<{ entries: UploadListEntry[] }>('/upload/list-remote', {
     method: 'POST',
-    body: JSON.stringify({ projectId, password, path: path ?? undefined }),
+    body: JSON.stringify({ projectId, password: password ?? undefined, path: path ?? undefined }),
   })
   return data.entries
 }
@@ -1537,44 +1537,44 @@ export async function listUploadLocal(
   return data.entries
 }
 
-export async function getUploadDefaultPassword(projectId: string): Promise<string | null> {
+export async function getUploadDefaultPasswordAvailable(projectId: string): Promise<boolean> {
   const q = new URLSearchParams({ projectId })
-  const data = await request<{ password: string | null }>(`/upload/default-password?${q}`)
-  return data.password
+  const data = await request<{ available: boolean }>(`/upload/default-password-available?${q}`)
+  return data.available
 }
 
 export async function uploadFileToRemote(
   projectId: string,
-  password: string,
+  password: string | undefined,
   localPath: string,
   remotePath: string,
 ): Promise<void> {
   await request<{ ok: boolean }>('/upload/upload', {
     method: 'POST',
-    body: JSON.stringify({ projectId, password, localPath, remotePath }),
+    body: JSON.stringify({ projectId, password: password ?? undefined, localPath, remotePath }),
   })
 }
 
 export async function downloadUploadRemoteFile(
   projectId: string,
-  password: string,
+  password: string | undefined,
   remotePath: string,
   localPath: string,
 ): Promise<void> {
   await request<{ ok: boolean }>('/upload/download', {
     method: 'POST',
-    body: JSON.stringify({ projectId, password, remotePath, localPath }),
+    body: JSON.stringify({ projectId, password: password ?? undefined, remotePath, localPath }),
   })
 }
 
 export async function deleteUploadRemoteFile(
   projectId: string,
-  password: string,
+  password: string | undefined,
   path: string,
 ): Promise<void> {
   await request<{ ok: boolean }>('/upload/delete-remote', {
     method: 'POST',
-    body: JSON.stringify({ projectId, password, path }),
+    body: JSON.stringify({ projectId, password: password ?? undefined, path }),
   })
 }
 
@@ -1599,12 +1599,12 @@ export async function getUploadLocalFileGeneratorVersion(
 
 export async function getUploadRemoteFileGeneratorVersion(
   projectId: string,
-  password: string,
+  password: string | undefined,
   path: string,
 ): Promise<string | null> {
   const data = await request<{ path: string; generatorVersion: string | null }>('/upload/file-version-remote', {
     method: 'POST',
-    body: JSON.stringify({ projectId, password, path }),
+    body: JSON.stringify({ projectId, password: password ?? undefined, path }),
   })
   return data.generatorVersion
 }

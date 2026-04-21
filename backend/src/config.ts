@@ -171,14 +171,23 @@ export function isValidTeledosiSystemdUnit(name: string): boolean {
   return TELEDOSI_UNIT_RE.test(name) && name.length > 0 && name.length <= 256;
 }
 
-export function isTeledosiConfigured(): boolean {
-  if (!teledosiSshHost || !teledosiSshUser || !isValidTeledosiSystemdUnit(teledosiSystemdUnit)) {
+/** SSH host/user/auth only (no systemd unit requirement). */
+export function isTeledosiSshConfigured(): boolean {
+  if (!teledosiSshHost || !teledosiSshUser) {
     return false;
   }
   if (teledosiSshPrivateKeyEnv || teledosiSshPrivateKeyPath) {
     return true;
   }
   return teledosiSshPassword.length > 0;
+}
+
+/** Remote control readiness (includes valid systemd unit). */
+export function isTeledosiConfigured(): boolean {
+  if (!isTeledosiSshConfigured() || !isValidTeledosiSystemdUnit(teledosiSystemdUnit)) {
+    return false;
+  }
+  return true;
 }
 
 export const TELEDOSI_NOT_CONFIGURED_MESSAGE =
@@ -216,7 +225,7 @@ export const teledosiFilesMaxBytes =
     : 8 * 1024 * 1024;
 
 export function isTeledosiFilesConfigured(): boolean {
-  if (!isTeledosiConfigured()) {
+  if (!isTeledosiSshConfigured()) {
     return false;
   }
   const root = teledosiSftpRemoteRoot;

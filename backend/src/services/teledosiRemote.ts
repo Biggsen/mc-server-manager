@@ -29,8 +29,8 @@ export function shellSingleQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
-export function getTeledosiSshOptions(): SshConnectOptions {
-  assertUnitName(teledosiSystemdUnit);
+/** SSH options for Teledosi host auth (no systemd validation). */
+export function getTeledosiBaseSshOptions(): SshConnectOptions {
   const key = getTeledosiPrivateKeyPem();
   const base: SshConnectOptions = {
     host: teledosiSshHost,
@@ -48,6 +48,11 @@ export function getTeledosiSshOptions(): SshConnectOptions {
     ...base,
     password: teledosiSshPassword,
   };
+}
+
+export function getTeledosiSshOptions(): SshConnectOptions {
+  assertUnitName(teledosiSystemdUnit);
+  return getTeledosiBaseSshOptions();
 }
 
 export async function connectTeledosiClient(): Promise<Client> {

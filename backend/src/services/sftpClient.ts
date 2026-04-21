@@ -219,9 +219,10 @@ export async function sftpReadFullFile(
   conn: Client,
   remotePath: string,
   maxBytes: number,
-): Promise<Buffer> {
+): Promise<{ buffer: Buffer; truncated: boolean }> {
   const chunks: Buffer[] = [];
   let position = 0;
+  let truncated = false;
   return new Promise((resolve, reject) => {
     conn.sftp((err, sftp) => {
       if (err) {
@@ -236,8 +237,9 @@ export async function sftpReadFullFile(
         const readNext = (): void => {
           const remaining = maxBytes - position;
           if (remaining <= 0) {
+            truncated = true;
             sftp.close(handle, () => {
-              resolve(Buffer.concat(chunks));
+              resolve({ buffer: Buffer.concat(chunks), truncated });
             });
             return;
           }
@@ -251,7 +253,7 @@ export async function sftpReadFullFile(
             }
             if (!bytesRead) {
               sftp.close(handle, () => {
-                resolve(Buffer.concat(chunks));
+                resolve({ buffer: Buffer.concat(chunks), truncated });
               });
               return;
             }

@@ -6,7 +6,7 @@ import {
   listUploadRemote,
   getUploadLocalFileGeneratorVersion,
   getUploadRemoteFileGeneratorVersion,
-  getUploadDefaultPassword,
+  getUploadDefaultPasswordAvailable,
   uploadFileToRemote,
   downloadUploadRemoteFile,
   deleteUploadRemoteFile,
@@ -105,6 +105,7 @@ export default function Upload() {
   const [selectedLocalVersionLoading, setSelectedLocalVersionLoading] = useState(false)
   const [selectedRemoteVersionLoading, setSelectedRemoteVersionLoading] = useState(false)
   const [linkedBrowse, setLinkedBrowse] = useState(false)
+  const [defaultPasswordAvailable, setDefaultPasswordAvailable] = useState(false)
   const { toast } = useToast()
 
   useEffect(() => {
@@ -120,20 +121,20 @@ export default function Upload() {
   useEffect(() => {
     if (!projectId) return
     let cancelled = false
-    getUploadDefaultPassword(projectId)
-      .then((nextPassword) => {
+    getUploadDefaultPasswordAvailable(projectId)
+      .then((available) => {
         if (cancelled) return
-        if (typeof nextPassword === 'string' && nextPassword.length > 0) {
-          setPassword(nextPassword)
-        }
+        setDefaultPasswordAvailable(Boolean(available))
       })
       .catch(() => {
-        // Keep manual entry flow when no default password is available.
+        if (!cancelled) setDefaultPasswordAvailable(false)
       })
     return () => {
       cancelled = true
     }
   }, [projectId])
+
+  const canUseSftpAuth = Boolean(password.trim()) || defaultPasswordAvailable
 
   useEffect(() => {
     if (!contextMenu) return
@@ -168,12 +169,12 @@ export default function Upload() {
   }, [])
 
   const loadRemote = useCallback(async (pathOverride?: string) => {
-    if (!projectId || !password) return
+    if (!projectId || !canUseSftpAuth) return
     const path = pathOverride ?? remotePath
     setRemoteLoading(true)
     setError(null)
     try {
-      const entries = await listUploadRemote(projectId, password, path || undefined)
+      const entries = await listUploadRemote(projectId, password.trim() || undefined, path || undefined)
       setRemoteEntries(entries)
       if (pathOverride != null) setRemotePath(pathOverride)
     } catch (err) {
@@ -182,7 +183,7 @@ export default function Upload() {
     } finally {
       setRemoteLoading(false)
     }
-  }, [projectId, password, remotePath])
+  }, [projectId, password, remotePath, canUseSftpAuth])
 
   const loadLocal = useCallback(async () => {
     if (!projectId) return
@@ -226,14 +227,14 @@ export default function Upload() {
   }, [projectId, selectedLocal])
 
   useEffect(() => {
-    if (!projectId || !password || !selectedRemote) {
+    if (!projectId || !canUseSftpAuth || !selectedRemote) {
       setSelectedRemoteVersion(null)
       setSelectedRemoteVersionLoading(false)
       return
     }
     let cancelled = false
     setSelectedRemoteVersionLoading(true)
-    getUploadRemoteFileGeneratorVersion(projectId, password, selectedRemote)
+    getUploadRemoteFileGeneratorVersion(projectId, password.trim() || undefined, selectedRemote)
       .then((version) => {
         if (!cancelled) setSelectedRemoteVersion(version)
       })
@@ -244,17 +245,17 @@ export default function Upload() {
         if (!cancelled) setSelectedRemoteVersionLoading(false)
       })
     return () => { cancelled = true }
-  }, [projectId, password, selectedRemote])
+  }, [projectId, password, selectedRemote, canUseSftpAuth])
 
   const handleUpload = async () => {
-    if (!projectId || !password || !selectedLocal) return
+    if (!projectId || !canUseSftpAuth || !selectedLocal) return
     setUploading(true)
     setError(null)
     try {
       const baseRemote = remotePath || projects.find((p) => p.id === projectId)?.sftp?.remotePath || ''
       const name = selectedLocal.split(/[/\\]/).filter(Boolean).pop() ?? selectedLocal
       const destPath = baseRemote ? `${baseRemote.replace(/\/+$/, '')}/${name}` : name
-      await uploadFileToRemote(projectId, password, selectedLocal, destPath)
+      await uploadFileToRemote(projectId, password.trim() || undefined, selectedLocal, destPath)
       toast({ variant: 'success', description: `Uploaded ${name}` })
       setSelectedLocal(null)
       loadRemote(remotePath)
@@ -274,13 +275,13 @@ export default function Upload() {
   }, [])
 
   const handleDownload = useCallback(async () => {
-    if (!projectId || !password || !selectedRemote) return
+    if (!projectId || !canUseSftpAuth || !selectedRemote) return
     const name = selectedRemote.split(/[/\\]/).filter(Boolean).pop() ?? selectedRemote
     const destRelative = localPath ? `${localPath}/${name}` : name
     setDownloading(true)
     setError(null)
     try {
-      await downloadUploadRemoteFile(projectId, password, selectedRemote, destRelative)
+      await downloadUploadRemoteFile(projectId, password.trim() || undefined, selectedRemote, destRelative)
       toast({ variant: 'success', description: `Downloaded ${name}` })
       setSelectedRemote(null)
       loadLocal()
@@ -292,7 +293,7 @@ export default function Upload() {
     } finally {
       setDownloading(false)
     }
-  }, [projectId, password, selectedRemote, localPath, toast, loadLocal])
+  }, [projectId, password, selectedRemote, localPath, toast, loadLocal, canUseSftpAuth])
 
   const handleDeleteFromContextMenu = useCallback(async () => {
     if (!contextMenu || !projectId) return
@@ -309,11 +310,11 @@ export default function Upload() {
     setContextMenu(null)
     try {
       if (panel === 'remote') {
-        if (!password) {
+        if (!canUseSftpAuth) {
           toast({ variant: 'danger', description: 'Password required to delete on server' })
           return
         }
-        await deleteUploadRemoteFile(projectId, password, entry.path)
+        await deleteUploadRemoteFile(projectId, password.trim() || undefined, entry.path)
         toast({
           variant: 'success',
           description: isDir ? `Deleted folder ${entry.name} on server` : `Deleted ${entry.name} on server`,
@@ -337,7 +338,7 @@ export default function Upload() {
     } finally {
       setDeleting(false)
     }
-  }, [contextMenu, projectId, password, remotePath, selectedLocal, selectedRemote, loadRemote, loadLocal, toast])
+  }, [contextMenu, projectId, password, remotePath, selectedLocal, selectedRemote, loadRemote, loadLocal, toast, canUseSftpAuth])
 
   const selectedProject = projects.find((p) => p.id === projectId)
   const remoteRootPath = selectedProject?.sftp?.remotePath ?? ''
@@ -492,6 +493,7 @@ export default function Upload() {
                     onChange={(v) => {
                       setProjectId(v || '')
                       setPassword('')
+                      setDefaultPasswordAvailable(false)
                       setRemoteEntries([])
                       setSelectedLocal(null)
                       setSelectedLocalVersion(null)
@@ -513,12 +515,16 @@ export default function Upload() {
                     placeholder="Control panel / SFTP password"
                     value={password}
                     onChange={(e) => setPassword(e.currentTarget.value)}
-                    description="Not stored; used only for this session"
+                    description={
+                      defaultPasswordAvailable
+                        ? 'Backend Teledosi default is available; enter to override for this session.'
+                        : 'Not stored; used only for this session'
+                    }
                     style={{ flex: 1 }}
                   />
                   <Button
                     variant="primary"
-                    disabled={!projectId || !password || !selectedProject?.sftp}
+                    disabled={!projectId || !canUseSftpAuth || !selectedProject?.sftp}
                     loading={remoteLoading}
                     onClick={() => loadRemote()}
                   >
@@ -531,6 +537,7 @@ export default function Upload() {
                       setRemoteEntries([])
                       setRemotePath('')
                       setPassword('')
+                      setDefaultPasswordAvailable(false)
                       setSelectedRemote(null)
                       setSelectedRemoteVersion(null)
                       setError(null)
@@ -629,7 +636,7 @@ export default function Upload() {
               )}
               {remoteEntries.length === 0 && !remoteLoading ? (
                 <Text size="sm" c="dimmed">
-                  Enter password and click Connect to list remote files.
+                  Enter password (or use backend Teledosi default) and click Connect to list remote files.
                 </Text>
               ) : (
                 <ScrollArea h={320} type="scroll">
@@ -838,7 +845,7 @@ export default function Upload() {
                 icon={<ArrowRight size={18} />}
                 iconPosition="left"
                 loading={uploading}
-                disabled={!password}
+                disabled={!canUseSftpAuth}
                 onClick={handleUpload}
               >
                 Upload
@@ -880,7 +887,7 @@ export default function Upload() {
                 icon={<ArrowDown size={18} />}
                 iconPosition="left"
                 loading={downloading}
-                disabled={!password}
+                disabled={!canUseSftpAuth}
                 onClick={handleDownload}
               >
                 Download
