@@ -512,6 +512,33 @@ export async function fetchBuildManifest(buildId: string): Promise<unknown> {
   return data.manifest
 }
 
+export interface BuildConfigDiff {
+  path: string
+  oldSha: string
+  newSha: string
+  oldContent: string | null
+  newContent: string | null
+  oldMissing: boolean
+  newMissing: boolean
+  oldBinary: boolean
+  newBinary: boolean
+  oldTooLarge: boolean
+  newTooLarge: boolean
+  maxDiffBytes: number
+}
+
+export async function fetchBuildConfigDiff(
+  olderBuildId: string,
+  newerBuildId: string,
+  path: string,
+): Promise<BuildConfigDiff> {
+  const params = new URLSearchParams({ path })
+  const data = await request<{ diff: BuildConfigDiff }>(
+    `/builds/${encodeURIComponent(olderBuildId)}/config-diff/${encodeURIComponent(newerBuildId)}?${params.toString()}`,
+  )
+  return data.diff
+}
+
 export async function updateProjectAssets(projectId: string, payload: {
   plugins?: ProjectSummary['plugins']
   configs?: ProjectSummary['configs']

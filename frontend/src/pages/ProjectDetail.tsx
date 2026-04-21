@@ -13,6 +13,7 @@ import {
   deleteProjectPlugin,
   duplicateProject,
   fetchBuildManifest,
+  fetchBuildConfigDiff,
   fetchBuilds,
   fetchGitHubRepos,
   fetchProject,
@@ -46,6 +47,7 @@ import {
   clearInitMarker,
   type BuildJob,
   type BuildOptions,
+  type BuildConfigDiff,
   type GitHubRepo,
   type PluginConfigDefinitionView,
   type ProjectConfigSummary,
@@ -91,6 +93,122 @@ type BuildDiffModalContent =
       newerLabel: string
       inventory: { configs: string[]; plugins: Array<{ id: string; version?: string }> }
     }
+
+type DiffLine = { kind: 'context' | 'added' | 'removed' | 'gap'; text: string }
+
+/** Leading YAML comments / blanks, then a short tail for version-style header lines. */
+function configFileHeaderLineCount(lines: string[]): number {
+  let i = 0
+  while (i < lines.length) {
+    if (i > 100) {
+      break
+    }
+    const s = lines[i]
+    if (s.trim() === '' || /^\s*#/.test(s)) {
+      i += 1
+      continue
+    }
+    break
+  }
+  return Math.min(lines.length, i + 12)
+}
+
+type AnnotatedDiffLine = {
+  kind: 'context' | 'added' | 'removed'
+  text: string
+  oldLine?: number
+  newLine?: number
+}
+
+function buildUnifiedAnnotated(oldContent: string, newContent: string): AnnotatedDiffLine[] {
+  const a = oldContent.split(/\r?\n/)
+  const b = newContent.split(/\r?\n/)
+  const dp: number[][] = Array.from({ length: a.length + 1 }, () => Array<number>(b.length + 1).fill(0))
+
+  for (let i = a.length - 1; i >= 0; i -= 1) {
+    for (let j = b.length - 1; j >= 0; j -= 1) {
+      dp[i][j] = a[i] === b[j] ? 1 + dp[i + 1][j + 1] : Math.max(dp[i + 1][j], dp[i][j + 1])
+    }
+  }
+
+  const lines: AnnotatedDiffLine[] = []
+  let i = 0
+  let j = 0
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) {
+      lines.push({ kind: 'context', text: a[i], oldLine: i, newLine: j })
+      i += 1
+      j += 1
+    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+      lines.push({ kind: 'removed', text: a[i], oldLine: i })
+      i += 1
+    } else {
+      lines.push({ kind: 'added', text: b[j], newLine: j })
+      j += 1
+    }
+  }
+  while (i < a.length) {
+    lines.push({ kind: 'removed', text: a[i], oldLine: i })
+    i += 1
+  }
+  while (j < b.length) {
+    lines.push({ kind: 'added', text: b[j], newLine: j })
+    j += 1
+  }
+  return lines
+}
+
+const DIFF_BODY_CONTEXT_LINES = 3
+
+/** Header (comments + version block) in full; elsewhere only hunks around edits. */
+function buildSparseDisplayDiff(oldContent: string, newContent: string): DiffLine[] {
+  const a = oldContent.split(/\r?\n/)
+  const b = newContent.split(/\r?\n/)
+  const headerLineCount = Math.max(configFileHeaderLineCount(a), configFileHeaderLineCount(b))
+
+  const annotated = buildUnifiedAnnotated(oldContent, newContent)
+  const n = annotated.length
+  const keep = new Set<number>()
+
+  for (let idx = 0; idx < n; idx += 1) {
+    const L = annotated[idx]
+    const inHeader =
+      (L.oldLine !== undefined && L.oldLine < headerLineCount) ||
+      (L.newLine !== undefined && L.newLine < headerLineCount)
+    if (inHeader) {
+      keep.add(idx)
+    }
+  }
+
+  for (let idx = 0; idx < n; idx += 1) {
+    if (annotated[idx].kind === 'context') {
+      continue
+    }
+    for (let d = -DIFF_BODY_CONTEXT_LINES; d <= DIFF_BODY_CONTEXT_LINES; d += 1) {
+      const t = idx + d
+      if (t >= 0 && t < n) {
+        keep.add(t)
+      }
+    }
+  }
+
+  const sorted = [...keep].sort((x, y) => x - y)
+  const out: DiffLine[] = []
+  let prev = -1
+  for (const idx of sorted) {
+    if (prev !== -1 && idx > prev + 1) {
+      const skipped = idx - prev - 1
+      out.push({
+        kind: 'gap',
+        text: `  ··· ${skipped} unchanged line${skipped === 1 ? '' : 's'} ···`,
+      })
+    }
+    const L = annotated[idx]
+    out.push({ kind: L.kind, text: L.text })
+    prev = idx
+  }
+  return out
+}
 
 const runStatusLabel: Record<
   RunJob['status'],
@@ -138,6 +256,14 @@ function defaultLabelFromConfigPath(path: string): string {
   const base = path.split('/').pop() ?? path
   const dot = base.lastIndexOf('.')
   return dot > 0 ? base.slice(0, dot) : base
+}
+
+function formatDiffLimitBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  const kb = bytes / 1024
+  if (kb < 1024) return `${kb.toFixed(kb >= 10 ? 0 : 1)} KB`
+  const mb = kb / 1024
+  return `${mb.toFixed(mb >= 10 ? 0 : 1)} MB`
 }
 
 /** Default backend limit (see MCSM_MAX_CONFIG_PAYLOAD_MB); used for editor warnings only. */
@@ -508,6 +634,10 @@ function ProjectDetail() {
   const [buildDiffLoading, setBuildDiffLoading] = useState(false)
   const [buildDiffError, setBuildDiffError] = useState<string | null>(null)
   const [buildDiffContent, setBuildDiffContent] = useState<BuildDiffModalContent | null>(null)
+  const [selectedConfigDiff, setSelectedConfigDiff] = useState<BuildConfigDiff | null>(null)
+  const [selectedConfigDiffPath, setSelectedConfigDiffPath] = useState<string | null>(null)
+  const [selectedConfigDiffLoading, setSelectedConfigDiffLoading] = useState(false)
+  const [selectedConfigDiffError, setSelectedConfigDiffError] = useState<string | null>(null)
   const [runOptions, setRunOptions] = useState({ resetWorld: false, resetPlugins: false, useSnapshot: false })
   const [showBuildOptions, setShowBuildOptions] = useState(false)
   const [buildOptions, setBuildOptions] = useState<BuildOptions>({ skipPush: true })
@@ -1832,7 +1962,30 @@ useEffect(() => {
     setBuildDiffModalOpen(false)
     setBuildDiffError(null)
     setBuildDiffContent(null)
+    setSelectedConfigDiff(null)
+    setSelectedConfigDiffPath(null)
+    setSelectedConfigDiffError(null)
+    setSelectedConfigDiffLoading(false)
   }, [])
+
+  const openConfigDiffModal = useCallback(
+    async (path: string) => {
+      if (buildDiffContent?.mode !== 'compare') return
+      setSelectedConfigDiffPath(path)
+      setSelectedConfigDiffLoading(true)
+      setSelectedConfigDiffError(null)
+      setSelectedConfigDiff(null)
+      try {
+        const diff = await fetchBuildConfigDiff(buildDiffContent.olderLabel, buildDiffContent.newerLabel, path)
+        setSelectedConfigDiff(diff)
+      } catch (err) {
+        setSelectedConfigDiffError(err instanceof Error ? err.message : 'Failed to load config diff')
+      } finally {
+        setSelectedConfigDiffLoading(false)
+      }
+    },
+    [buildDiffContent],
+  )
 
   const handleRemovePlugin = useCallback(
     async (pluginId: string) => {
@@ -5058,12 +5211,17 @@ useEffect(() => {
                   <ScrollArea h={buildDiffContent.diff.configs.changed.length > 10 ? 160 : 'auto'} type="auto">
                     <Stack gap={4}>
                       {buildDiffContent.diff.configs.changed.map((row) => (
-                        <Text key={row.path} size="sm" c="dimmed">
-                          {row.path}{' '}
-                          <Text span size="xs" ff="monospace">
-                            {row.oldSha.slice(0, 8)}… → {row.newSha.slice(0, 8)}…
+                        <Group key={row.path} justify="space-between" align="center" gap="xs" wrap="nowrap">
+                          <Text size="sm" c="dimmed">
+                            {row.path}{' '}
+                            <Text span size="xs" ff="monospace">
+                              {row.oldSha.slice(0, 8)}… → {row.newSha.slice(0, 8)}…
+                            </Text>
                           </Text>
-                        </Text>
+                          <Button size="sm" variant="ghost" onClick={() => void openConfigDiffModal(row.path)}>
+                            View diff
+                          </Button>
+                        </Group>
                       ))}
                     </Stack>
                   </ScrollArea>
@@ -5117,6 +5275,75 @@ useEffect(() => {
                 </>
               ) : null}
             </>
+          ) : null}
+        </Stack>
+      </Modal>
+
+      <Modal
+        opened={Boolean(selectedConfigDiffPath)}
+        onClose={() => {
+          setSelectedConfigDiffPath(null)
+          setSelectedConfigDiff(null)
+          setSelectedConfigDiffError(null)
+          setSelectedConfigDiffLoading(false)
+        }}
+        title={selectedConfigDiffPath ? `Diff: ${selectedConfigDiffPath}` : 'Config diff'}
+        size="xl"
+        centered
+      >
+        <Stack gap="md">
+          {selectedConfigDiffLoading ? (
+            <Group justify="center" py="md">
+              <Loader />
+            </Group>
+          ) : null}
+          {selectedConfigDiffError ? (
+            <Text size="sm" c="red">
+              {selectedConfigDiffError}
+            </Text>
+          ) : null}
+          {!selectedConfigDiffLoading && !selectedConfigDiffError && selectedConfigDiff ? (
+            selectedConfigDiff.oldBinary || selectedConfigDiff.newBinary ? (
+              <Text size="sm" c="dimmed">
+                This file looks binary in one of the builds, so text diff is not available.
+              </Text>
+            ) : selectedConfigDiff.oldTooLarge || selectedConfigDiff.newTooLarge ? (
+              <Text size="sm" c="dimmed">
+                This file is too large to diff inline (limit {formatDiffLimitBytes(selectedConfigDiff.maxDiffBytes)}).
+              </Text>
+            ) : selectedConfigDiff.oldMissing || selectedConfigDiff.newMissing ? (
+              <Text size="sm" c="dimmed">
+                This file is missing in one of the two build artifacts.
+              </Text>
+            ) : (
+              <ScrollArea h={420} type="auto">
+                <Stack gap={0}>
+                  {buildSparseDisplayDiff(
+                    selectedConfigDiff.oldContent ?? '',
+                    selectedConfigDiff.newContent ?? '',
+                  ).map((line, index) => (
+                    <Text
+                      key={`${line.kind}-${index}`}
+                      size="xs"
+                      ff="monospace"
+                      c={
+                        line.kind === 'added'
+                          ? 'green'
+                          : line.kind === 'removed'
+                            ? 'red'
+                            : line.kind === 'gap'
+                              ? 'dimmed'
+                              : 'dimmed'
+                      }
+                      fs={line.kind === 'gap' ? 'italic' : undefined}
+                    >
+                      {line.kind === 'added' ? '+' : line.kind === 'removed' ? '-' : line.kind === 'gap' ? ' ' : ' '}
+                      {line.text}
+                    </Text>
+                  ))}
+                </Stack>
+              </ScrollArea>
+            )
           ) : null}
         </Stack>
       </Modal>
