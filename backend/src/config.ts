@@ -208,15 +208,17 @@ export const teledosiRconTimeoutMs =
     ? Math.min(30000, Math.floor(teledosiRconTimeoutParsed))
     : 5000;
 export const teledosiMcrconBin = (process.env.TELEDOSI_MCRCON_BIN ?? "mcrcon").trim() || "mcrcon";
+export const teledosiRconWrapperBin =
+  (process.env.TELEDOSI_RCON_WRAPPER_BIN ?? "teledosi-rcon").trim() || "teledosi-rcon";
 
 export function isTeledosiRconConfigured(): boolean {
-  return teledosiRconHost.length > 0 && teledosiRconPassword.length > 0;
+  return isTeledosiSshConfigured() && teledosiRconWrapperBin.length > 0;
 }
 
 export const TELEDOSI_RCON_NOT_CONFIGURED_MESSAGE =
-  "Teledosi RCON is not configured. Set TELEDOSI_RCON_HOST and TELEDOSI_RCON_PASSWORD in the backend environment.";
+  "Teledosi RCON wrapper is not configured. Set TELEDOSI_RCON_WRAPPER_BIN in the backend environment.";
 export const TELEDOSI_RCON_TRANSPORT_ERROR_MESSAGE =
-  "Teledosi command transport failed over SSH. Verify TELEDOSI_SSH_* connectivity and TELEDOSI_MCRCON_BIN on the VPS.";
+  "Teledosi command transport failed over SSH. Verify TELEDOSI_SSH_* connectivity and TELEDOSI_RCON_WRAPPER_BIN on the VPS.";
 
 /**
  * Resolved private key for SSH (env body, or file path). Throws if path is set but unreadable.

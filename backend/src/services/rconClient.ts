@@ -1,11 +1,8 @@
 import {
   TELEDOSI_RCON_NOT_CONFIGURED_MESSAGE,
   isTeledosiRconConfigured,
-  teledosiMcrconBin,
-  teledosiRconHost,
-  teledosiRconPassword,
-  teledosiRconPort,
   teledosiRconTimeoutMs,
+  teledosiRconWrapperBin,
 } from "../config";
 import { execBuffered, shellSingleQuote, withTeledosiSsh } from "./teledosiRemote";
 
@@ -43,12 +40,9 @@ function stripAnsi(text: string): string {
 async function executeViaSshMcrcon(
   command: string,
 ): Promise<{ response: string }> {
-  const host = shellSingleQuote(teledosiRconHost);
-  const port = shellSingleQuote(String(teledosiRconPort));
-  const password = shellSingleQuote(teledosiRconPassword);
+  const wrapperBin = shellSingleQuote(teledosiRconWrapperBin);
   const cmd = shellSingleQuote(command);
-  const bin = shellSingleQuote(teledosiMcrconBin);
-  const remoteCmd = `${bin} -H ${host} -P ${port} -p ${password} ${cmd} 2>&1`;
+  const remoteCmd = `${wrapperBin} ${cmd} 2>&1`;
 
   const result = await Promise.race([
     withTeledosiSsh((conn) => execBuffered(conn, remoteCmd)),
@@ -70,7 +64,7 @@ async function executeViaSshMcrcon(
   if (result.code === 127 || /command not found|not recognized/.test(msg)) {
     throw new TeledosiRconError(
       "BINARY_MISSING",
-      `mcrcon binary not found on remote host (tried ${teledosiMcrconBin}). Set TELEDOSI_MCRCON_BIN or install mcrcon on the VPS.`,
+      `RCON wrapper binary not found on remote host (tried ${teledosiRconWrapperBin}). Set TELEDOSI_RCON_WRAPPER_BIN or install the wrapper on the VPS.`,
     );
   }
   if (/connection timed out|timed out/.test(msg)) {

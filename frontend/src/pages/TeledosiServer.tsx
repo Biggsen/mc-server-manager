@@ -357,7 +357,7 @@ export default function TeledosiServer() {
           <Text mt="md" c="yellow.4" size="sm">
             Teledosi remote control is not configured on the backend. Set TELEDOSI_SSH_HOST,
             TELEDOSI_SSH_USER, and TELEDOSI_SSH_PASSWORD or a private key, then restart the
-            backend. RCON commands also require TELEDOSI_RCON_HOST and TELEDOSI_RCON_PASSWORD.
+            backend. RCON commands also require TELEDOSI_RCON_WRAPPER_BIN (default: teledosi-rcon).
           </Text>
         )}
 
