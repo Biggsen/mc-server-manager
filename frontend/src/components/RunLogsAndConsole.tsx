@@ -3,8 +3,24 @@ import { Code, Group, ScrollArea, Stack, Text, TextInput } from '@mantine/core'
 import { Button } from './ui'
 import type { RunJob, RunLogEntry } from '../lib/api'
 
+const URL_TOKEN_REGEX = /(https?:\/\/[^\s]+)/g
+
 function formatLogLine(entry: RunLogEntry): string {
   return `[${new Date(entry.timestamp).toLocaleTimeString()}][${entry.stream}] ${entry.message}`
+}
+
+function renderLogLineWithLinks(line: string) {
+  const parts = line.split(URL_TOKEN_REGEX)
+  return parts.map((part, index) => {
+    if (part.match(/^https?:\/\/[^\s]+$/)) {
+      return (
+        <a key={`${part}-${index}`} href={part} target="_blank" rel="noreferrer noopener">
+          {part}
+        </a>
+      )
+    }
+    return <span key={`${part}-${index}`}>{part}</span>
+  })
 }
 
 export interface RunLogsAndConsoleProps {
@@ -53,9 +69,15 @@ export function RunLogsAndConsole({
             component="pre"
             style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0 }}
           >
-            {run.logs.length > 0
-              ? run.logs.map(formatLogLine).join('\n')
-              : 'No log entries yet.'}
+            {run.logs.length > 0 ? (
+              run.logs.map((entry, index) => (
+                <div key={`${entry.timestamp}-${entry.stream}-${index}`}>
+                  {renderLogLineWithLinks(formatLogLine(entry))}
+                </div>
+              ))
+            ) : (
+              <span>No log entries yet.</span>
+            )}
           </Code>
         </div>
       </ScrollArea>
