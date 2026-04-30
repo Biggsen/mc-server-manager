@@ -193,6 +193,33 @@ export function isTeledosiConfigured(): boolean {
 export const TELEDOSI_NOT_CONFIGURED_MESSAGE =
   "Teledosi remote control is not configured. Set TELEDOSI_SSH_HOST, TELEDOSI_SSH_USER, and TELEDOSI_SSH_PASSWORD or TELEDOSI_SSH_PRIVATE_KEY / TELEDOSI_SSH_PRIVATE_KEY_PATH in the backend environment.";
 
+const teledosiRconPortParsed = Number(process.env.TELEDOSI_RCON_PORT);
+export const teledosiRconHost = (process.env.TELEDOSI_RCON_HOST ?? "").trim();
+export const teledosiRconPort =
+  Number.isFinite(teledosiRconPortParsed) &&
+  teledosiRconPortParsed > 0 &&
+  teledosiRconPortParsed < 65536
+    ? Math.floor(teledosiRconPortParsed)
+    : 25575;
+export const teledosiRconPassword = process.env.TELEDOSI_RCON_PASSWORD ?? "";
+const teledosiRconTimeoutParsed = Number(process.env.TELEDOSI_RCON_TIMEOUT_MS);
+export const teledosiRconTimeoutMs =
+  Number.isFinite(teledosiRconTimeoutParsed) && teledosiRconTimeoutParsed >= 250
+    ? Math.min(30000, Math.floor(teledosiRconTimeoutParsed))
+    : 5000;
+export const teledosiMcrconBin = (process.env.TELEDOSI_MCRCON_BIN ?? "mcrcon").trim() || "mcrcon";
+export const teledosiRconWrapperBin =
+  (process.env.TELEDOSI_RCON_WRAPPER_BIN ?? "teledosi-rcon").trim() || "teledosi-rcon";
+
+export function isTeledosiRconConfigured(): boolean {
+  return isTeledosiSshConfigured() && teledosiRconWrapperBin.length > 0;
+}
+
+export const TELEDOSI_RCON_NOT_CONFIGURED_MESSAGE =
+  "Teledosi RCON wrapper is not configured. Set TELEDOSI_RCON_WRAPPER_BIN in the backend environment.";
+export const TELEDOSI_RCON_TRANSPORT_ERROR_MESSAGE =
+  "Teledosi command transport failed over SSH. Verify TELEDOSI_SSH_* connectivity and TELEDOSI_RCON_WRAPPER_BIN on the VPS.";
+
 /**
  * Resolved private key for SSH (env body, or file path). Throws if path is set but unreadable.
  */

@@ -26,6 +26,18 @@ Required keys:
 - `APP_BASE_URL` (frontend origin, e.g. `http://localhost:5173`)
 - Optional: `GITHUB_SCOPE` (defaults to `repo read:user`)
 
+Teledosi remote control keys:
+
+- `TELEDOSI_SSH_HOST` / `TELEDOSI_SSH_USER` and either `TELEDOSI_SSH_PASSWORD` or SSH private key vars
+- `TELEDOSI_RCON_WRAPPER_BIN` (default `teledosi-rcon`, executed on the VPS over SSH)
+- Optional: `TELEDOSI_RCON_PORT` (default `25575`)
+- Optional: `TELEDOSI_RCON_TIMEOUT_MS` (default `5000`, min `250`, max `30000`)
+- Optional (legacy/direct mode tooling): `TELEDOSI_MCRCON_BIN`, `TELEDOSI_RCON_HOST`, `TELEDOSI_RCON_PASSWORD`
+
+Teledosi command transport uses SSH to run a VPS-local wrapper (Option B), so RCON can stay local
+to the VPS and does not need to be publicly exposed. This avoids passing the RCON password in app-
+constructed process arguments.
+
 ## Structure
 
 - `frontend/` – Vite + React TypeScript UI scaffold.

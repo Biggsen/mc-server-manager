@@ -11,10 +11,12 @@ import {
   Code,
   Group,
   Loader,
+  NativeSelect,
   Paper,
   Stack,
   Switch,
   Text,
+  TextInput,
   Title,
 } from '@mantine/core'
 import { Button } from '../components/ui'
@@ -24,6 +26,7 @@ import {
   fetchTeledosiStatus,
   getTeledosiLogsStreamUrl,
   teledosiRestart,
+  teledosiSendCommand,
   teledosiStart,
   teledosiStop,
   type TeledosiServiceState,
@@ -32,6 +35,7 @@ import {
 const LOG_AREA_HEIGHT = 520
 const RECENT_LINES = 200
 const LIVE_BUFFER_MAX_CHARS = 512_000
+const JOURNAL_PREFIX_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{4}\s+\S+\s+java\[\d+\]:\s*/
 
 function stateBadgeColor(state: TeledosiServiceState): string {
   if (state === 'running') return 'green'
@@ -45,6 +49,50 @@ function stateLabel(state: TeledosiServiceState): string {
   return 'Stopped'
 }
 
+function stripJournalPrefix(line: string): string {
+  return line.replace(JOURNAL_PREFIX_RE, '')
+}
+
+function normalizeLogText(text: string): string {
+  return text
+    .split(/\r?\n/)
+    .map(stripJournalPrefix)
+    .join('\n')
+}
+
+function formatRconPrefix(): string {
+  const now = new Date()
+  const hh = String(now.getHours()).padStart(2, '0')
+  const mm = String(now.getMinutes()).padStart(2, '0')
+  const ss = String(now.getSeconds()).padStart(2, '0')
+  return `[${hh}:${mm}:${ss} RCON]`
+}
+
+type BroadcastType = 'general' | 'maintenance' | 'warning' | 'alert' | 'success'
+
+function getBroadcastStyle(kind: BroadcastType): { prefix: string; prefixColor: string; messageColor: string } {
+  if (kind === 'maintenance') return { prefix: '[Maintenance] ', prefixColor: 'gray', messageColor: 'gold' }
+  if (kind === 'warning') return { prefix: '[Warning] ', prefixColor: 'gray', messageColor: 'yellow' }
+  if (kind === 'alert') return { prefix: '[Alert] ', prefixColor: 'dark_red', messageColor: 'red' }
+  if (kind === 'success') return { prefix: '[Server] ', prefixColor: 'gray', messageColor: 'green' }
+  return { prefix: '[Server] ', prefixColor: 'gray', messageColor: 'white' }
+}
+
+function buildBroadcastTellraw(message: string, kind: BroadcastType): string {
+  const style = getBroadcastStyle(kind)
+  const payload = {
+    text: style.prefix,
+    color: style.prefixColor,
+    extra: [
+      {
+        text: message,
+        color: style.messageColor,
+      },
+    ],
+  }
+  return `tellraw @a ${JSON.stringify(payload)}`
+}
+
 export default function TeledosiServer() {
   const navigate = useNavigate()
   const [configured, setConfigured] = useState(true)
@@ -54,6 +102,14 @@ export default function TeledosiServer() {
   const [logText, setLogText] = useState<string>('')
   const [logsLoading, setLogsLoading] = useState(true)
   const [controlBusy, setControlBusy] = useState(false)
+  const [commandBusy, setCommandBusy] = useState(false)
+  const [commandValue, setCommandValue] = useState('')
+  const [broadcastBusy, setBroadcastBusy] = useState(false)
+  const [broadcastValue, setBroadcastValue] = useState('')
+  const [broadcastType, setBroadcastType] = useState<BroadcastType>('general')
+  const [commandHistory, setCommandHistory] = useState<string[]>([])
+  const [historyIndex, setHistoryIndex] = useState<number | null>(null)
+  const [historyDraft, setHistoryDraft] = useState('')
   const [liveTail, setLiveTail] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const esRef = useRef<EventSource | null>(null)
@@ -76,7 +132,7 @@ export default function TeledosiServer() {
       setConfigured(true)
       setStatus(st.state)
       setStatusRaw(st.raw)
-      setLogText(lg.text)
+      setLogText(normalizeLogText(lg.text))
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       if (/503|not configured/i.test(msg)) {
@@ -115,7 +171,7 @@ export default function TeledosiServer() {
       try {
         const data = JSON.parse((ev as MessageEvent).data) as { line?: string }
         if (typeof data.line === 'string' && data.line.length > 0) {
-          const line = data.line
+          const line = stripJournalPrefix(data.line)
           setLogText((prev) => {
             const next: string = prev ? `${prev}\n${line}` : line
             if (next.length > LIVE_BUFFER_MAX_CHARS) {
@@ -167,13 +223,102 @@ export default function TeledosiServer() {
       setStatusRaw(st.raw)
       if (!liveTail) {
         const lg = await fetchTeledosiLogs(RECENT_LINES)
-        setLogText(lg.text)
+        setLogText(normalizeLogText(lg.text))
       }
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e))
     } finally {
       setControlBusy(false)
     }
+  }
+
+  const runCommand = async () => {
+    const command = commandValue.trim()
+    if (!command) return
+    setCommandBusy(true)
+    setLoadError(null)
+    try {
+      const result = await teledosiSendCommand(command)
+      const response = result.response?.trim()
+      setLogText((prev) => {
+        const lines = [`${formatRconPrefix()} > ${command}`]
+        if (response) {
+          lines.push(`${formatRconPrefix()} ${response}`)
+        }
+        const appended = lines.join('\n')
+        const next: string = prev ? `${prev}\n${appended}` : appended
+        if (next.length > LIVE_BUFFER_MAX_CHARS) {
+          return next.slice(next.length - LIVE_BUFFER_MAX_CHARS)
+        }
+        return next
+      })
+      setCommandHistory((prev) => [...prev, command])
+      setHistoryIndex(null)
+      setHistoryDraft('')
+      setCommandValue('')
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setCommandBusy(false)
+    }
+  }
+
+  const runBroadcast = async () => {
+    const message = broadcastValue.trim()
+    if (!message) return
+    const tellraw = buildBroadcastTellraw(message, broadcastType)
+    setBroadcastBusy(true)
+    setLoadError(null)
+    try {
+      const result = await teledosiSendCommand(tellraw)
+      const response = result.response?.trim()
+      const style = getBroadcastStyle(broadcastType)
+      setLogText((prev) => {
+        const lines = [`${formatRconPrefix()} ${style.prefix}${message}`]
+        if (response) {
+          lines.push(`${formatRconPrefix()} ${response}`)
+        }
+        const appended = lines.join('\n')
+        const next: string = prev ? `${prev}\n${appended}` : appended
+        if (next.length > LIVE_BUFFER_MAX_CHARS) {
+          return next.slice(next.length - LIVE_BUFFER_MAX_CHARS)
+        }
+        return next
+      })
+      setBroadcastValue('')
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBroadcastBusy(false)
+    }
+  }
+
+  const handleCommandHistory = (direction: 'up' | 'down') => {
+    if (commandHistory.length === 0) return
+
+    if (direction === 'up') {
+      if (historyIndex === null) {
+        setHistoryDraft(commandValue)
+        const next = commandHistory.length - 1
+        setHistoryIndex(next)
+        setCommandValue(commandHistory[next])
+        return
+      }
+      const next = Math.max(0, historyIndex - 1)
+      setHistoryIndex(next)
+      setCommandValue(commandHistory[next])
+      return
+    }
+
+    if (historyIndex === null) return
+    if (historyIndex >= commandHistory.length - 1) {
+      setHistoryIndex(null)
+      setCommandValue(historyDraft)
+      return
+    }
+    const next = historyIndex + 1
+    setHistoryIndex(next)
+    setCommandValue(commandHistory[next])
   }
 
   return (
@@ -212,7 +357,7 @@ export default function TeledosiServer() {
           <Text mt="md" c="yellow.4" size="sm">
             Teledosi remote control is not configured on the backend. Set TELEDOSI_SSH_HOST,
             TELEDOSI_SSH_USER, and TELEDOSI_SSH_PASSWORD or a private key, then restart the
-            backend.
+            backend. RCON commands also require TELEDOSI_RCON_WRAPPER_BIN (default: teledosi-rcon).
           </Text>
         )}
 
@@ -269,6 +414,80 @@ export default function TeledosiServer() {
                 disabled={logsLoading || liveTail}
               >
                 Refresh logs
+              </Button>
+            </Group>
+
+            <Group align="flex-end" mt="md" wrap="nowrap">
+              <TextInput
+                label="Admin command"
+                value={commandValue}
+                onChange={(e) => {
+                  setCommandValue(e.currentTarget.value)
+                  if (historyIndex !== null) {
+                    setHistoryIndex(null)
+                    setHistoryDraft('')
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    void runCommand()
+                  } else if (e.key === 'ArrowUp') {
+                    e.preventDefault()
+                    handleCommandHistory('up')
+                  } else if (e.key === 'ArrowDown') {
+                    e.preventDefault()
+                    handleCommandHistory('down')
+                  }
+                }}
+                disabled={!configured || commandBusy}
+                style={{ flex: 1 }}
+              />
+              <Button
+                variant="primary"
+                onClick={() => void runCommand()}
+                disabled={!configured || commandBusy || !commandValue.trim()}
+                loading={commandBusy}
+              >
+                Send
+              </Button>
+            </Group>
+
+            <Group align="flex-end" mt="sm" wrap="nowrap">
+              <NativeSelect
+                label="Broadcast type"
+                value={broadcastType}
+                onChange={(e) => setBroadcastType(e.currentTarget.value as BroadcastType)}
+                data={[
+                  { value: 'general', label: 'General' },
+                  { value: 'maintenance', label: 'Maintenance' },
+                  { value: 'warning', label: 'Warning' },
+                  { value: 'alert', label: 'Alert' },
+                  { value: 'success', label: 'Success' },
+                ]}
+                disabled={!configured || broadcastBusy}
+                style={{ width: 180 }}
+              />
+              <TextInput
+                label="Broadcast message"
+                value={broadcastValue}
+                onChange={(e) => setBroadcastValue(e.currentTarget.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    void runBroadcast()
+                  }
+                }}
+                disabled={!configured || broadcastBusy}
+                style={{ flex: 1 }}
+              />
+              <Button
+                variant="secondary"
+                onClick={() => void runBroadcast()}
+                disabled={!configured || broadcastBusy || !broadcastValue.trim()}
+                loading={broadcastBusy}
+              >
+                Broadcast
               </Button>
             </Group>
 
