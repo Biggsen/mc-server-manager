@@ -1,6 +1,14 @@
 import type { Request, Response } from "express";
 import { Router } from "express";
-import { getRun, listRuns, stopRun, subscribeRunEvents, sendRunCommand } from "../services/runQueue";
+import {
+  getRun,
+  listRuns,
+  stopRun,
+  subscribeRunEvents,
+  sendRunCommand,
+  sendTeledosiCommand,
+} from "../services/runQueue";
+import { TeledosiRconError } from "../services/rconClient";
 
 const router = Router();
 
@@ -86,6 +94,12 @@ router.post("/:id/command", async (req: Request, res: Response) => {
       return;
     }
 
+    if (id === "teledosi") {
+      const result = await sendTeledosiCommand(command);
+      res.status(200).json({ ok: true, response: result.response });
+      return;
+    }
+
     const run = getRun(id);
     if (!run) {
       res.status(404).json({ error: "Run not found" });
@@ -96,6 +110,34 @@ router.post("/:id/command", async (req: Request, res: Response) => {
     res.status(200).json({ ok: true });
   } catch (error) {
     console.error("Failed to send run command", error);
+    if (error instanceof TeledosiRconError) {
+      if (error.code === "NOT_CONFIGURED") {
+        res.status(503).json({ error: error.message });
+        return;
+      }
+      if (error.code === "AUTH_FAILED") {
+        res.status(401).json({ error: error.message });
+        return;
+      }
+      if (error.code === "TIMEOUT") {
+        res.status(504).json({ error: error.message });
+        return;
+      }
+      if (error.code === "NETWORK") {
+        res.status(502).json({ error: error.message });
+        return;
+      }
+      if (error.code === "BINARY_MISSING") {
+        res.status(500).json({ error: error.message });
+        return;
+      }
+      if (error.code === "SSH") {
+        res.status(502).json({ error: error.message });
+        return;
+      }
+      res.status(500).json({ error: error.message });
+      return;
+    }
     const message = error instanceof Error ? error.message : String(error);
     if (message.includes("not found")) {
       res.status(404).json({ error: message });

@@ -20,6 +20,7 @@ import {
 import { readProjectFile, resolveProjectRoot } from "./projectFiles";
 import { parse } from "yaml";
 import { existsSync, readdirSync } from "fs";
+import { executeTeledosiRconCommand } from "./rconClient";
 
 const DATA_DIR = getRunsRoot();
 const LOG_PATH = join(DATA_DIR, "runs.json");
@@ -637,6 +638,11 @@ export async function sendRunCommand(runId: string, command: string): Promise<vo
     throw new Error("Command cannot be empty.");
   }
 
+  if (runId === "teledosi") {
+    await executeTeledosiRconCommand(trimmed);
+    return;
+  }
+
   const job = jobs.get(runId);
   if (!job) {
     throw new Error("Run not found.");
@@ -657,6 +663,16 @@ export async function sendRunCommand(runId: string, command: string): Promise<vo
     throw new Error("Command channel is not available.");
   }
   appendLog(job, "system", `> ${trimmed}`);
+}
+
+export async function sendTeledosiCommand(
+  command: string,
+): Promise<{ response: string }> {
+  const trimmed = command.trim();
+  if (!trimmed) {
+    throw new Error("Command cannot be empty.");
+  }
+  return executeTeledosiRconCommand(trimmed);
 }
 
 export async function resetProjectWorkspace(projectId: string): Promise<{ workspacePath: string }> {

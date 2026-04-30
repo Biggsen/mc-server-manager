@@ -15,6 +15,7 @@ import {
   Stack,
   Switch,
   Text,
+  TextInput,
   Title,
 } from '@mantine/core'
 import { Button } from '../components/ui'
@@ -24,6 +25,7 @@ import {
   fetchTeledosiStatus,
   getTeledosiLogsStreamUrl,
   teledosiRestart,
+  teledosiSendCommand,
   teledosiStart,
   teledosiStop,
   type TeledosiServiceState,
@@ -54,6 +56,8 @@ export default function TeledosiServer() {
   const [logText, setLogText] = useState<string>('')
   const [logsLoading, setLogsLoading] = useState(true)
   const [controlBusy, setControlBusy] = useState(false)
+  const [commandBusy, setCommandBusy] = useState(false)
+  const [commandValue, setCommandValue] = useState('')
   const [liveTail, setLiveTail] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const esRef = useRef<EventSource | null>(null)
@@ -176,6 +180,34 @@ export default function TeledosiServer() {
     }
   }
 
+  const runCommand = async () => {
+    const command = commandValue.trim()
+    if (!command) return
+    setCommandBusy(true)
+    setLoadError(null)
+    try {
+      const result = await teledosiSendCommand(command)
+      const response = result.response?.trim()
+      setLogText((prev) => {
+        const lines = [`[rcon] > ${command}`]
+        if (response) {
+          lines.push(`[rcon] ${response}`)
+        }
+        const appended = lines.join('\n')
+        const next: string = prev ? `${prev}\n${appended}` : appended
+        if (next.length > LIVE_BUFFER_MAX_CHARS) {
+          return next.slice(next.length - LIVE_BUFFER_MAX_CHARS)
+        }
+        return next
+      })
+      setCommandValue('')
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setCommandBusy(false)
+    }
+  }
+
   return (
     <Stack gap="xl" pb="xl">
       <ContentSection as="article" padding="xl">
@@ -212,7 +244,7 @@ export default function TeledosiServer() {
           <Text mt="md" c="yellow.4" size="sm">
             Teledosi remote control is not configured on the backend. Set TELEDOSI_SSH_HOST,
             TELEDOSI_SSH_USER, and TELEDOSI_SSH_PASSWORD or a private key, then restart the
-            backend.
+            backend. RCON commands also require TELEDOSI_RCON_HOST and TELEDOSI_RCON_PASSWORD.
           </Text>
         )}
 
@@ -269,6 +301,31 @@ export default function TeledosiServer() {
                 disabled={logsLoading || liveTail}
               >
                 Refresh logs
+              </Button>
+            </Group>
+
+            <Group align="flex-end" mt="md" wrap="nowrap">
+              <TextInput
+                label="RCON command"
+                placeholder="say Hello from MCP"
+                value={commandValue}
+                onChange={(e) => setCommandValue(e.currentTarget.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    void runCommand()
+                  }
+                }}
+                disabled={!configured || commandBusy}
+                style={{ flex: 1 }}
+              />
+              <Button
+                variant="primary"
+                onClick={() => void runCommand()}
+                disabled={!configured || commandBusy || !commandValue.trim()}
+                loading={commandBusy}
+              >
+                Send
               </Button>
             </Group>
 

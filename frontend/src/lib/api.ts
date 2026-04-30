@@ -1635,6 +1635,16 @@ export async function teledosiRestart(): Promise<{ ok: boolean; output?: string 
   return request<{ ok: boolean; output?: string }>('/teledosi/restart', { method: 'POST' })
 }
 
+export async function teledosiSendCommand(command: string): Promise<{
+  ok: boolean
+  response?: string
+}> {
+  return request<{ ok: boolean; response?: string }>('/teledosi/command', {
+    method: 'POST',
+    body: JSON.stringify({ command }),
+  })
+}
+
 /** Absolute or origin-relative URL for EventSource (SSE). */
 export function getTeledosiLogsStreamUrl(): string {
   const base = getApiBase().replace(/\/$/, '')

@@ -1,10 +1,12 @@
 import type { Request, Response } from "express";
 import { Router } from "express";
 import {
+  TELEDOSI_RCON_NOT_CONFIGURED_MESSAGE,
   TELEDOSI_FILES_NOT_CONFIGURED_MESSAGE,
   TELEDOSI_NOT_CONFIGURED_MESSAGE,
   isTeledosiConfigured,
   isTeledosiFilesConfigured,
+  isTeledosiRconConfigured,
   isTeledosiSshConfigured,
   teledosiFilesMaxBytes,
   teledosiSftpRemoteRoot,
@@ -22,6 +24,7 @@ import {
   teledosiFilesRead,
   teledosiFilesWrite,
 } from "../services/teledosiFiles";
+import { executeTeledosiRconCommand, TeledosiRconError } from "../services/rconClient";
 
 const router = Router();
 
@@ -96,6 +99,53 @@ router.post("/restart", async (_req: Request, res: Response) => {
   } catch (error) {
     console.error("Teledosi restart error", error);
     res.status(502).json({ error: formatError(error) });
+  }
+});
+
+router.post("/command", async (req: Request, res: Response) => {
+  const command = typeof req.body?.command === "string" ? req.body.command.trim() : "";
+  if (!command) {
+    res.status(400).json({ error: "Command is required" });
+    return;
+  }
+  if (!isTeledosiRconConfigured()) {
+    res.status(503).json({ error: TELEDOSI_RCON_NOT_CONFIGURED_MESSAGE });
+    return;
+  }
+  try {
+    const { response } = await executeTeledosiRconCommand(command);
+    res.json({ ok: true, response });
+  } catch (error) {
+    if (error instanceof TeledosiRconError) {
+      if (error.code === "NOT_CONFIGURED") {
+        res.status(503).json({ error: TELEDOSI_RCON_NOT_CONFIGURED_MESSAGE });
+        return;
+      }
+      if (error.code === "AUTH_FAILED") {
+        res.status(401).json({ error: error.message });
+        return;
+      }
+      if (error.code === "TIMEOUT") {
+        res.status(504).json({ error: error.message });
+        return;
+      }
+      if (error.code === "NETWORK") {
+        res.status(502).json({ error: error.message });
+        return;
+      }
+      if (error.code === "BINARY_MISSING") {
+        res.status(500).json({ error: error.message });
+        return;
+      }
+      if (error.code === "SSH") {
+        res.status(502).json({ error: error.message });
+        return;
+      }
+      res.status(500).json({ error: error.message });
+      return;
+    }
+    console.error("Teledosi RCON command error", error);
+    res.status(500).json({ error: formatError(error) });
   }
 });
 
