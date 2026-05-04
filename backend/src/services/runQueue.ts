@@ -26,6 +26,8 @@ const DATA_DIR = getRunsRoot();
 const LOG_PATH = join(DATA_DIR, "runs.json");
 const WORKSPACE_ROOT = join(DATA_DIR, "workspaces");
 const WORKSPACE_STATE_FILENAME = ".workspace-state.json";
+const DOCKER_STOP_TIMEOUT_MS = 120_000;
+const DOCKER_RM_TIMEOUT_MS = 45_000;
 
 const jobs = new Map<string, RunJob>();
 const processes = new Map<string, ChildProcess>();
@@ -177,17 +179,9 @@ export async function stopRun(jobId: string): Promise<RunJob> {
   await persistRuns();
 
   const containerName = job.containerName;
-  if (containerName) {
-    try {
-      await stopDockerContainer(job, containerName);
-    } catch (error) {
-      appendLog(
-        job,
-        "stderr",
-        error instanceof Error ? error.message : "Failed to stop docker container",
-      );
-    }
-  }
+  const dockerCleanup = containerName
+    ? stopDockerContainer(job, containerName)
+    : Promise.resolve();
 
   const child = processes.get(jobId);
   if (child && !child.killed) {
@@ -195,6 +189,8 @@ export async function stopRun(jobId: string): Promise<RunJob> {
   }
   processes.delete(jobId);
   stdinStreams.delete(jobId);
+
+  await dockerCleanup;
 
   job.status = "stopped";
   job.finishedAt = new Date().toISOString();
@@ -552,7 +548,32 @@ async function loadRunsFromDisk(): Promise<void> {
     if (code !== "ENOENT") {
       console.warn("Failed to read run history", error);
     }
+    return;
   }
+
+  if (recoverStuckStoppingRuns()) {
+    await persistRuns();
+  }
+}
+
+function recoverStuckStoppingRuns(): boolean {
+  let changed = false;
+  for (const run of jobs.values()) {
+    if (run.status !== "stopping") {
+      continue;
+    }
+    appendLog(run, "system", "Recovered incomplete stop (app restarted while stopping).");
+    run.status = "stopped";
+    run.finishedAt = run.finishedAt ?? new Date().toISOString();
+    run.consoleAvailable = false;
+    jobs.set(run.id, run);
+    changed = true;
+    emitRunUpdate(run);
+    if (run.containerName) {
+      void forceRemoveDockerContainer(run, run.containerName);
+    }
+  }
+  return changed;
 }
 
 async function persistRuns(): Promise<void> {
@@ -565,8 +586,43 @@ async function persistRuns(): Promise<void> {
 
 async function stopDockerContainer(job: RunJob, containerName: string): Promise<void> {
   appendLog(job, "system", `Stopping docker container ${containerName}`);
-  await new Promise<void>((resolve, reject) => {
+  try {
+    await runDockerStopWithTimeout(job, containerName, DOCKER_STOP_TIMEOUT_MS);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      appendLog(job, "system", "Docker CLI not found while attempting to stop container.");
+      return;
+    }
+    appendLog(
+      job,
+      "stderr",
+      error instanceof Error ? error.message : "Failed to stop docker container",
+    );
+  }
+}
+
+function runDockerStopWithTimeout(
+  job: RunJob,
+  containerName: string,
+  timeoutMs: number,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
     const stopper = spawn("docker", ["stop", containerName], { stdio: ["ignore", "pipe", "pipe"] });
+    let settled = false;
+
+    const timeout = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      stopper.kill("SIGKILL");
+      appendLog(
+        job,
+        "system",
+        `docker stop timed out after ${timeoutMs}ms; forcing container removal.`,
+      );
+      void forceRemoveDockerContainer(job, containerName).then(() => resolve());
+    }, timeoutMs);
 
     stopper.stdout?.on("data", (chunk: Buffer) => {
       appendLog(job, "stdout", chunk.toString("utf-8"));
@@ -577,22 +633,82 @@ async function stopDockerContainer(job: RunJob, containerName: string): Promise<
     });
 
     stopper.on("error", (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
       reject(error);
     });
 
     stopper.on("close", (code) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
       if (code === 0) {
         resolve();
-      } else {
-        reject(new Error(`docker stop exited with status ${code}`));
+        return;
       }
+      appendLog(job, "stderr", `docker stop exited with status ${code}; trying docker rm -f.`);
+      void forceRemoveDockerContainer(job, containerName).then(() => resolve());
     });
-  }).catch((error) => {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      appendLog(job, "system", "Docker CLI not found while attempting to stop container.");
-      return;
-    }
-    throw error;
+  });
+}
+
+function forceRemoveDockerContainer(job: RunJob, containerName: string): Promise<void> {
+  return new Promise((resolve) => {
+    const remover = spawn("docker", ["rm", "-f", containerName], { stdio: ["ignore", "pipe", "pipe"] });
+    let settled = false;
+
+    const timeout = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      remover.kill("SIGKILL");
+      appendLog(job, "stderr", "docker rm -f timed out; container may still exist.");
+      resolve();
+    }, DOCKER_RM_TIMEOUT_MS);
+
+    remover.stdout?.on("data", (chunk: Buffer) => {
+      appendLog(job, "stdout", chunk.toString("utf-8"));
+    });
+
+    remover.stderr?.on("data", (chunk: Buffer) => {
+      appendLog(job, "stderr", chunk.toString("utf-8"));
+    });
+
+    remover.on("error", (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        appendLog(job, "system", "Docker CLI not found during forced container removal.");
+      } else {
+        appendLog(job, "stderr", error instanceof Error ? error.message : String(error));
+      }
+      resolve();
+    });
+
+    remover.on("close", (code) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      if (code !== 0) {
+        appendLog(
+          job,
+          "system",
+          `docker rm -f exited with status ${code} (container may already be gone).`,
+        );
+      }
+      resolve();
+    });
   });
 }
 
