@@ -505,25 +505,33 @@ function LiveEditor() {
           </Paper>
         )}
 
-        <Select
-          label="Project"
-          placeholder="Select project"
-          data={projectOptions}
-          value={projectId ?? ''}
-          onChange={(v) => {
-            setProjectId(v || null)
-            setBreadcrumb([])
-            setSelectedFile(null)
-          }}
-          w={220}
-          clearable
-        />
+        <Group align="flex-end" gap="md" wrap="nowrap">
+          <Select
+            label="Project"
+            placeholder="Select project"
+            data={projectOptions}
+            value={projectId ?? ''}
+            onChange={(v) => {
+              setProjectId(v || null)
+              setBreadcrumb([])
+              setSelectedFile(null)
+            }}
+            w={220}
+            clearable
+          />
+          {projectId ? (
+            <Anchor component={Link} to={`/projects/${projectId}`} size="sm">
+              Go to project
+            </Anchor>
+          ) : null}
+        </Group>
 
         {projectId && breadcrumb.length > 0 && (
           <UIButton
             variant="secondary"
             size="sm"
             icon={<FolderPlus size={16} />}
+            style={{ alignSelf: 'flex-start' }}
             onClick={() => promoteFolder()}
             disabled={promoteFolderLoading || !canPromoteFolder}
             title={
