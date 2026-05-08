@@ -4,14 +4,7 @@ import { readdir, stat, mkdir, rm } from "fs/promises";
 import { join, dirname } from "path";
 import { findProject } from "../storage/projectsStore";
 import { listRemote, uploadFile, deleteRemoteFile, downloadRemoteFile, readRemoteGeneratorVersion } from "../services/sftpClient";
-import {
-  getRunsRoot,
-  teledosiSftpPassword,
-  teledosiSshHost,
-  teledosiSshPassword,
-  teledosiSshPort,
-  teledosiSshUser,
-} from "../config";
+import { getRunsRoot, liveServers, type LiveServerConfig } from "../config";
 import { readGeneratorVersionFromFile } from "../services/configUploads";
 import { normalizeSshHost } from "../services/sshConnection";
 import type { StoredProject } from "../types/storage";
@@ -42,17 +35,26 @@ function formatSftpError(error: unknown): string {
   return String(error);
 }
 
-function isProjectTeledosiTarget(project: StoredProject): boolean {
+function projectMatchesLiveServer(project: StoredProject, cfg: LiveServerConfig): boolean {
   const sftp = project.sftp;
   if (!sftp) return false;
   const projectHost = normalizeSshHost(sftp.host).toLowerCase();
-  const teledosiHost = normalizeSshHost(teledosiSshHost).toLowerCase();
-  if (!projectHost || !teledosiHost || projectHost !== teledosiHost) return false;
+  const serverHost = normalizeSshHost(cfg.ssh.host).toLowerCase();
+  if (!projectHost || !serverHost || projectHost !== serverHost) return false;
   const projectUser = (sftp.username ?? "").trim().toLowerCase();
-  const teledosiUser = (teledosiSshUser ?? "").trim().toLowerCase();
-  if (!projectUser || !teledosiUser || projectUser !== teledosiUser) return false;
+  const serverUser = (cfg.ssh.user ?? "").trim().toLowerCase();
+  if (!projectUser || !serverUser || projectUser !== serverUser) return false;
   const projectPort = sftp.port ?? 22;
-  return projectPort === teledosiSshPort;
+  return projectPort === cfg.ssh.port;
+}
+
+function findMatchingLiveServer(project: StoredProject): LiveServerConfig | undefined {
+  for (const cfg of liveServers) {
+    if (projectMatchesLiveServer(project, cfg)) {
+      return cfg;
+    }
+  }
+  return undefined;
 }
 
 function resolveUploadPassword(project: StoredProject, providedRaw: unknown): string | null {
@@ -63,10 +65,11 @@ function resolveUploadPassword(project: StoredProject, providedRaw: unknown): st
   if (provided.length > 0) {
     return provided;
   }
-  if (!isProjectTeledosiTarget(project)) {
+  const cfg = findMatchingLiveServer(project);
+  if (!cfg) {
     return null;
   }
-  const fallback = (teledosiSftpPassword || teledosiSshPassword || "").trim();
+  const fallback = (cfg.files.password || cfg.ssh.password || "").trim();
   return fallback.length > 0 ? fallback : null;
 }
 
@@ -78,11 +81,12 @@ router.get("/default-password-available", async (req: Request, res: Response) =>
       return;
     }
     const project = await findProject(projectId);
-    if (!project?.sftp || !isProjectTeledosiTarget(project)) {
+    const cfg = project ? findMatchingLiveServer(project) : undefined;
+    if (!project?.sftp || !cfg) {
       res.json({ available: false });
       return;
     }
-    const hasDefault = (teledosiSftpPassword || teledosiSshPassword || "").trim().length > 0;
+    const hasDefault = (cfg.files.password || cfg.ssh.password || "").trim().length > 0;
     res.json({ available: hasDefault });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

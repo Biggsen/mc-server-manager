@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Cloud, File, FloppyDisk, Folder, FolderOpen } from '@phosphor-icons/react'
+import { File, FloppyDisk, Folder, FolderOpen } from '@phosphor-icons/react'
 import {
   Alert,
   Anchor,
@@ -21,11 +21,11 @@ import { ContentSection } from '../components/layout'
 import { Button, Button as UIButton } from '../components/ui'
 import { useToast } from '../components/ui'
 import {
-  fetchTeledosiFileRead,
-  fetchTeledosiFilesConfig,
-  fetchTeledosiFilesList,
-  writeTeledosiRemoteFile,
-  type TeledosiFileListEntry,
+  fetchLiveServerFileRead,
+  fetchLiveServerFilesConfig,
+  fetchLiveServerFilesList,
+  writeLiveServerRemoteFile,
+  type LiveServerFileListEntry,
 } from '../lib/api'
 import { useAsyncAction } from '../lib/useAsyncAction'
 
@@ -34,9 +34,17 @@ function isYamlPath(path: string): boolean {
   return lower.endsWith('.yml') || lower.endsWith('.yaml')
 }
 
-export default function TeledosiFiles() {
+export type LiveServerFilesPageProps = {
+  serverId: string
+  displayName: string
+  serverPath: string
+}
+
+export default function LiveServerFilesPage({ serverId, displayName, serverPath }: LiveServerFilesPageProps) {
   const navigate = useNavigate()
   const { toast: showToast } = useToast()
+  const envPrefix = serverId.toUpperCase()
+  const profileIconPath = `server_icons/${serverId}-profile.png`
   const [sshOk, setSshOk] = useState(true)
   const [filesConfigured, setFilesConfigured] = useState(false)
   const [remoteRoot, setRemoteRoot] = useState<string | undefined>()
@@ -45,7 +53,7 @@ export default function TeledosiFiles() {
   const [configLoading, setConfigLoading] = useState(true)
 
   const [breadcrumb, setBreadcrumb] = useState<string[]>([])
-  const [entries, setEntries] = useState<TeledosiFileListEntry[]>([])
+  const [entries, setEntries] = useState<LiveServerFileListEntry[]>([])
   const [entriesLoading, setEntriesLoading] = useState(false)
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
   const [fileContent, setFileContent] = useState('')
@@ -62,7 +70,7 @@ export default function TeledosiFiles() {
   useEffect(() => {
     let cancelled = false
     setConfigLoading(true)
-    fetchTeledosiFilesConfig()
+    fetchLiveServerFilesConfig(serverId)
       .then((c) => {
         if (cancelled) return
         setSshOk(true)
@@ -78,7 +86,7 @@ export default function TeledosiFiles() {
           setSshOk(false)
         } else {
           showToast({
-            title: 'Failed to load Teledosi file settings',
+            title: 'Failed to load file settings',
             description: msg,
             variant: 'danger',
           })
@@ -90,13 +98,13 @@ export default function TeledosiFiles() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [serverId, showToast])
 
   const loadEntries = useCallback(async () => {
     if (!sshOk || !filesConfigured) return
     setEntriesLoading(true)
     try {
-      const { entries: list } = await fetchTeledosiFilesList(currentDirPath || undefined)
+      const { entries: list } = await fetchLiveServerFilesList(serverId, currentDirPath || undefined)
       setEntries(list)
     } catch (err) {
       showToast({
@@ -108,7 +116,7 @@ export default function TeledosiFiles() {
     } finally {
       setEntriesLoading(false)
     }
-  }, [sshOk, filesConfigured, currentDirPath, showToast])
+  }, [sshOk, filesConfigured, currentDirPath, serverId, showToast])
 
   useEffect(() => {
     void loadEntries()
@@ -121,7 +129,7 @@ export default function TeledosiFiles() {
       setContentDirty(false)
       setFileLoadError(null)
       try {
-        const { content, isBinary } = await fetchTeledosiFileRead(relPath)
+        const { content, isBinary } = await fetchLiveServerFileRead(serverId, relPath)
         setFileContent(content)
         setFileIsBinary(isBinary)
       } catch (err) {
@@ -138,20 +146,20 @@ export default function TeledosiFiles() {
         setFileLoading(false)
       }
     },
-    [showToast],
+    [serverId, showToast],
   )
 
   const { run: saveFile, busy: saveLoading } = useAsyncAction(
     async () => {
       if (!selectedFile) return
-      await writeTeledosiRemoteFile(selectedFile, fileContent)
+      await writeLiveServerRemoteFile(serverId, selectedFile, fileContent)
       setContentDirty(false)
     },
     {
       label: 'Saving…',
       successToast: () => ({
         title: 'Saved',
-        description: 'File written on the Teledosi VPS.',
+        description: 'File written on the remote server.',
         variant: 'success',
       }),
       errorToast: (err) => ({
@@ -163,7 +171,7 @@ export default function TeledosiFiles() {
   )
 
   const handleEntryClick = useCallback(
-    (entry: TeledosiFileListEntry) => {
+    (entry: LiveServerFileListEntry) => {
       if (entry.type === 'directory') {
         setBreadcrumb((prev) => [...prev, entry.name])
         setSelectedFile(null)
@@ -239,13 +247,20 @@ export default function TeledosiFiles() {
       <Stack gap="lg">
         <Group justify="space-between" align="flex-start" wrap="wrap">
           <Group gap="sm">
-            <Cloud size={26} weight="duotone" aria-hidden />
-            <Title order={2}>Teledosi Files</Title>
+            <img
+              src={profileIconPath}
+              alt=""
+              aria-hidden="true"
+              width={64}
+              height={64}
+              style={{ borderRadius: 8, objectFit: 'cover', display: 'block' }}
+            />
+            <Title order={2}>{displayName}</Title>
           </Group>
           <Button
             variant="secondary"
             size="sm"
-            onClick={() => navigate('/teledosi')}
+            onClick={() => navigate(serverPath)}
             styles={{ root: { alignSelf: 'flex-start', width: 'fit-content' } }}
           >
             Server
@@ -253,14 +268,15 @@ export default function TeledosiFiles() {
         </Group>
 
         {!sshOk && (
-          <Alert color="yellow" title="Teledosi SSH not configured">
-            Set TELEDOSI_SSH_HOST, TELEDOSI_SSH_USER, and TELEDOSI_SSH_PASSWORD or a private key on the backend.
+          <Alert color="yellow" title="SSH not configured">
+            Set {envPrefix}_SSH_HOST, {envPrefix}_SSH_USER, and {envPrefix}_SSH_PASSWORD or a private key on the backend.
           </Alert>
         )}
 
         {sshOk && !filesConfigured && (
           <Alert color="blue" title="Remote file root not set">
-            {filesHint ?? 'Set TELEDOSI_SFTP_REMOTE_ROOT to an absolute path on the VPS (for example the same path as your project SFTP remote path on the Upload page), then restart the backend.'}
+            {filesHint ??
+              `Set ${envPrefix}_SFTP_REMOTE_ROOT to an absolute path on the VPS (for example the same path as your project SFTP remote path on the Upload page), then restart the backend.`}
           </Alert>
         )}
 

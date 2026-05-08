@@ -20,7 +20,8 @@ import {
 import { readProjectFile, resolveProjectRoot } from "./projectFiles";
 import { parse } from "yaml";
 import { existsSync, readdirSync } from "fs";
-import { executeTeledosiRconCommand } from "./rconClient";
+import { liveServersById } from "../config";
+import { executeRconCommand, executeTeledosiRconCommand } from "./rconClient";
 
 const DATA_DIR = getRunsRoot();
 const LOG_PATH = join(DATA_DIR, "runs.json");
@@ -754,8 +755,9 @@ export async function sendRunCommand(runId: string, command: string): Promise<vo
     throw new Error("Command cannot be empty.");
   }
 
-  if (runId === "teledosi") {
-    await executeTeledosiRconCommand(trimmed);
+  const liveCfg = liveServersById[runId];
+  if (liveCfg) {
+    await executeRconCommand(liveCfg, trimmed);
     return;
   }
 

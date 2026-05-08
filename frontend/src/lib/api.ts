@@ -1612,49 +1612,85 @@ export async function getUploadRemoteFileGeneratorVersion(
   return data.generatorVersion
 }
 
-export type TeledosiServiceState = 'running' | 'stopped' | 'failed'
+export type LiveServerServiceState = 'running' | 'stopped' | 'failed'
 
-export async function fetchTeledosiStatus(): Promise<{ state: TeledosiServiceState; raw: string }> {
-  return request<{ state: TeledosiServiceState; raw: string }>('/teledosi/status')
+/** @deprecated Use LiveServerServiceState */
+export type TeledosiServiceState = LiveServerServiceState
+
+export async function fetchLiveServerStatus(
+  serverId: string,
+): Promise<{ state: LiveServerServiceState; raw: string }> {
+  return request<{ state: LiveServerServiceState; raw: string }>(`/${serverId}/status`)
 }
 
-export async function fetchTeledosiLogs(lines?: number): Promise<{ text: string }> {
+export async function fetchLiveServerLogs(serverId: string, lines?: number): Promise<{ text: string }> {
   const q = lines != null ? `?lines=${encodeURIComponent(String(lines))}` : ''
-  return request<{ text: string }>(`/teledosi/logs${q}`)
+  return request<{ text: string }>(`/${serverId}/logs${q}`)
 }
 
-export async function teledosiStart(): Promise<{ ok: boolean; output?: string }> {
-  return request<{ ok: boolean; output?: string }>('/teledosi/start', { method: 'POST' })
+export async function liveServerStart(serverId: string): Promise<{ ok: boolean; output?: string }> {
+  return request<{ ok: boolean; output?: string }>(`/${serverId}/start`, { method: 'POST' })
 }
 
-export async function teledosiStop(): Promise<{ ok: boolean; output?: string }> {
-  return request<{ ok: boolean; output?: string }>('/teledosi/stop', { method: 'POST' })
+export async function liveServerStop(serverId: string): Promise<{ ok: boolean; output?: string }> {
+  return request<{ ok: boolean; output?: string }>(`/${serverId}/stop`, { method: 'POST' })
 }
 
-export async function teledosiRestart(): Promise<{ ok: boolean; output?: string }> {
-  return request<{ ok: boolean; output?: string }>('/teledosi/restart', { method: 'POST' })
+export async function liveServerRestart(serverId: string): Promise<{ ok: boolean; output?: string }> {
+  return request<{ ok: boolean; output?: string }>(`/${serverId}/restart`, { method: 'POST' })
 }
 
-export async function teledosiSendCommand(command: string): Promise<{
+export async function liveServerSendCommand(
+  serverId: string,
+  command: string,
+): Promise<{
   ok: boolean
   response?: string
 }> {
-  return request<{ ok: boolean; response?: string }>('/teledosi/command', {
+  return request<{ ok: boolean; response?: string }>(`/${serverId}/command`, {
     method: 'POST',
     body: JSON.stringify({ command }),
   })
 }
 
 /** Absolute or origin-relative URL for EventSource (SSE). */
-export function getTeledosiLogsStreamUrl(): string {
+export function getLiveServerLogsStreamUrl(serverId: string): string {
   const base = getApiBase().replace(/\/$/, '')
-  if (base.startsWith('http://') || base.startsWith('https://')) {
-    return `${base}/teledosi/logs/stream`
-  }
-  return `${base}/teledosi/logs/stream`
+  return `${base}/${serverId}/logs/stream`
 }
 
-export type TeledosiFileListEntry = {
+export async function fetchTeledosiStatus(): Promise<{ state: TeledosiServiceState; raw: string }> {
+  return fetchLiveServerStatus('teledosi')
+}
+
+export async function fetchTeledosiLogs(lines?: number): Promise<{ text: string }> {
+  return fetchLiveServerLogs('teledosi', lines)
+}
+
+export async function teledosiStart(): Promise<{ ok: boolean; output?: string }> {
+  return liveServerStart('teledosi')
+}
+
+export async function teledosiStop(): Promise<{ ok: boolean; output?: string }> {
+  return liveServerStop('teledosi')
+}
+
+export async function teledosiRestart(): Promise<{ ok: boolean; output?: string }> {
+  return liveServerRestart('teledosi')
+}
+
+export async function teledosiSendCommand(command: string): Promise<{
+  ok: boolean
+  response?: string
+}> {
+  return liveServerSendCommand('teledosi', command)
+}
+
+export function getTeledosiLogsStreamUrl(): string {
+  return getLiveServerLogsStreamUrl('teledosi')
+}
+
+export type LiveServerFileListEntry = {
   name: string
   path: string
   type: 'file' | 'directory'
@@ -1663,31 +1699,65 @@ export type TeledosiFileListEntry = {
   relativePath: string
 }
 
+/** @deprecated Use LiveServerFileListEntry */
+export type TeledosiFileListEntry = LiveServerFileListEntry
+
+export async function fetchLiveServerFilesConfig(serverId: string): Promise<{
+  filesConfigured: boolean
+  remoteRoot?: string
+  maxBytes: number
+  hint?: string
+}> {
+  return request(`/${serverId}/files/config`)
+}
+
+export async function fetchLiveServerFilesList(
+  serverId: string,
+  relDir?: string,
+): Promise<{ entries: LiveServerFileListEntry[] }> {
+  const q =
+    relDir != null && relDir.length > 0 ? `?path=${encodeURIComponent(relDir.replace(/^\/+/, ''))}` : ''
+  return request(`/${serverId}/files/list${q}`)
+}
+
+export async function fetchLiveServerFileRead(
+  serverId: string,
+  path: string,
+): Promise<{ path: string; content: string; isBinary: boolean }> {
+  return request(`/${serverId}/files/read?path=${encodeURIComponent(path)}`)
+}
+
+export async function writeLiveServerRemoteFile(
+  serverId: string,
+  path: string,
+  content: string,
+): Promise<{ ok: boolean }> {
+  return request(`/${serverId}/files/write`, {
+    method: 'PUT',
+    body: JSON.stringify({ path, content }),
+  })
+}
+
 export async function fetchTeledosiFilesConfig(): Promise<{
   filesConfigured: boolean
   remoteRoot?: string
   maxBytes: number
   hint?: string
 }> {
-  return request('/teledosi/files/config')
+  return fetchLiveServerFilesConfig('teledosi')
 }
 
 export async function fetchTeledosiFilesList(relDir?: string): Promise<{ entries: TeledosiFileListEntry[] }> {
-  const q =
-    relDir != null && relDir.length > 0 ? `?path=${encodeURIComponent(relDir.replace(/^\/+/, ''))}` : ''
-  return request(`/teledosi/files/list${q}`)
+  return fetchLiveServerFilesList('teledosi', relDir)
 }
 
 export async function fetchTeledosiFileRead(
   path: string,
 ): Promise<{ path: string; content: string; isBinary: boolean }> {
-  return request(`/teledosi/files/read?path=${encodeURIComponent(path)}`)
+  return fetchLiveServerFileRead('teledosi', path)
 }
 
 export async function writeTeledosiRemoteFile(path: string, content: string): Promise<{ ok: boolean }> {
-  return request('/teledosi/files/write', {
-    method: 'PUT',
-    body: JSON.stringify({ path, content }),
-  })
+  return writeLiveServerRemoteFile('teledosi', path, content)
 }
 

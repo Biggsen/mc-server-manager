@@ -26,17 +26,22 @@ Required keys:
 - `APP_BASE_URL` (frontend origin, e.g. `http://localhost:5173`)
 - Optional: `GITHUB_SCOPE` (defaults to `repo read:user`)
 
-Teledosi remote control keys:
+Live server remote control (same pattern for each server; prefix `TELEDOSI_` or `CHARIDH_`):
 
-- `TELEDOSI_SSH_HOST` / `TELEDOSI_SSH_USER` and either `TELEDOSI_SSH_PASSWORD` or SSH private key vars
-- `TELEDOSI_RCON_WRAPPER_BIN` (default `teledosi-rcon`, executed on the VPS over SSH)
-- Optional: `TELEDOSI_RCON_PORT` (default `25575`)
-- Optional: `TELEDOSI_RCON_TIMEOUT_MS` (default `5000`, min `250`, max `30000`)
-- Optional (legacy/direct mode tooling): `TELEDOSI_MCRCON_BIN`, `TELEDOSI_RCON_HOST`, `TELEDOSI_RCON_PASSWORD`
+- `{PREFIX}_SSH_HOST` / `{PREFIX}_SSH_USER` and either `{PREFIX}_SSH_PASSWORD` or `{PREFIX}_SSH_PRIVATE_KEY` / `{PREFIX}_SSH_PRIVATE_KEY_PATH` (+ optional `{PREFIX}_SSH_PASSPHRASE`)
+- `{PREFIX}_SYSTEMD_UNIT` — optional; defaults to `minecraft-<serverId>` (e.g. `minecraft-teledosi`, `minecraft-charidh`)
+- `{PREFIX}_RCON_WRAPPER_BIN` — optional; defaults to `<serverId>-rcon` (e.g. `teledosi-rcon`, `charidh-rcon`), executed on the VPS over SSH
+- `{PREFIX}_SFTP_REMOTE_ROOT` — absolute path on the VPS for the file browser / Upload matching host
+- Optional: `{PREFIX}_SFTP_PASSWORD` (falls back to `{PREFIX}_SSH_PASSWORD`)
+- Optional: `{PREFIX}_SSH_PORT` (default `22`), `{PREFIX}_USE_SUDO` (default on), `{PREFIX}_LOGS_MAX_LINES`, `{PREFIX}_RCON_TIMEOUT_MS`, `{PREFIX}_FILES_MAX_BYTES`
 
-Teledosi command transport uses SSH to run a VPS-local wrapper (Option B), so RCON can stay local
-to the VPS and does not need to be publicly exposed. This avoids passing the RCON password in app-
-constructed process arguments.
+Place `.env` next to the backend (`backend/.env`) when running the API from that folder. Command transport uses SSH to run a VPS-local wrapper so RCON can stay on the VPS.
+
+**Upload:** When a project’s SFTP host, username, and port match a configured live server, the Upload page can use the backend `{PREFIX}_SFTP_PASSWORD` or `{PREFIX}_SSH_PASSWORD` as the default SFTP password.
+
+**Adding another live server:** Add `{PREFIX}_*` env vars, append one entry to `liveServers` in `backend/src/config.ts`, and one entry to `frontend/src/lib/liveServers.ts`.
+
+**Projects:** Renaming “Charidh Live” → “Charidh old-Live” and creating a new “Charidh Live” project for the new VPS is done in the app (Projects → project settings); not via git/code.
 
 ## Structure
 

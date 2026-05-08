@@ -1,12 +1,12 @@
+import type { LiveServerConfig } from "../config";
 import {
-  TELEDOSI_RCON_NOT_CONFIGURED_MESSAGE,
-  isTeledosiRconConfigured,
-  teledosiRconTimeoutMs,
-  teledosiRconWrapperBin,
+  isLiveServerRconConfigured,
+  liveServerRconNotConfiguredMessage,
+  teledosiConfig,
 } from "../config";
-import { execBuffered, shellSingleQuote, withTeledosiSsh } from "./teledosiRemote";
+import { execBuffered, shellSingleQuote, withLiveServerSsh } from "./liveServerRemote";
 
-export class TeledosiRconError extends Error {
+export class LiveServerRconError extends Error {
   code:
     | "NOT_CONFIGURED"
     | "AUTH_FAILED"
@@ -32,29 +32,34 @@ export class TeledosiRconError extends Error {
   }
 }
 
+/** @deprecated Use LiveServerRconError */
+export const TeledosiRconError = LiveServerRconError;
+
 const ANSI_ESCAPE_RE = /\x1b\[[0-9;?]*[ -/]*[@-~]/g;
 function stripAnsi(text: string): string {
   return text.replace(ANSI_ESCAPE_RE, "");
 }
 
-async function executeViaSshMcrcon(
+async function executeViaSshWrapper(
+  cfg: LiveServerConfig,
   command: string,
 ): Promise<{ response: string }> {
-  const wrapperBin = shellSingleQuote(teledosiRconWrapperBin);
+  const wrapperBin = shellSingleQuote(cfg.rcon.wrapperBin);
   const cmd = shellSingleQuote(command);
   const remoteCmd = `${wrapperBin} ${cmd} 2>&1`;
+  const timeoutMs = cfg.rcon.timeoutMs;
 
   const result = await Promise.race([
-    withTeledosiSsh((conn) => execBuffered(conn, remoteCmd)),
+    withLiveServerSsh(cfg, (conn) => execBuffered(conn, remoteCmd)),
     new Promise<never>((_resolve, reject) => {
       setTimeout(() => {
         reject(
-          new TeledosiRconError(
+          new LiveServerRconError(
             "TIMEOUT",
-            `RCON request timed out after ${teledosiRconTimeoutMs} ms`,
+            `RCON request timed out after ${timeoutMs} ms`,
           ),
         );
-      }, teledosiRconTimeoutMs);
+      }, timeoutMs);
     }),
   ]);
 
@@ -62,42 +67,49 @@ async function executeViaSshMcrcon(
   const out = stripAnsi(rawOut).trim();
   const msg = out.toLowerCase();
   if (result.code === 127 || /command not found|not recognized/.test(msg)) {
-    throw new TeledosiRconError(
+    throw new LiveServerRconError(
       "BINARY_MISSING",
-      `RCON wrapper binary not found on remote host (tried ${teledosiRconWrapperBin}). Set TELEDOSI_RCON_WRAPPER_BIN or install the wrapper on the VPS.`,
+      `RCON wrapper binary not found on remote host (tried ${cfg.rcon.wrapperBin}). Set ${cfg.envPrefix}_RCON_WRAPPER_BIN or install the wrapper on the VPS.`,
     );
   }
   if (/connection timed out|timed out/.test(msg)) {
-    throw new TeledosiRconError("TIMEOUT", `RCON request timed out after ${teledosiRconTimeoutMs} ms`);
+    throw new LiveServerRconError("TIMEOUT", `RCON request timed out after ${timeoutMs} ms`);
   }
   if (/authentication failed|login failed|wrong password/.test(msg)) {
-    throw new TeledosiRconError("AUTH_FAILED", "RCON authentication failed");
+    throw new LiveServerRconError("AUTH_FAILED", "RCON authentication failed");
   }
   if (result.code !== 0) {
-    throw new TeledosiRconError("SSH", out || `Remote mcrcon exited with status ${result.code}`);
+    throw new LiveServerRconError("SSH", out || `Remote wrapper exited with status ${result.code}`);
   }
   return { response: out };
+}
+
+export async function executeRconCommand(
+  cfg: LiveServerConfig,
+  command: string,
+): Promise<{ response: string }> {
+  if (!isLiveServerRconConfigured(cfg)) {
+    throw new LiveServerRconError("NOT_CONFIGURED", liveServerRconNotConfiguredMessage(cfg));
+  }
+  const trimmed = command.trim();
+  if (!trimmed) {
+    throw new LiveServerRconError("PROTOCOL", "Command cannot be empty.");
+  }
+  return executeViaSshWrapper(cfg, trimmed).catch((error) => {
+    throw normalizeRconError(error);
+  });
 }
 
 export async function executeTeledosiRconCommand(
   command: string,
 ): Promise<{ response: string }> {
-  if (!isTeledosiRconConfigured()) {
-    throw new TeledosiRconError("NOT_CONFIGURED", TELEDOSI_RCON_NOT_CONFIGURED_MESSAGE);
-  }
-  const trimmed = command.trim();
-  if (!trimmed) {
-    throw new TeledosiRconError("PROTOCOL", "Command cannot be empty.");
-  }
-  return executeViaSshMcrcon(trimmed).catch((error) => {
-    throw normalizeRconError(error);
-  });
+  return executeRconCommand(teledosiConfig, command);
 }
 
-function normalizeRconError(error: unknown): TeledosiRconError {
-  if (error instanceof TeledosiRconError) {
+function normalizeRconError(error: unknown): LiveServerRconError {
+  if (error instanceof LiveServerRconError) {
     return error;
   }
   const message = error instanceof Error ? error.message : String(error);
-  return new TeledosiRconError("NETWORK", `RCON transport error: ${message}`);
+  return new LiveServerRconError("NETWORK", `RCON transport error: ${message}`);
 }

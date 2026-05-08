@@ -1,27 +1,21 @@
 import type { Client } from "ssh2";
+import type { LiveServerConfig } from "../config";
 import {
-  getTeledosiPrivateKeyPem,
-  isTeledosiConfigured,
-  isValidTeledosiSystemdUnit,
-  teledosiLogsMaxLines,
-  teledosiSshHost,
-  teledosiSshPassword,
-  teledosiSshPassphrase,
-  teledosiSshPort,
-  teledosiSshUser,
-  teledosiSystemdUnit,
+  getResolvedPrivateKeyPem,
+  isLiveServerConfigured,
+  isValidLiveServerSystemdUnit,
 } from "../config";
 import { connectSsh2, type SshConnectOptions } from "./sshConnection";
 
 function assertUnitName(unit: string): void {
-  if (!isValidTeledosiSystemdUnit(unit)) {
-    throw new Error("Invalid TELEDOSI_SYSTEMD_UNIT (allowed: letters, digits, :, ., _, -, @)");
+  if (!isValidLiveServerSystemdUnit(unit)) {
+    throw new Error("Invalid systemd unit name (allowed: letters, digits, :, ., _, -, @)");
   }
 }
 
-/** Match `TELEDOSI_USE_SUDO` — default use sudo -n for start/stop/restart */
-function useSudoForSystemctl(): boolean {
-  const v = (process.env.TELEDOSI_USE_SUDO ?? "1").trim().toLowerCase();
+/** Match `${PREFIX}_USE_SUDO` — default use sudo -n for start/stop/restart */
+function useSudoForSystemctl(cfg: LiveServerConfig): boolean {
+  const v = (process.env[`${cfg.envPrefix}_USE_SUDO`] ?? "1").trim().toLowerCase();
   return v !== "0" && v !== "false" && v !== "no";
 }
 
@@ -29,44 +23,47 @@ export function shellSingleQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
-/** SSH options for Teledosi host auth (no systemd validation). */
-export function getTeledosiBaseSshOptions(): SshConnectOptions {
-  const key = getTeledosiPrivateKeyPem();
+/** SSH options for live server host auth (no systemd validation). */
+export function getLiveServerBaseSshOptions(cfg: LiveServerConfig): SshConnectOptions {
+  const key = getResolvedPrivateKeyPem(cfg);
   const base: SshConnectOptions = {
-    host: teledosiSshHost,
-    port: teledosiSshPort,
-    username: teledosiSshUser,
+    host: cfg.ssh.host,
+    port: cfg.ssh.port,
+    username: cfg.ssh.user,
   };
   if (key) {
     return {
       ...base,
       privateKey: key,
-      passphrase: teledosiSshPassphrase || undefined,
+      passphrase: cfg.ssh.passphrase || undefined,
     };
   }
   return {
     ...base,
-    password: teledosiSshPassword,
+    password: cfg.ssh.password,
   };
 }
 
-export function getTeledosiSshOptions(): SshConnectOptions {
-  assertUnitName(teledosiSystemdUnit);
-  return getTeledosiBaseSshOptions();
+export function getLiveServerSshOptions(cfg: LiveServerConfig): SshConnectOptions {
+  assertUnitName(cfg.systemdUnit);
+  return getLiveServerBaseSshOptions(cfg);
 }
 
-export async function connectTeledosiClient(): Promise<Client> {
-  if (!isTeledosiConfigured()) {
-    throw new Error("Teledosi is not configured");
+export async function connectLiveServerClient(cfg: LiveServerConfig): Promise<Client> {
+  if (!isLiveServerConfigured(cfg)) {
+    throw new Error(`Live server "${cfg.id}" is not configured`);
   }
-  return connectSsh2(getTeledosiSshOptions());
+  return connectSsh2(getLiveServerSshOptions(cfg));
 }
 
-export async function withTeledosiSsh<T>(fn: (conn: Client) => Promise<T>): Promise<T> {
-  if (!isTeledosiConfigured()) {
-    throw new Error("Teledosi is not configured");
+export async function withLiveServerSsh<T>(
+  cfg: LiveServerConfig,
+  fn: (conn: Client) => Promise<T>,
+): Promise<T> {
+  if (!isLiveServerConfigured(cfg)) {
+    throw new Error(`Live server "${cfg.id}" is not configured`);
   }
-  const conn = await connectSsh2(getTeledosiSshOptions());
+  const conn = await connectSsh2(getLiveServerSshOptions(cfg));
   try {
     return await fn(conn);
   } finally {
@@ -103,14 +100,13 @@ export function execBuffered(conn: Client, command: string): Promise<ExecResult>
   });
 }
 
-export type TeledosiServiceState = "running" | "stopped" | "failed";
+export type LiveServerServiceState = "running" | "stopped" | "failed";
 
-export async function getTeledosiStatus(): Promise<{
-  state: TeledosiServiceState;
-  raw: string;
-}> {
-  const u = shellSingleQuote(teledosiSystemdUnit);
-  const { stdout, stderr, code } = await withTeledosiSsh((conn) =>
+export async function getLiveServerStatus(
+  cfg: LiveServerConfig,
+): Promise<{ state: LiveServerServiceState; raw: string }> {
+  const u = shellSingleQuote(cfg.systemdUnit);
+  const { stdout, stderr, code } = await withLiveServerSsh(cfg, (conn) =>
     execBuffered(conn, `systemctl is-active ${u} 2>&1`),
   );
   const raw = (stdout + stderr).trim();
@@ -134,39 +130,46 @@ export async function getTeledosiStatus(): Promise<{
   return { state: "stopped", raw: line };
 }
 
-function systemctlActionCmd(action: "start" | "stop" | "restart"): string {
-  const u = shellSingleQuote(teledosiSystemdUnit);
-  return useSudoForSystemctl()
+function systemctlActionCmd(cfg: LiveServerConfig, action: "start" | "stop" | "restart"): string {
+  const u = shellSingleQuote(cfg.systemdUnit);
+  return useSudoForSystemctl(cfg)
     ? `sudo -n systemctl ${action} ${u} 2>&1`
     : `systemctl ${action} ${u} 2>&1`;
 }
 
-export async function teledosiSystemctl(action: "start" | "stop" | "restart"): Promise<ExecResult> {
-  return withTeledosiSsh((conn) => execBuffered(conn, systemctlActionCmd(action)));
+export async function liveServerSystemctl(
+  cfg: LiveServerConfig,
+  action: "start" | "stop" | "restart",
+): Promise<ExecResult> {
+  return withLiveServerSsh(cfg, (conn) => execBuffered(conn, systemctlActionCmd(cfg, action)));
 }
 
-export function clampLogLines(requested: number | undefined): number {
+export function clampLogLines(cfg: LiveServerConfig, requested: number | undefined): number {
   const n = typeof requested === "number" && Number.isFinite(requested) ? Math.floor(requested) : 200;
-  return Math.max(1, Math.min(teledosiLogsMaxLines, n));
+  return Math.max(1, Math.min(cfg.logsMaxLines, n));
 }
 
-export async function getTeledosiRecentLogs(lines?: number): Promise<string> {
-  const n = clampLogLines(lines);
-  const u = shellSingleQuote(teledosiSystemdUnit);
+export async function getLiveServerRecentLogs(
+  cfg: LiveServerConfig,
+  lines?: number,
+): Promise<string> {
+  const n = clampLogLines(cfg, lines);
+  const u = shellSingleQuote(cfg.systemdUnit);
   const cmd = `journalctl -u ${u} -n ${n} --no-pager -o short-iso 2>&1`;
-  const { stdout, stderr } = await withTeledosiSsh((conn) => execBuffered(conn, cmd));
+  const { stdout, stderr } = await withLiveServerSsh(cfg, (conn) => execBuffered(conn, cmd));
   return stdout + (stderr ? (stdout ? "\n" : "") + stderr : "");
 }
 
 /**
  * Stream `journalctl -f` until the connection is closed. Call `conn.end()` to stop.
  */
-export function streamTeledosiJournalFollow(
+export function streamLiveServerJournalFollow(
+  cfg: LiveServerConfig,
   conn: Client,
   onLine: (line: string) => void,
   onError: (err: Error) => void,
 ): void {
-  const u = shellSingleQuote(teledosiSystemdUnit);
+  const u = shellSingleQuote(cfg.systemdUnit);
   const cmd = `journalctl -u ${u} -f -n 100 --no-pager -o short-iso 2>&1`;
   conn.exec(cmd, (err, stream) => {
     if (err) {
@@ -184,9 +187,7 @@ export function streamTeledosiJournalFollow(
     };
     stream.on("data", (chunk: Buffer) => flush(chunk.toString("utf8")));
     stream.stderr.on("data", (chunk: Buffer) => flush(chunk.toString("utf8")));
-    stream.on("error", (e: unknown) =>
-      onError(e instanceof Error ? e : new Error(String(e))),
-    );
+    stream.on("error", (e: unknown) => onError(e instanceof Error ? e : new Error(String(e))));
     stream.on("close", () => {
       if (buf.trim().length) onLine(buf.trimEnd());
     });

@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { NavLink as RouterNavLink, Route, Routes, useLocation } from 'react-router-dom'
 import {
-  Cloud,
   Package,
   PencilSimpleLine,
   Plug,
@@ -41,8 +40,9 @@ import TestTools from './pages/TestTools'
 import PluginLibrary from './pages/PluginLibrary'
 import LiveEditor from './pages/LiveEditor'
 import Console from './pages/Console'
-import TeledosiServer from './pages/TeledosiServer'
-import TeledosiFiles from './pages/TeledosiFiles'
+import LiveServerPage from './pages/LiveServerPage'
+import LiveServerFilesPage from './pages/LiveServerFilesPage'
+import { liveServers } from './lib/liveServers'
 import AddPlugin from './pages/AddPlugin'
 import GenerateProfile from './pages/GenerateProfile'
 import Styleguide from './pages/Styleguide'
@@ -88,14 +88,21 @@ const NAV_SECTIONS: NavSection[] = [
   },
   {
     label: 'Live Servers',
-    items: [
-      {
-        to: '/teledosi',
-        label: 'Teledosi Server',
-        exact: true,
-        icon: <Cloud size={18} weight="fill" aria-hidden="true" />,
-      },
-    ],
+    items: liveServers.map((s) => ({
+      to: s.serverPath,
+      label: s.label,
+      exact: true,
+      icon: (
+        <img
+          src={s.iconPath}
+          alt=""
+          aria-hidden="true"
+          width={18}
+          height={18}
+          style={{ borderRadius: 4, objectFit: 'cover', display: 'block' }}
+        />
+      ),
+    })),
   },
   {
     label: 'Operations',
@@ -300,11 +307,15 @@ function App() {
     if (location.pathname.startsWith('/console')) {
       return 'Console'
     }
-    if (location.pathname === '/teledosi/files') {
-      return 'Teledosi Files'
+    for (const s of liveServers) {
+      if (location.pathname === s.filesPath) {
+        return s.filesLabel
+      }
     }
-    if (location.pathname.startsWith('/teledosi')) {
-      return 'Teledosi Server'
+    for (const s of liveServers) {
+      if (location.pathname === s.serverPath) {
+        return s.label
+      }
     }
     if (location.pathname.startsWith('/deployments')) {
       return 'Deployments'
@@ -476,8 +487,26 @@ function App() {
             <Route path="/plugins" element={<PluginLibrary />} />
             <Route path="/live-editor" element={<LiveEditor />} />
             <Route path="/console" element={<Console />} />
-            <Route path="/teledosi/files" element={<TeledosiFiles />} />
-            <Route path="/teledosi" element={<TeledosiServer />} />
+            {liveServers.flatMap((s) => [
+              <Route
+                key={`${s.id}-srv`}
+                path={s.serverPath}
+                element={
+                  <LiveServerPage serverId={s.id} displayName={s.label} filesPath={s.filesPath} />
+                }
+              />,
+              <Route
+                key={`${s.id}-files`}
+                path={s.filesPath}
+                element={
+                  <LiveServerFilesPage
+                    serverId={s.id}
+                    displayName={s.filesLabel}
+                    serverPath={s.serverPath}
+                  />
+                }
+              />,
+            ])}
             <Route path="/plugins/add" element={<AddPlugin />} />
             {isDev && <Route path="/dev/tools" element={<TestTools />} />}
             <Route path="/deployments" element={<Deployments />} />

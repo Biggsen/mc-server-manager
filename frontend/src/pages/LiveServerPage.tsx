@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ArrowClockwise,
-  Cloud,
   Play,
   Stop,
 } from '@phosphor-icons/react'
@@ -22,14 +21,14 @@ import {
 import { Button } from '../components/ui'
 import { ContentSection } from '../components/layout'
 import {
-  fetchTeledosiLogs,
-  fetchTeledosiStatus,
-  getTeledosiLogsStreamUrl,
-  teledosiRestart,
-  teledosiSendCommand,
-  teledosiStart,
-  teledosiStop,
-  type TeledosiServiceState,
+  fetchLiveServerLogs,
+  fetchLiveServerStatus,
+  getLiveServerLogsStreamUrl,
+  liveServerRestart,
+  liveServerSendCommand,
+  liveServerStart,
+  liveServerStop,
+  type LiveServerServiceState,
 } from '../lib/api'
 
 const LOG_AREA_HEIGHT = 520
@@ -37,13 +36,19 @@ const RECENT_LINES = 200
 const LIVE_BUFFER_MAX_CHARS = 512_000
 const JOURNAL_PREFIX_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{4}\s+\S+\s+java\[\d+\]:\s*/
 
-function stateBadgeColor(state: TeledosiServiceState): string {
+export type LiveServerPageProps = {
+  serverId: string
+  displayName: string
+  filesPath: string
+}
+
+function stateBadgeColor(state: LiveServerServiceState): string {
   if (state === 'running') return 'green'
   if (state === 'failed') return 'red'
   return 'gray'
 }
 
-function stateLabel(state: TeledosiServiceState): string {
+function stateLabel(state: LiveServerServiceState): string {
   if (state === 'running') return 'Online'
   if (state === 'failed') return 'Failed'
   return 'Stopped'
@@ -93,11 +98,15 @@ function buildBroadcastTellraw(message: string, kind: BroadcastType): string {
   return `tellraw @a ${JSON.stringify(payload)}`
 }
 
-export default function TeledosiServer() {
+export default function LiveServerPage({ serverId, displayName, filesPath }: LiveServerPageProps) {
   const navigate = useNavigate()
+  const envPrefix = serverId.toUpperCase()
+  const defaultWrapperName = `${serverId}-rcon`
+  const profileIconPath = `server_icons/${serverId}-profile.png`
+
   const [configured, setConfigured] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [status, setStatus] = useState<TeledosiServiceState | null>(null)
+  const [status, setStatus] = useState<LiveServerServiceState | null>(null)
   const [statusRaw, setStatusRaw] = useState<string>('')
   const [logText, setLogText] = useState<string>('')
   const [logsLoading, setLogsLoading] = useState(true)
@@ -126,8 +135,8 @@ export default function TeledosiServer() {
     setLoadError(null)
     try {
       const [st, lg] = await Promise.all([
-        fetchTeledosiStatus(),
-        fetchTeledosiLogs(RECENT_LINES),
+        fetchLiveServerStatus(serverId),
+        fetchLiveServerLogs(serverId, RECENT_LINES),
       ])
       setConfigured(true)
       setStatus(st.state)
@@ -144,7 +153,7 @@ export default function TeledosiServer() {
     } finally {
       setLogsLoading(false)
     }
-  }, [])
+  }, [serverId])
 
   useEffect(() => {
     void refreshSnapshot()
@@ -163,7 +172,7 @@ export default function TeledosiServer() {
       return
     }
 
-    const url = getTeledosiLogsStreamUrl()
+    const url = getLiveServerLogsStreamUrl(serverId)
     const es = new EventSource(url)
     esRef.current = es
 
@@ -209,20 +218,20 @@ export default function TeledosiServer() {
       es.close()
       esRef.current = null
     }
-  }, [liveTail])
+  }, [liveTail, serverId])
 
   const runControl = async (action: 'start' | 'stop' | 'restart') => {
     setControlBusy(true)
     setLoadError(null)
     try {
-      if (action === 'start') await teledosiStart()
-      else if (action === 'stop') await teledosiStop()
-      else await teledosiRestart()
-      const st = await fetchTeledosiStatus()
+      if (action === 'start') await liveServerStart(serverId)
+      else if (action === 'stop') await liveServerStop(serverId)
+      else await liveServerRestart(serverId)
+      const st = await fetchLiveServerStatus(serverId)
       setStatus(st.state)
       setStatusRaw(st.raw)
       if (!liveTail) {
-        const lg = await fetchTeledosiLogs(RECENT_LINES)
+        const lg = await fetchLiveServerLogs(serverId, RECENT_LINES)
         setLogText(normalizeLogText(lg.text))
       }
     } catch (e) {
@@ -238,7 +247,7 @@ export default function TeledosiServer() {
     setCommandBusy(true)
     setLoadError(null)
     try {
-      const result = await teledosiSendCommand(command)
+      const result = await liveServerSendCommand(serverId, command)
       const response = result.response?.trim()
       setLogText((prev) => {
         const lines = [`${formatRconPrefix()} > ${command}`]
@@ -270,7 +279,7 @@ export default function TeledosiServer() {
     setBroadcastBusy(true)
     setLoadError(null)
     try {
-      const result = await teledosiSendCommand(tellraw)
+      const result = await liveServerSendCommand(serverId, tellraw)
       const response = result.response?.trim()
       const style = getBroadcastStyle(broadcastType)
       setLogText((prev) => {
@@ -327,8 +336,15 @@ export default function TeledosiServer() {
         <Stack gap="sm">
           <Group justify="space-between" align="flex-start" wrap="wrap">
             <Group gap="sm">
-              <Cloud size={28} weight="duotone" aria-hidden />
-              <Title order={2}>Teledosi Server</Title>
+              <img
+                src={profileIconPath}
+                alt=""
+                aria-hidden="true"
+                width={64}
+                height={64}
+                style={{ borderRadius: 8, objectFit: 'cover', display: 'block' }}
+              />
+              <Title order={2}>{displayName}</Title>
             </Group>
             {status && (
               <Badge size="lg" variant="light" color={stateBadgeColor(status)} tt="none">
@@ -340,7 +356,7 @@ export default function TeledosiServer() {
             <Button
               variant="secondary"
               size="sm"
-              onClick={() => navigate('/teledosi/files')}
+              onClick={() => navigate(filesPath)}
               styles={{ root: { alignSelf: 'flex-start', width: 'fit-content' } }}
             >
               Edit files
@@ -355,9 +371,9 @@ export default function TeledosiServer() {
 
         {!configured && (
           <Text mt="md" c="yellow.4" size="sm">
-            Teledosi remote control is not configured on the backend. Set TELEDOSI_SSH_HOST,
-            TELEDOSI_SSH_USER, and TELEDOSI_SSH_PASSWORD or a private key, then restart the
-            backend. RCON commands also require TELEDOSI_RCON_WRAPPER_BIN (default: teledosi-rcon).
+            Live server remote control is not configured on the backend. Set {envPrefix}_SSH_HOST,{' '}
+            {envPrefix}_SSH_USER, and {envPrefix}_SSH_PASSWORD or a private key, then restart the backend.
+            RCON commands also require {envPrefix}_RCON_WRAPPER_BIN (default: {defaultWrapperName}).
           </Text>
         )}
 
