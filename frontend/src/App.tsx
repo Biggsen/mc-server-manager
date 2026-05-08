@@ -43,6 +43,7 @@ import LiveEditor from './pages/LiveEditor'
 import Console from './pages/Console'
 import TeledosiServer from './pages/TeledosiServer'
 import TeledosiFiles from './pages/TeledosiFiles'
+import TeledosiBackups from './pages/TeledosiBackups'
 import AddPlugin from './pages/AddPlugin'
 import GenerateProfile from './pages/GenerateProfile'
 import Styleguide from './pages/Styleguide'
@@ -303,6 +304,9 @@ function App() {
     if (location.pathname === '/teledosi/files') {
       return 'Teledosi Files'
     }
+    if (location.pathname === '/teledosi/backups') {
+      return 'Teledosi Backups'
+    }
     if (location.pathname.startsWith('/teledosi')) {
       return 'Teledosi Server'
     }
@@ -477,6 +481,7 @@ function App() {
             <Route path="/live-editor" element={<LiveEditor />} />
             <Route path="/console" element={<Console />} />
             <Route path="/teledosi/files" element={<TeledosiFiles />} />
+            <Route path="/teledosi/backups" element={<TeledosiBackups />} />
             <Route path="/teledosi" element={<TeledosiServer />} />
             <Route path="/plugins/add" element={<AddPlugin />} />
             {isDev && <Route path="/dev/tools" element={<TestTools />} />}

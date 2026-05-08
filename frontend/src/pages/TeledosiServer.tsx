@@ -337,14 +337,24 @@ export default function TeledosiServer() {
             )}
           </Group>
           {configured && (
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => navigate('/teledosi/files')}
-              styles={{ root: { alignSelf: 'flex-start', width: 'fit-content' } }}
-            >
-              Edit files
-            </Button>
+            <Group gap="sm">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => navigate('/teledosi/files')}
+                styles={{ root: { width: 'fit-content' } }}
+              >
+                Edit files
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => navigate('/teledosi/backups')}
+                styles={{ root: { width: 'fit-content' } }}
+              >
+                Backup
+              </Button>
+            </Group>
           )}
           {statusRaw && (
             <Text size="xs" c="dimmed" ff="monospace">

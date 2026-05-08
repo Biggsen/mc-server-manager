@@ -1691,3 +1691,51 @@ export async function writeTeledosiRemoteFile(path: string, content: string): Pr
   })
 }
 
+export type TeledosiBackupEntry = {
+  name: string
+  path: string
+  type: 'file'
+  size?: number
+  mtime?: string
+}
+
+export async function fetchTeledosiBackupsList(): Promise<{ entries: TeledosiBackupEntry[] }> {
+  return request('/teledosi/backups/list')
+}
+
+export function getTeledosiBackupDownloadUrl(fileName: string): string {
+  const base = getApiBase().replace(/\/$/, '')
+  return `${base}/teledosi/backups/download?file=${encodeURIComponent(fileName)}`
+}
+
+export async function downloadTeledosiBackupToLocal(fileName: string): Promise<{ ok: boolean; localPath: string; jobId: string }> {
+  return request('/teledosi/backups/download-local', {
+    method: 'POST',
+    body: JSON.stringify({ file: fileName }),
+  })
+}
+
+export type TeledosiBackupDownloadJob = {
+  id: string
+  fileName: string
+  localPath: string
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
+  error?: string
+  downloadedBytes: number
+  totalBytes?: number
+  speedBytesPerSec?: number
+  etaSeconds?: number
+  startedAt: string
+  finishedAt?: string
+}
+
+export async function fetchTeledosiBackupDownloadJob(jobId: string): Promise<{ job: TeledosiBackupDownloadJob }> {
+  return request(`/teledosi/backups/download-local/${encodeURIComponent(jobId)}`)
+}
+
+export async function cancelTeledosiBackupDownloadJob(jobId: string): Promise<{ ok: boolean }> {
+  return request(`/teledosi/backups/download-local/${encodeURIComponent(jobId)}/cancel`, {
+    method: 'POST',
+  })
+}
+
