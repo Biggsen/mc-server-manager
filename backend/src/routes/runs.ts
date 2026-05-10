@@ -6,9 +6,9 @@ import {
   stopRun,
   subscribeRunEvents,
   sendRunCommand,
-  sendTeledosiCommand,
 } from "../services/runQueue";
-import { TeledosiRconError } from "../services/rconClient";
+import { liveServersById } from "../config";
+import { executeRconCommand, TeledosiRconError } from "../services/rconClient";
 
 const router = Router();
 
@@ -94,8 +94,9 @@ router.post("/:id/command", async (req: Request, res: Response) => {
       return;
     }
 
-    if (id === "teledosi") {
-      const result = await sendTeledosiCommand(command);
+    const liveCfg = liveServersById[id];
+    if (liveCfg) {
+      const result = await executeRconCommand(liveCfg, command);
       res.status(200).json({ ok: true, response: result.response });
       return;
     }

@@ -517,7 +517,7 @@ export default function Upload() {
                     onChange={(e) => setPassword(e.currentTarget.value)}
                     description={
                       defaultPasswordAvailable
-                        ? 'Backend Teledosi default is available; enter to override for this session.'
+                        ? 'Backend SFTP default password is available for this host; enter to override for this session.'
                         : 'Not stored; used only for this session'
                     }
                     style={{ flex: 1 }}
@@ -636,7 +636,7 @@ export default function Upload() {
               )}
               {remoteEntries.length === 0 && !remoteLoading ? (
                 <Text size="sm" c="dimmed">
-                  Enter password (or use backend Teledosi default) and click Connect to list remote files.
+                  Enter password (or use backend default when available for this host) and click Connect to list remote files.
                 </Text>
               ) : (
                 <ScrollArea h={320} type="scroll">

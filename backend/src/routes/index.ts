@@ -7,7 +7,8 @@ import deploymentsRouter from "./deployments";
 import pluginsRouter from "./plugins";
 import runsRouter from "./runs";
 import uploadRouter from "./upload";
-import teledosiRouter from "./teledosi";
+import { liveServers } from "../config";
+import { createLiveServerRouter } from "./liveServer";
 
 export function registerRoutes(app: Express): void {
   app.get("/health", (_req, res) => {
@@ -22,6 +23,8 @@ export function registerRoutes(app: Express): void {
   app.use("/api/plugins", pluginsRouter);
   app.use("/api/runs", runsRouter);
   app.use("/api/upload", uploadRouter);
-  app.use("/api/teledosi", teledosiRouter);
+  for (const cfg of liveServers) {
+    app.use(`/api/${cfg.id}`, createLiveServerRouter(cfg));
+  }
 }
 
