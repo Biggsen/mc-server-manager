@@ -12,4 +12,6 @@ backend/dist/
 backend/data/
 dist-electron/
 release/
+release-smoke/
+release-smoke2/
 
