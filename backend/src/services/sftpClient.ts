@@ -1,5 +1,6 @@
 import { Client } from "ssh2";
 import type { SFTPWrapper } from "ssh2";
+import type { Readable } from "stream";
 import type { ProjectSftpConfig } from "../types/storage";
 import { connectSsh2, type SshConnectOptions } from "./sshConnection";
 
@@ -263,6 +264,67 @@ export async function sftpReadFullFile(
           });
         };
         readNext();
+      });
+    });
+  });
+}
+
+/**
+ * Open a Readable stream over a remote file. The caller is responsible for
+ * consuming the stream and closing the underlying connection (use
+ * {@link withSftpConnection} to scope it).
+ *
+ * A defensive `error` listener is attached so late SSH/SFTP errors that arrive
+ * during channel teardown (e.g. "No response from server" from
+ * `cleanupRequests` after the consumer has finished) cannot crash the process
+ * as an unhandled `'error'` event. Errors that happen while data is still
+ * being read are still surfaced to the consumer through the pipe chain.
+ */
+export function sftpCreateReadStream(conn: Client, remotePath: string): Promise<Readable> {
+  return new Promise((resolve, reject) => {
+    conn.sftp((err, sftp) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      const stream = sftp.createReadStream(remotePath);
+      stream.on("error", (streamErr: Error) => {
+        console.warn(
+          `[sftp] read stream error for ${remotePath}: ${streamErr?.message ?? streamErr}`,
+        );
+      });
+      resolve(stream);
+    });
+  });
+}
+
+/** Stat a remote file (size, mtime). Returns null if the file is absent. */
+export function sftpStat(
+  conn: Client,
+  remotePath: string,
+): Promise<{ size: number; mtime?: string } | null> {
+  return new Promise((resolve, reject) => {
+    conn.sftp((err, sftp) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      sftp.stat(remotePath, (statErr, attrs) => {
+        if (statErr) {
+          const code = (statErr as NodeJS.ErrnoException).code;
+          if (code === "ENOENT" || /no such file/i.test(statErr.message)) {
+            resolve(null);
+            return;
+          }
+          reject(statErr);
+          return;
+        }
+        const size = typeof attrs?.size === "number" ? attrs.size : 0;
+        const mtime =
+          typeof attrs?.mtime === "number"
+            ? new Date(attrs.mtime * 1000).toISOString()
+            : undefined;
+        resolve({ size, mtime });
       });
     });
   });

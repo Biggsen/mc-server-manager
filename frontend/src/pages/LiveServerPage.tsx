@@ -40,6 +40,7 @@ export type LiveServerPageProps = {
   serverId: string
   displayName: string
   filesPath: string
+  logsPath: string
 }
 
 function stateBadgeColor(state: LiveServerServiceState): string {
@@ -98,7 +99,7 @@ function buildBroadcastTellraw(message: string, kind: BroadcastType): string {
   return `tellraw @a ${JSON.stringify(payload)}`
 }
 
-export default function LiveServerPage({ serverId, displayName, filesPath }: LiveServerPageProps) {
+export default function LiveServerPage({ serverId, displayName, filesPath, logsPath }: LiveServerPageProps) {
   const navigate = useNavigate()
   const envPrefix = serverId.toUpperCase()
   const defaultWrapperName = `${serverId}-rcon`
@@ -353,14 +354,24 @@ export default function LiveServerPage({ serverId, displayName, filesPath }: Liv
             )}
           </Group>
           {configured && (
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => navigate(filesPath)}
-              styles={{ root: { alignSelf: 'flex-start', width: 'fit-content' } }}
-            >
-              Edit files
-            </Button>
+            <Group gap="sm">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => navigate(filesPath)}
+                styles={{ root: { alignSelf: 'flex-start', width: 'fit-content' } }}
+              >
+                Edit files
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => navigate(logsPath)}
+                styles={{ root: { alignSelf: 'flex-start', width: 'fit-content' } }}
+              >
+                View logs
+              </Button>
+            </Group>
           )}
           {statusRaw && (
             <Text size="xs" c="dimmed" ff="monospace">
