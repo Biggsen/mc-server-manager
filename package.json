@@ -14,15 +14,17 @@
     "build:electron": "tsc -p electron/tsconfig.json",
     "electron:dev": "npm run build:electron && concurrently \"npm run dev:be\" \"npm run dev:fe\" \"wait-on http://localhost:5173 && electron .\"",
     "postinstall": "electron-rebuild",
-    "electron:build": "npm run build && electron-rebuild && electron-packager . mc-server-manager --platform=win32 --arch=x64 --out=release --overwrite --asar --asarUnpack=**/node_modules/keytar/** --asarUnpack=**/node_modules/ssh2/** --icon=assets/icon.ico --prune=true --ignore=\\.git --ignore=frontend/node_modules --ignore=electron/node_modules --ignore=tasks --ignore=docs",
-    "electron:build:win": "npm run build && electron-rebuild && electron-packager . mc-server-manager --platform=win32 --arch=x64 --out=release --overwrite --asar --asarUnpack=**/node_modules/keytar/** --asarUnpack=**/node_modules/ssh2/** --icon=assets/icon.ico --prune=true --ignore=\\.git --ignore=frontend/node_modules --ignore=electron/node_modules --ignore=tasks --ignore=docs",
-    "electron:build:mac": "npm run build && electron-rebuild && electron-packager . mc-server-manager --platform=darwin --arch=x64,arm64 --out=release --overwrite --asar --asarUnpack=**/node_modules/keytar/** --asarUnpack=**/node_modules/ssh2/** --icon=assets/icon.icns --prune=true --ignore=\\.git --ignore=frontend/node_modules --ignore=electron/node_modules --ignore=tasks --ignore=docs",
-    "electron:build:linux": "npm run build && electron-rebuild && electron-packager . mc-server-manager --platform=linux --arch=x64 --out=release --overwrite --asar --asarUnpack=**/node_modules/keytar/** --asarUnpack=**/node_modules/ssh2/** --icon=assets/icon.png --prune=true --ignore=\\.git --ignore=frontend/node_modules --ignore=electron/node_modules --ignore=tasks --ignore=docs"
+    "rebuild:electron:native": "node scripts/rebuild-electron-native.cjs",
+    "electron:build": "npm run build && npm run rebuild:electron:native && node scripts/package-electron.cjs win32 x64",
+    "electron:build:win": "npm run build && npm run rebuild:electron:native && node scripts/package-electron.cjs win32 x64",
+    "electron:build:mac": "npm run build && npm run rebuild:electron:native && node scripts/package-electron.cjs darwin x64,arm64",
+    "electron:build:linux": "npm run build && npm run rebuild:electron:native && node scripts/package-electron.cjs linux x64"
   },
   "dependencies": {
     "@octokit/plugin-throttling": "^11.0.3",
     "@octokit/rest": "^22.0.1",
     "adm-zip": "^0.5.12",
+    "better-sqlite3": "^12.9.0",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
     "express-session": "^1.18.2",

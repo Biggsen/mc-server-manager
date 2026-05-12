@@ -84,10 +84,12 @@ async function startBackendServer(): Promise<void> {
     console.error('[Backend] Failed to start backend server:', error);
     console.error('[Backend] Error details:', error instanceof Error ? error.stack : error);
     
-    // Check if it's a port conflict error
+    // Check if it's a real port conflict error. We deliberately do not
+    // match on the bare word "port" because many unrelated errors (e.g.
+    // module resolution failures or stack traces) contain it and would
+    // otherwise pop the misleading "Port already in use" dialog.
     const isPortConflict = error instanceof Error && (
       (error as NodeJS.ErrnoException).code === 'EADDRINUSE' ||
-      error.message.includes('port') ||
       error.message.includes('address already in use') ||
       error.message.includes('EADDRINUSE')
     );

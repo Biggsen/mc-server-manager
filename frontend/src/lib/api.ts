@@ -1761,3 +1761,344 @@ export async function writeTeledosiRemoteFile(path: string, content: string): Pr
   return writeLiveServerRemoteFile('teledosi', path, content)
 }
 
+export interface ServerLogFileEntry {
+  name: string
+  size: number | null
+  mtime: string | null
+  imported: boolean
+  eventCount: number | null
+  importedAt: string | null
+}
+
+export interface ServerLogLatestEntry {
+  name: string
+  size: number | null
+  mtime: string | null
+}
+
+export async function fetchServerLogFiles(serverId: string): Promise<{
+  files: ServerLogFileEntry[]
+  latest: ServerLogLatestEntry | null
+}> {
+  return request(`/${serverId}/logs/files`)
+}
+
+export interface IngestLogResult {
+  fileName: string
+  importId: number
+  eventCount: number
+  totalLines: number
+  durationMs: number
+}
+
+export async function ingestServerLog(
+  serverId: string,
+  file: string,
+): Promise<IngestLogResult> {
+  return request(`/${serverId}/logs/ingest`, {
+    method: 'POST',
+    body: JSON.stringify({ file }),
+  })
+}
+
+export async function deleteServerLogImport(
+  serverId: string,
+  fileName: string,
+): Promise<{ ok: boolean; deleted: boolean }> {
+  return request(`/${serverId}/logs/imports/${encodeURIComponent(fileName)}`, {
+    method: 'DELETE',
+  })
+}
+
+export interface MetricsRange {
+  earliestTs: string | null
+  latestTs: string | null
+  totalEvents: number
+  totalImports: number
+  importedFiles: string[]
+}
+
+export async function fetchMetricsRange(serverId: string): Promise<MetricsRange> {
+  return request(`/${serverId}/metrics/range`)
+}
+
+export interface OverviewKpis {
+  uniquePlayers: number
+  totalSessions: number
+  totalJoins: number
+  totalLeaves: number
+  totalDiscoveries: number
+  totalPlayMinutes: number
+  daysActive: number
+}
+
+function rangeQuery(from?: string, to?: string): string {
+  const params = new URLSearchParams()
+  if (from) params.set('from', from)
+  if (to) params.set('to', to)
+  const s = params.toString()
+  return s ? `?${s}` : ''
+}
+
+export async function fetchOverviewKpis(
+  serverId: string,
+  from?: string,
+  to?: string,
+): Promise<OverviewKpis> {
+  return request(`/${serverId}/metrics/overview/kpis${rangeQuery(from, to)}`)
+}
+
+export interface ActivityRow {
+  bucket: string
+  joins: number
+  leaves: number
+  discoveries: number
+  uniquePlayers: number
+}
+
+export async function fetchOverviewActivity(
+  serverId: string,
+  bucket: 'day' | 'hour',
+  from?: string,
+  to?: string,
+): Promise<{ bucket: 'day' | 'hour'; rows: ActivityRow[] }> {
+  const params = new URLSearchParams()
+  params.set('bucket', bucket)
+  if (from) params.set('from', from)
+  if (to) params.set('to', to)
+  return request(`/${serverId}/metrics/overview/activity?${params.toString()}`)
+}
+
+export interface OverviewPlayerRow {
+  player: string
+  uuid: string
+  sessions: number
+  playMinutes: number
+  firstSeen: string
+  lastSeen: string
+  joins: number
+  discoveries: number
+  discoveriesByEntity: { region: number; structure: number; village: number; heart: number }
+}
+
+export async function fetchOverviewPlayers(
+  serverId: string,
+  from?: string,
+  to?: string,
+): Promise<{ rows: OverviewPlayerRow[] }> {
+  return request(`/${serverId}/metrics/overview/players${rangeQuery(from, to)}`)
+}
+
+export interface DiscoveriesByEntityRow {
+  entity: string
+  count: number
+}
+
+export async function fetchDiscoveriesByEntity(
+  serverId: string,
+  from?: string,
+  to?: string,
+): Promise<{ rows: DiscoveriesByEntityRow[] }> {
+  return request(`/${serverId}/metrics/overview/discoveries-by-entity${rangeQuery(from, to)}`)
+}
+
+export interface TopRegionRow {
+  region: string
+  discoveries: number
+  uniquePlayers: number
+}
+
+export async function fetchTopRegions(
+  serverId: string,
+  limit: number,
+  from?: string,
+  to?: string,
+): Promise<{ rows: TopRegionRow[] }> {
+  const params = new URLSearchParams()
+  params.set('limit', String(limit))
+  if (from) params.set('from', from)
+  if (to) params.set('to', to)
+  return request(`/${serverId}/metrics/overview/top-regions?${params.toString()}`)
+}
+
+export interface PlayerListEntry {
+  player: string
+  uuid: string
+  lastSeen: string
+}
+
+export async function fetchPlayersList(
+  serverId: string,
+  q: string,
+  limit = 20,
+): Promise<{ rows: PlayerListEntry[] }> {
+  const params = new URLSearchParams()
+  if (q) params.set('q', q)
+  params.set('limit', String(limit))
+  return request(`/${serverId}/metrics/players/list?${params.toString()}`)
+}
+
+export interface PlayerSummary {
+  player: string
+  uuid: string
+  firstSeen: string | null
+  lastSeen: string | null
+  totalSessions: number
+  totalPlayMinutes: number
+  totalDiscoveries: number
+  latestState: Record<string, number>
+}
+
+function playerQuery(player: string, from?: string, to?: string, extra: Record<string, string> = {}): string {
+  const params = new URLSearchParams()
+  params.set('player', player)
+  if (from) params.set('from', from)
+  if (to) params.set('to', to)
+  for (const [k, v] of Object.entries(extra)) params.set(k, v)
+  return params.toString()
+}
+
+export async function fetchPlayerSummary(
+  serverId: string,
+  player: string,
+  from?: string,
+  to?: string,
+): Promise<PlayerSummary> {
+  return request(`/${serverId}/metrics/player/summary?${playerQuery(player, from, to)}`)
+}
+
+export interface PlayerSessionRow {
+  joinTs: string
+  leaveTs: string | null
+  durationMinutes: number | null
+}
+
+export async function fetchPlayerSessions(
+  serverId: string,
+  player: string,
+  from?: string,
+  to?: string,
+): Promise<{ rows: PlayerSessionRow[] }> {
+  return request(`/${serverId}/metrics/player/sessions?${playerQuery(player, from, to)}`)
+}
+
+export interface PlayerDiscoveryRow {
+  ts: string
+  entity: string | null
+  region: string | null
+  diff: number | null
+}
+
+export async function fetchPlayerDiscoveries(
+  serverId: string,
+  player: string,
+  from?: string,
+  to?: string,
+  limit = 200,
+): Promise<{ rows: PlayerDiscoveryRow[] }> {
+  return request(
+    `/${serverId}/metrics/player/discoveries?${playerQuery(player, from, to, { limit: String(limit) })}`,
+  )
+}
+
+export interface PlayerStateSeriesRow {
+  ts: string
+  value: number
+}
+
+export async function fetchPlayerStateSeries(
+  serverId: string,
+  player: string,
+  counter: string,
+  from?: string,
+  to?: string,
+): Promise<{ counter: string; rows: PlayerStateSeriesRow[] }> {
+  return request(
+    `/${serverId}/metrics/player/state-series?${playerQuery(player, from, to, { counter })}`,
+  )
+}
+
+export async function fetchPlayerCounters(
+  serverId: string,
+  player: string,
+): Promise<{ counters: string[] }> {
+  return request(`/${serverId}/metrics/player/counters?${playerQuery(player)}`)
+}
+
+export interface LivePreviewEvent {
+  ts: string
+  type: string
+  entity: string | null
+  player: string | null
+  uuid: string | null
+  region: string | null
+  diff: number | null
+  lineNo: number
+  rawLine: string
+  data: Record<string, string>
+  counters: Array<{ name: string; value: number }>
+}
+
+export interface LivePreview {
+  fileName: string
+  fileSize: number | null
+  fetchedBytes: number
+  truncated: boolean
+  fetchedAt: string
+  date: string
+  events: LivePreviewEvent[]
+  summary: {
+    totalLines: number
+    expmetricCount: number
+    joins: number
+    leaves: number
+    discoveries: number
+    uniquePlayers: number
+    currentlyOnline: Array<{ player: string; uuid: string; since: string }>
+  }
+}
+
+export async function fetchLivePreview(serverId: string): Promise<LivePreview> {
+  return request(`/${serverId}/metrics/live`)
+}
+
+export type IngestFileStatus =
+  | 'pending'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'skipped'
+
+export interface IngestFileState {
+  file: string
+  status: IngestFileStatus
+  eventCount: number | null
+  durationMs: number | null
+  error: string | null
+  startedAt: string | null
+  finishedAt: string | null
+}
+
+export interface IngestJob {
+  id: string
+  serverId: string
+  status: 'pending' | 'running' | 'completed' | 'failed'
+  startedAt: string
+  finishedAt: string | null
+  files: IngestFileState[]
+}
+
+export async function ingestAllServerLogs(
+  serverId: string,
+): Promise<{ jobId: string | null; files: string[] }> {
+  return request(`/${serverId}/logs/ingest-all`, { method: 'POST' })
+}
+
+export async function fetchIngestJob(serverId: string, jobId: string): Promise<IngestJob> {
+  return request(`/${serverId}/logs/jobs/${encodeURIComponent(jobId)}`)
+}
+
+export function getIngestJobStreamUrl(serverId: string, jobId: string): string {
+  return `${getApiBase()}/${serverId}/logs/jobs/${encodeURIComponent(jobId)}/stream`
+}
+

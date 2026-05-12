@@ -127,7 +127,25 @@ export function createApp(): express.Application {
   return app;
 }
 
+/**
+ * Install last-resort process-level error handlers. When the backend is
+ * embedded inside Electron's main process (ELECTRON_MODE=true), an
+ * uncaught exception or unhandled rejection would otherwise pop the
+ * fatal "JavaScript error in main process" dialog and kill the whole app.
+ * Logging is much friendlier; the operation that caused the rejection is
+ * already failing on its own, so the process can keep running.
+ */
+function installProcessErrorTraps(): void {
+  process.on("uncaughtException", (err) => {
+    console.error("[Backend] uncaughtException:", err);
+  });
+  process.on("unhandledRejection", (reason) => {
+    console.error("[Backend] unhandledRejection:", reason);
+  });
+}
+
 export async function startServer(port: number = 4000): Promise<Server> {
+  installProcessErrorTraps();
   const app = createApp();
   return new Promise((resolve, reject) => {
     try {

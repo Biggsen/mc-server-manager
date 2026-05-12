@@ -42,6 +42,7 @@ import LiveEditor from './pages/LiveEditor'
 import Console from './pages/Console'
 import LiveServerPage from './pages/LiveServerPage'
 import LiveServerFilesPage from './pages/LiveServerFilesPage'
+import LiveServerLogsPage from './pages/LiveServerLogsPage'
 import { liveServers } from './lib/liveServers'
 import AddPlugin from './pages/AddPlugin'
 import GenerateProfile from './pages/GenerateProfile'
@@ -313,6 +314,11 @@ function App() {
       }
     }
     for (const s of liveServers) {
+      if (location.pathname === s.logsPath) {
+        return s.logsLabel
+      }
+    }
+    for (const s of liveServers) {
       if (location.pathname === s.serverPath) {
         return s.label
       }
@@ -492,7 +498,12 @@ function App() {
                 key={`${s.id}-srv`}
                 path={s.serverPath}
                 element={
-                  <LiveServerPage serverId={s.id} displayName={s.label} filesPath={s.filesPath} />
+                  <LiveServerPage
+                    serverId={s.id}
+                    displayName={s.label}
+                    filesPath={s.filesPath}
+                    logsPath={s.logsPath}
+                  />
                 }
               />,
               <Route
@@ -502,6 +513,17 @@ function App() {
                   <LiveServerFilesPage
                     serverId={s.id}
                     displayName={s.filesLabel}
+                    serverPath={s.serverPath}
+                  />
+                }
+              />,
+              <Route
+                key={`${s.id}-logs`}
+                path={s.logsPath}
+                element={
+                  <LiveServerLogsPage
+                    serverId={s.id}
+                    displayName={s.logsLabel}
                     serverPath={s.serverPath}
                   />
                 }
